@@ -175,3 +175,32 @@ Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS."
             (dotimes (i (length generated))
               (setf (aref result-tokens i) (aref generated i)))
             (detokenize model result-tokens))))))
+
+(defun embed (ctx text &key (normalize t))
+  "Compute embeddings for TEXT. Returns a vector of single-floats.
+The context must have been created with :embeddings 1.
+When NORMALIZE is true (default), L2-normalizes the result."
+  (with-fp-traps-masked
+    (let* ((model (%llama:get-model ctx))
+           (tokens (tokenize model text))
+           (n-tokens (length tokens))
+           (n-embd (%llama:model-n-embd model)))
+      ;; Build batch and encode
+      (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
+        (dotimes (i n-tokens)
+          (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
+        (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
+               (rc (%llama:encode ctx batch)))
+          (unless (zerop rc)
+            (error 'decode-error :code rc))))
+      ;; Read embeddings
+      (let* ((embd-ptr (%llama:get-embeddings-ith ctx 0))
+             (result (make-array n-embd :element-type 'single-float)))
+        (dotimes (i n-embd)
+          (setf (aref result i) (cffi:mem-aref embd-ptr :float i)))
+        (when normalize
+          (let ((norm (sqrt (loop for x across result sum (* x x)))))
+            (when (> norm 0.0)
+              (dotimes (i (length result))
+                (setf (aref result i) (/ (aref result i) norm))))))
+        result))))
