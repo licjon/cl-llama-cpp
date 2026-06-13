@@ -17,3 +17,15 @@
         (ok (not (cffi:null-pointer-p model)) "model loaded")
         (cl-llama-cpp:with-context (ctx model :n-ctx 512)
           (ok (not (cffi:null-pointer-p ctx)) "context created"))))))
+
+(deftest tokenize-roundtrip
+  (when-model-available
+    (testing "tokenize and detokenize roundtrip"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((text "Hello, world!")
+               (tokens (cl-llama-cpp:tokenize model text))
+               (result (cl-llama-cpp:detokenize model tokens)))
+          (ok (> (length tokens) 0)
+              (format nil "tokenized to ~d tokens" (length tokens)))
+          (ok (search "Hello" result)
+              (format nil "detokenized back to: ~s" result)))))))
