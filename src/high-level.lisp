@@ -37,3 +37,18 @@ PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 
              (unwind-protect
                   (progn ,@body)
                (%llama:model-free ,var))))))))
+
+(defmacro with-context ((var model &rest params) &body body)
+  "Create an inference context from MODEL, bind to VAR, execute BODY, free context.
+PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)."
+  (let ((ctx-ptr (gensym "CTX")))
+    `(with-fp-traps-masked
+       (let* ((defaults (%llama:context-default-params))
+              (ctx-params (override-params defaults (list ,@params)))
+              (,ctx-ptr (%llama:new-context-with-model ,model ctx-params)))
+         (when (cffi:null-pointer-p ,ctx-ptr)
+           (error 'context-creation-error))
+         (let ((,var ,ctx-ptr))
+           (unwind-protect
+                (progn ,@body)
+             (%llama:free ,var)))))))
