@@ -12,27 +12,27 @@
         (ok (> count 50) (format nil "%llama has ~d symbols (expected >50)" count))))))
 
 (deftest model-default-params
-  (testing "llama_model_default_params returns without error"
+  (testing "llama_model_default_params returns a struct via cffi-libffi"
     (cl-llama-cpp:with-fp-traps-masked
-      ;; CLAW generates SRET (struct-return) convention: allocate result buffer
-      ;; and pass as pointer; use foreign-funcall to bypass type translation.
-      (let ((buf (cffi:foreign-alloc :uint8 :count 72)))
-        (unwind-protect
-             (progn
-               (cffi:foreign-funcall "llama_model_default_params" :pointer buf :void)
-               (ok (not (cffi:null-pointer-p buf))
-                   "model-default-params returned non-nil"))
-          (cffi:foreign-free buf))))))
+      (let ((params (%llama:model-default-params)))
+        (ok params "model-default-params returned non-nil")
+        (ok (listp params) "result is a plist")))))
 
 (deftest context-default-params
-  (testing "llama_context_default_params returns without error"
+  (testing "llama_context_default_params returns a struct via cffi-libffi"
     (cl-llama-cpp:with-fp-traps-masked
-      ;; CLAW generates SRET (struct-return) convention: allocate result buffer
-      ;; and pass as pointer; use foreign-funcall to bypass type translation.
-      (let ((buf (cffi:foreign-alloc :uint8 :count 160)))
-        (unwind-protect
-             (progn
-               (cffi:foreign-funcall "llama_context_default_params" :pointer buf :void)
-               (ok (not (cffi:null-pointer-p buf))
-                   "context-default-params returned non-nil"))
-          (cffi:foreign-free buf))))))
+      (let ((params (%llama:context-default-params)))
+        (ok params "context-default-params returned non-nil")
+        (ok (listp params) "result is a plist")))))
+
+(deftest sampler-chain-default-params
+  (testing "llama_sampler_chain_default_params returns a struct via cffi-libffi"
+    (cl-llama-cpp:with-fp-traps-masked
+      (let ((params (%llama:sampler-chain-default-params)))
+        (ok (listp params) "result is a plist")))))
+
+(deftest backend-init
+  (testing "llama_backend_init runs without error"
+    (cl-llama-cpp:with-fp-traps-masked
+      (%llama:backend-init)
+      (pass "backend-init completed"))))

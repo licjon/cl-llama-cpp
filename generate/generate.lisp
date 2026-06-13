@@ -97,7 +97,8 @@ and a fabricated (result (:struct T)) parameter with the same struct type."
               (first-param (car params)))
          (and first-param
               (listp first-param)
-              (eq (car first-param) 'result)
+              (symbolp (car first-param))
+              (string= (symbol-name (car first-param)) "RESULT")
               (equal (cadr first-param) (caddr form))))))
 
 (defun strip-sret-result (form)

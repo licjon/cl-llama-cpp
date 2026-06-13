@@ -553,26 +553,22 @@
 
 (cffi:defcfun ("llama_model_default_params" model-default-params)
     (:struct model-params)
-  "struct llama_model_params llama_model_default_params();"
-  (result (:struct model-params)))
+  "struct llama_model_params llama_model_default_params();")
 
 
 (cffi:defcfun ("llama_context_default_params" context-default-params)
     (:struct context-params)
-  "struct llama_context_params llama_context_default_params();"
-  (result (:struct context-params)))
+  "struct llama_context_params llama_context_default_params();")
 
 
 (cffi:defcfun ("llama_sampler_chain_default_params" sampler-chain-default-params)
     (:struct sampler-chain-params)
-  "struct llama_sampler_chain_params llama_sampler_chain_default_params();"
-  (result (:struct sampler-chain-params)))
+  "struct llama_sampler_chain_params llama_sampler_chain_default_params();")
 
 
 (cffi:defcfun ("llama_model_quantize_default_params" model-quantize-default-params)
     (:struct model-quantize-params)
-  "struct llama_model_quantize_params llama_model_quantize_default_params();"
-  (result (:struct model-quantize-params)))
+  "struct llama_model_quantize_params llama_model_quantize_default_params();")
 
 
 (cffi:defcfun ("llama_backend_init" backend-init)
@@ -1594,7 +1590,6 @@
 (cffi:defcfun ("llama_batch_get_one" batch-get-one)
     (:struct batch)
   "struct llama_batch llama_batch_get_one(llama_token* tokens, int32_t n_tokens);"
-  (result (:struct batch))
   (tokens (:pointer token))
   (n-tokens int32-t))
 
@@ -1602,7 +1597,6 @@
 (cffi:defcfun ("llama_batch_init" batch-init)
     (:struct batch)
   "struct llama_batch llama_batch_init(int32_t n_tokens, int32_t embd, int32_t n_seq_max);"
-  (result (:struct batch))
   (n-tokens int32-t)
   (embd int32-t)
   (n-seq-max int32-t))
@@ -2630,7 +2624,6 @@
 (cffi:defcfun ("llama_perf_context" perf-context)
     (:struct perf-context-data)
   "struct llama_perf_context_data llama_perf_context(struct llama_context* ctx);"
-  (result (:struct perf-context-data))
   (ctx (:pointer (:struct context))))
 
 
@@ -2655,7 +2648,6 @@
 (cffi:defcfun ("llama_perf_sampler" perf-sampler)
     (:struct perf-sampler-data)
   "struct llama_perf_sampler_data llama_perf_sampler(struct llama_sampler* chain);"
-  (result (:struct perf-sampler-data))
   (chain (:pointer (:struct sampler))))
 
 
