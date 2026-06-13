@@ -3,4 +3,24 @@
 
 (defpackage #:cl-llama-cpp
   (:use #:cl)
-  (:export #:with-fp-traps-masked))
+  (:export
+   ;; Utility
+   #:with-fp-traps-masked
+   ;; Conditions
+   #:llama-error
+   #:model-load-error
+   #:model-load-error-path
+   #:context-creation-error
+   #:tokenization-error
+   #:tokenization-error-text
+   #:decode-error
+   #:decode-error-code
+   ;; Resource management
+   #:with-model
+   #:with-context
+   #:with-sampler-chain
+   ;; Operations
+   #:tokenize
+   #:detokenize
+   #:generate
+   #:embed))

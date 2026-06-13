@@ -1,5 +1,5 @@
 (defsystem "cl-llama-cpp"
-  :version "0.1.0"
+  :version "0.2.0"
   :author "Jonathan Hustad"
   :license "MIT"
   :description "CFFI bindings to llama.cpp"
@@ -10,7 +10,9 @@
                 :components
                 ((:file "packages")
                  (:file "library")
-                 (:file "bindings")))))
+                 (:file "bindings")
+                 (:file "conditions")
+                 (:file "high-level")))))
 
 (defsystem "cl-llama-cpp/generate"
   :description "Binding generator for cl-llama-cpp (developers only)"
@@ -24,5 +26,6 @@
   :depends-on ("cl-llama-cpp" "rove")
   :components ((:module "tests"
                 :components
-                ((:file "smoke"))))
+                ((:file "smoke")
+                 (:file "integration"))))
   :perform (test-op (op c) (symbol-call :rove :run c)))

@@ -36,3 +36,25 @@
     (cl-llama-cpp:with-fp-traps-masked
       (%llama:backend-init)
       (pass "backend-init completed"))))
+
+(deftest condition-hierarchy
+  (testing "llama-error condition hierarchy exists"
+    (ok (subtypep 'cl-llama-cpp:model-load-error 'cl-llama-cpp:llama-error)
+        "model-load-error is a llama-error")
+    (ok (subtypep 'cl-llama-cpp:context-creation-error 'cl-llama-cpp:llama-error)
+        "context-creation-error is a llama-error")
+    (ok (subtypep 'cl-llama-cpp:tokenization-error 'cl-llama-cpp:llama-error)
+        "tokenization-error is a llama-error")
+    (ok (subtypep 'cl-llama-cpp:decode-error 'cl-llama-cpp:llama-error)
+        "decode-error is a llama-error")))
+
+(deftest condition-signaling
+  (testing "conditions can be signaled and caught"
+    (ok (typep (handler-case (error 'cl-llama-cpp:model-load-error :path "/bad/path")
+                (cl-llama-cpp:model-load-error (c) c))
+               'cl-llama-cpp:model-load-error)
+        "model-load-error is catchable")
+    (ok (typep (handler-case (error 'cl-llama-cpp:decode-error :code -1)
+                (cl-llama-cpp:decode-error (c) c))
+               'cl-llama-cpp:decode-error)
+        "decode-error is catchable")))
