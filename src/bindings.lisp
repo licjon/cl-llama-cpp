@@ -4,6 +4,45 @@
 (in-package #:%llama)
 
 
+(common-lisp:defparameter +default-seed+ 4294967295)
+
+
+(common-lisp:defparameter +file-magic-ggla+ 1734831201)
+
+
+(common-lisp:defparameter +file-magic-ggsn+ 1734833006)
+
+
+(common-lisp:defparameter +file-magic-ggsq+ 1734833009)
+
+
+(common-lisp:defparameter +session-magic+ 1734833006)
+
+
+(common-lisp:defparameter +session-version+ 9)
+
+
+(common-lisp:defparameter +state-seq-flags-none+ 0)
+
+
+(common-lisp:defparameter +state-seq-flags-on-device+ 2)
+
+
+(common-lisp:defparameter +state-seq-flags-partial-only+ 1)
+
+
+(common-lisp:defparameter +state-seq-flags-swa-only+ 1)
+
+
+(common-lisp:defparameter +state-seq-magic+ 1734833009)
+
+
+(common-lisp:defparameter +state-seq-version+ 2)
+
+
+(common-lisp:defparameter +token-null+ -1)
+
+
 (cffi:defctype size-t :unsigned-long)
 
 
@@ -43,6 +82,12 @@
 (cffi:defctype uint64-t :unsigned-long)
 
 
+(cffi:defcstruct (%io-file :size 216))
+
+
+(cffi:defctype file (:struct %io-file))
+
+
 (cffi:defcenum ggml-type
   (:f32 0)
   (:f16 1)
@@ -76,7 +121,9 @@
   (:tq1-0 34)
   (:tq2-0 35)
   (:mxfp4 39)
-  (:count 40))
+  (:nvfp4 40)
+  (:q1-0 41)
+  (:count 42))
 
 
 (cffi:defcstruct (ggml-tensor :size 336))
@@ -234,6 +281,8 @@
   (:mostly-tq1-0 36)
   (:mostly-tq2-0 37)
   (:mostly-mxfp4-moe 38)
+  (:mostly-nvfp4 39)
+  (:mostly-q1-0 40)
   (:guessed 1024))
 
 
@@ -276,7 +325,13 @@
 (cffi:defcenum split-mode
   (:none 0)
   (:layer 1)
-  (:row 2))
+  (:row 2)
+  (:tensor 3))
+
+
+(cffi:defcenum context-type
+  (:default 0)
+  (:mtp 1))
 
 
 (cffi:defcstruct (token-data :size 12)
@@ -366,43 +421,91 @@
   (kv-overrides (:pointer (:struct model-kv-override)) :offset 56)
   (vocab-only :char :offset 64)
   (use-mmap :char :offset 65)
-  (use-mlock :char :offset 66)
-  (check-tensors :char :offset 67)
-  (use-extra-bufts :char :offset 68)
-  (no-host :char :offset 69))
+  (use-direct-io :char :offset 66)
+  (use-mlock :char :offset 67)
+  (check-tensors :char :offset 68)
+  (use-extra-bufts :char :offset 69)
+  (no-host :char :offset 70)
+  (no-alloc :char :offset 71))
 
 
-(cffi:defcstruct (context-params :size 120)
+(cffi:defcstruct (sampler-i :size 80)
+  (name (:pointer :void) :offset 0)
+  (accept (:pointer :void) :offset 8)
+  (apply (:pointer :void) :offset 16)
+  (reset (:pointer :void) :offset 24)
+  (clone (:pointer :void) :offset 32)
+  (free (:pointer :void) :offset 40)
+  (backend-init (:pointer :void) :offset 48)
+  (backend-accept (:pointer :void) :offset 56)
+  (backend-apply (:pointer :void) :offset 64)
+  (backend-set-input (:pointer :void) :offset 72))
+
+
+(cffi:defctype sampler-context-t (:pointer :void))
+
+
+(cffi:defcstruct (sampler :size 16)
+  (iface (:pointer (:struct sampler-i)) :offset 0)
+  (ctx sampler-context-t :offset 8))
+
+
+(cffi:defcstruct (sampler-seq-config :size 16)
+  (seq-id seq-id :offset 0)
+  (sampler (:pointer (:struct sampler)) :offset 8))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcstruct (context-params :size 160)
   (n-ctx uint32-t :offset 0)
   (n-batch uint32-t :offset 4)
   (n-ubatch uint32-t :offset 8)
   (n-seq-max uint32-t :offset 12)
-  (n-threads int32-t :offset 16)
-  (n-threads-batch int32-t :offset 20)
-  (rope-scaling-type rope-scaling-type :offset 24)
-  (pooling-type pooling-type :offset 28)
-  (attention-type attention-type :offset 32)
-  (flash-attn-type flash-attn-type :offset 36)
-  (rope-freq-base :float :offset 40)
-  (rope-freq-scale :float :offset 44)
-  (yarn-ext-factor :float :offset 48)
-  (yarn-attn-factor :float :offset 52)
-  (yarn-beta-fast :float :offset 56)
-  (yarn-beta-slow :float :offset 60)
-  (yarn-orig-ctx uint32-t :offset 64)
-  (defrag-thold :float :offset 68)
-  (cb-eval ggml-backend-sched-eval-callback :offset 72)
-  (cb-eval-user-data (:pointer :void) :offset 80)
-  (type-k ggml-type :offset 88)
-  (type-v ggml-type :offset 92)
-  (abort-callback ggml-abort-callback :offset 96)
-  (abort-callback-data (:pointer :void) :offset 104)
-  (embeddings :char :offset 112)
-  (offload-kqv :char :offset 113)
-  (no-perf :char :offset 114)
-  (op-offload :char :offset 115)
-  (swa-full :char :offset 116)
-  (kv-unified :char :offset 117))
+  (n-rs-seq uint32-t :offset 16)
+  (n-outputs-max uint32-t :offset 20)
+  (n-threads int32-t :offset 24)
+  (n-threads-batch int32-t :offset 28)
+  (ctx-type context-type :offset 32)
+  (rope-scaling-type rope-scaling-type :offset 36)
+  (pooling-type pooling-type :offset 40)
+  (attention-type attention-type :offset 44)
+  (flash-attn-type flash-attn-type :offset 48)
+  (rope-freq-base :float :offset 52)
+  (rope-freq-scale :float :offset 56)
+  (yarn-ext-factor :float :offset 60)
+  (yarn-attn-factor :float :offset 64)
+  (yarn-beta-fast :float :offset 68)
+  (yarn-beta-slow :float :offset 72)
+  (yarn-orig-ctx uint32-t :offset 76)
+  (defrag-thold :float :offset 80)
+  (cb-eval ggml-backend-sched-eval-callback :offset 88)
+  (cb-eval-user-data (:pointer :void) :offset 96)
+  (type-k ggml-type :offset 104)
+  (type-v ggml-type :offset 108)
+  (abort-callback ggml-abort-callback :offset 112)
+  (abort-callback-data (:pointer :void) :offset 120)
+  (embeddings :char :offset 128)
+  (offload-kqv :char :offset 129)
+  (no-perf :char :offset 130)
+  (op-offload :char :offset 131)
+  (swa-full :char :offset 132)
+  (kv-unified :char :offset 133)
+  (samplers (:pointer (:struct sampler-seq-config)) :offset 136)
+  (n-samplers size-t :offset 144)
+  (ctx-other (:pointer (:struct context)) :offset 152))
+
+
+(cffi:defcstruct (model-tensor-override :size 16)
+  (pattern :string :offset 0)
+  (type ggml-type :offset 8))
+
+
+(cffi:defcstruct (model-imatrix-data :size 24)
+  (name :string :offset 0)
+  (data (:pointer :float) :offset 8)
+  (size size-t :offset 16))
 
 
 (cffi:defcstruct (model-quantize-params :size 56)
@@ -415,10 +518,11 @@
   (only-copy :char :offset 18)
   (pure :char :offset 19)
   (keep-split :char :offset 20)
-  (imatrix (:pointer :void) :offset 24)
-  (kv-overrides (:pointer :void) :offset 32)
-  (tensor-types (:pointer :void) :offset 40)
-  (prune-layers (:pointer :void) :offset 48))
+  (dry-run :char :offset 21)
+  (imatrix (:pointer (:struct model-imatrix-data)) :offset 24)
+  (kv-overrides (:pointer (:struct model-kv-override)) :offset 32)
+  (tt-overrides (:pointer (:struct model-tensor-override)) :offset 40)
+  (prune-layers (:pointer int32-t) :offset 48))
 
 
 (cffi:defctype model-quantize-params (:struct model-quantize-params))
@@ -507,6 +611,24 @@
   (ctx (:pointer (:struct context))))
 
 
+(cffi:defctype model-set-tensor-data-t (:pointer :void))
+
+
+(cffi:defcstruct model)
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("llama_model_init_from_user" model-init-from-user)
+    (:pointer (:struct model))
+  "struct llama_model* llama_model_init_from_user(struct gguf_context* metadata, llama_model_set_tensor_data_t set_tensor_data, void* set_tensor_data_ud, struct llama_model_params params);"
+  (metadata (:pointer (:struct gguf-context)))
+  (set-tensor-data model-set-tensor-data-t)
+  (set-tensor-data-ud (:pointer :void))
+  (params (:struct model-params)))
+
+
 (cffi:defcstruct model)
 
 
@@ -524,6 +646,16 @@
     (:pointer (:struct model))
   "struct llama_model* llama_model_load_from_file(char* path_model, struct llama_model_params params);"
   (path-model :string)
+  (params (:struct model-params)))
+
+
+(cffi:defcstruct model)
+
+
+(cffi:defcfun ("llama_model_load_from_file_ptr" model-load-from-file-ptr)
+    (:pointer (:struct model))
+  "struct llama_model* llama_model_load_from_file_ptr(FILE* file, struct llama_model_params params);"
+  (file (:pointer file))
   (params (:struct model-params)))
 
 
@@ -616,6 +748,11 @@
   "size_t llama_max_parallel_sequences();")
 
 
+(cffi:defcfun ("llama_max_tensor_buft_overrides" max-tensor-buft-overrides)
+    size-t
+  "size_t llama_max_tensor_buft_overrides();")
+
+
 (cffi:defcfun ("llama_supports_mmap" supports-mmap)
     :char
   "char llama_supports_mmap();")
@@ -678,6 +815,15 @@
 (cffi:defcfun ("llama_n_seq_max" n-seq-max)
     uint32-t
   "uint32_t llama_n_seq_max(struct llama_context* ctx);"
+  (ctx (:pointer (:struct context))))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_n_rs_seq" n-rs-seq)
+    uint32-t
+  "uint32_t llama_n_rs_seq(struct llama_context* ctx);"
   (ctx (:pointer (:struct context))))
 
 
@@ -801,6 +947,15 @@
 (cffi:defcfun ("llama_model_n_embd_inp" model-n-embd-inp)
     int32-t
   "int32_t llama_model_n_embd_inp(struct llama_model* model);"
+  (model (:pointer (:struct model))))
+
+
+(cffi:defcstruct model)
+
+
+(cffi:defcfun ("llama_model_n_embd_out" model-n-embd-out)
+    int32-t
+  "int32_t llama_model_n_embd_out(struct llama_model* model);"
   (model (:pointer (:struct model))))
 
 
@@ -1129,42 +1284,21 @@
 (cffi:defcstruct adapter-lora)
 
 
-(cffi:defcfun ("llama_set_adapter_lora" set-adapter-lora)
+(cffi:defcfun ("llama_set_adapters_lora" set-adapters-lora)
     int32-t
-  "int32_t llama_set_adapter_lora(struct llama_context* ctx, struct llama_adapter_lora* adapter, float scale);"
+  "int32_t llama_set_adapters_lora(struct llama_context* ctx, struct llama_adapter_lora** adapters, size_t n_adapters, float* scales);"
   (ctx (:pointer (:struct context)))
-  (adapter (:pointer (:struct adapter-lora)))
-  (scale :float))
+  (adapters (:pointer (:pointer (:struct adapter-lora))))
+  (n-adapters size-t)
+  (scales (:pointer :float)))
 
 
 (cffi:defcstruct context)
 
 
-(cffi:defcstruct adapter-lora)
-
-
-(cffi:defcfun ("llama_rm_adapter_lora" rm-adapter-lora)
+(cffi:defcfun ("llama_set_adapter_cvec" set-adapter-cvec)
     int32-t
-  "int32_t llama_rm_adapter_lora(struct llama_context* ctx, struct llama_adapter_lora* adapter);"
-  (ctx (:pointer (:struct context)))
-  (adapter (:pointer (:struct adapter-lora))))
-
-
-(cffi:defcstruct context)
-
-
-(cffi:defcfun ("llama_clear_adapter_lora" clear-adapter-lora)
-    :void
-  "void llama_clear_adapter_lora(struct llama_context* ctx);"
-  (ctx (:pointer (:struct context))))
-
-
-(cffi:defcstruct context)
-
-
-(cffi:defcfun ("llama_apply_adapter_cvec" apply-adapter-cvec)
-    int32-t
-  "int32_t llama_apply_adapter_cvec(struct llama_context* ctx, float* data, size_t len, int32_t n_embd, int32_t il_start, int32_t il_end);"
+  "int32_t llama_set_adapter_cvec(struct llama_context* ctx, float* data, size_t len, int32_t n_embd, int32_t il_start, int32_t il_end);"
   (ctx (:pointer (:struct context)))
   (data (:pointer :float))
   (len size-t)
@@ -1627,6 +1761,76 @@
   (seq-id seq-id))
 
 
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_token_ith" get-sampled-token-ith)
+    token
+  "llama_token llama_get_sampled_token_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_probs_ith" get-sampled-probs-ith)
+    (:pointer :float)
+  "float* llama_get_sampled_probs_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_probs_count_ith" get-sampled-probs-count-ith)
+    uint32-t
+  "uint32_t llama_get_sampled_probs_count_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_logits_ith" get-sampled-logits-ith)
+    (:pointer :float)
+  "float* llama_get_sampled_logits_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_logits_count_ith" get-sampled-logits-count-ith)
+    uint32-t
+  "uint32_t llama_get_sampled_logits_count_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_candidates_ith" get-sampled-candidates-ith)
+    (:pointer token)
+  "llama_token* llama_get_sampled_candidates_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
+(cffi:defcstruct context)
+
+
+(cffi:defcfun ("llama_get_sampled_candidates_count_ith" get-sampled-candidates-count-ith)
+    uint32-t
+  "uint32_t llama_get_sampled_candidates_count_ith(struct llama_context* ctx, int32_t i);"
+  (ctx (:pointer (:struct context)))
+  (i int32-t))
+
+
 (cffi:defcstruct vocab)
 
 
@@ -2077,21 +2281,22 @@
   (len size-t))
 
 
-(cffi:defctype sampler-context-t (:pointer :void))
+(cffi:defcstruct (sampler-data :size 32)
+  (logits (:pointer (:struct ggml-tensor)) :offset 0)
+  (probs (:pointer (:struct ggml-tensor)) :offset 8)
+  (sampled (:pointer (:struct ggml-tensor)) :offset 16)
+  (candidates (:pointer (:struct ggml-tensor)) :offset 24))
 
 
-(cffi:defcstruct (sampler-i :size 48)
-  (name (:pointer :void) :offset 0)
-  (accept (:pointer :void) :offset 8)
-  (apply (:pointer :void) :offset 16)
-  (reset (:pointer :void) :offset 24)
-  (clone (:pointer :void) :offset 32)
-  (free (:pointer :void) :offset 40))
+(cffi:defcstruct context)
 
 
-(cffi:defcstruct (sampler :size 16)
-  (iface (:pointer (:struct sampler-i)) :offset 0)
-  (ctx sampler-context-t :offset 8))
+(cffi:defcfun ("llama_set_sampler" set-sampler)
+    :char
+  "char llama_set_sampler(struct llama_context* ctx, llama_seq_id seq_id, struct llama_sampler* smpl);"
+  (ctx (:pointer (:struct context)))
+  (seq-id seq-id)
+  (smpl (:pointer (:struct sampler))))
 
 
 (cffi:defcfun ("llama_sampler_init" sampler-init)
@@ -2323,6 +2528,14 @@
   (num-breakers size-t))
 
 
+(cffi:defcfun ("llama_sampler_init_adaptive_p" sampler-init-adaptive-p)
+    (:pointer (:struct sampler))
+  "struct llama_sampler* llama_sampler_init_adaptive_p(float target, float decay, uint32_t seed);"
+  (target :float)
+  (decay :float)
+  (seed uint32-t))
+
+
 (cffi:defcfun ("llama_sampler_init_logit_bias" sampler-init-logit-bias)
     (:pointer (:struct sampler))
   "struct llama_sampler* llama_sampler_init_logit_bias(int32_t n_vocab, int32_t n_logit_bias, llama_logit_bias* logit_bias);"
@@ -2358,28 +2571,35 @@
 
 
 (cffi:defcfun ("llama_split_path" split-path)
-    :int
-  "int llama_split_path(char* split_path, size_t maxlen, char* path_prefix, int split_no, int split_count);"
+    int32-t
+  "int32_t llama_split_path(char* split_path, size_t maxlen, char* path_prefix, int32_t split_no, int32_t split_count);"
   (split-path :string)
   (maxlen size-t)
   (path-prefix :string)
-  (split-no :int)
-  (split-count :int))
+  (split-no int32-t)
+  (split-count int32-t))
 
 
 (cffi:defcfun ("llama_split_prefix" split-prefix)
-    :int
-  "int llama_split_prefix(char* split_prefix, size_t maxlen, char* split_path, int split_no, int split_count);"
+    int32-t
+  "int32_t llama_split_prefix(char* split_prefix, size_t maxlen, char* split_path, int32_t split_no, int32_t split_count);"
   (split-prefix :string)
   (maxlen size-t)
   (split-path :string)
-  (split-no :int)
-  (split-count :int))
+  (split-no int32-t)
+  (split-count int32-t))
 
 
 (cffi:defcfun ("llama_print_system_info" print-system-info)
     :string
   "char* llama_print_system_info();")
+
+
+(cffi:defcfun ("llama_log_get" log-get)
+    :void
+  "void llama_log_get(ggml_log_callback* log_callback, void** user_data);"
+  (log-callback (:pointer ggml-log-callback))
+  (user-data (:pointer (:pointer :void))))
 
 
 (cffi:defcfun ("llama_log_set" log-set)
@@ -2451,15 +2671,6 @@
   (chain (:pointer (:struct sampler))))
 
 
-(cffi:defcstruct context)
-
-
-(cffi:defcfun ("llama_memory_breakdown_print" memory-breakdown-print)
-    :void
-  "void llama_memory_breakdown_print(struct llama_context* ctx);"
-  (ctx (:pointer (:struct context))))
-
-
 (cffi:defctype opt-param-filter (:pointer :void))
 
 
@@ -2508,6 +2719,45 @@
   (callback-eval ggml-opt-epoch-callback))
 
 
+(common-lisp:export '+default-seed+ "%LLAMA")
+
+
+(common-lisp:export '+file-magic-ggla+ "%LLAMA")
+
+
+(common-lisp:export '+file-magic-ggsn+ "%LLAMA")
+
+
+(common-lisp:export '+file-magic-ggsq+ "%LLAMA")
+
+
+(common-lisp:export '+session-magic+ "%LLAMA")
+
+
+(common-lisp:export '+session-version+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-flags-none+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-flags-on-device+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-flags-partial-only+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-flags-swa-only+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-magic+ "%LLAMA")
+
+
+(common-lisp:export '+state-seq-version+ "%LLAMA")
+
+
+(common-lisp:export '+token-null+ "%LLAMA")
+
+
 (common-lisp:export 'size-t "%LLAMA")
 
 
@@ -2545,6 +2795,12 @@
 
 
 (common-lisp:export 'uint64-t "%LLAMA")
+
+
+(common-lisp:export '%io-file "%LLAMA")
+
+
+(common-lisp:export 'file "%LLAMA")
 
 
 (common-lisp:export 'ggml-type "%LLAMA")
@@ -2632,6 +2888,9 @@
 
 
 (common-lisp:export 'split-mode "%LLAMA")
+
+
+(common-lisp:export 'context-type "%LLAMA")
 
 
 (common-lisp:export 'id "%LLAMA")
@@ -2745,6 +3004,9 @@
 (common-lisp:export 'use-mmap "%LLAMA")
 
 
+(common-lisp:export 'use-direct-io "%LLAMA")
+
+
 (common-lisp:export 'use-mlock "%LLAMA")
 
 
@@ -2757,7 +3019,58 @@
 (common-lisp:export 'no-host "%LLAMA")
 
 
+(common-lisp:export 'no-alloc "%LLAMA")
+
+
 (common-lisp:export 'model-params "%LLAMA")
+
+
+(common-lisp:export 'name "%LLAMA")
+
+
+(common-lisp:export 'accept "%LLAMA")
+
+
+(common-lisp:export 'apply "%LLAMA")
+
+
+(common-lisp:export 'reset "%LLAMA")
+
+
+(common-lisp:export 'clone "%LLAMA")
+
+
+(common-lisp:export 'free "%LLAMA")
+
+
+(common-lisp:export 'backend-init "%LLAMA")
+
+
+(common-lisp:export 'backend-accept "%LLAMA")
+
+
+(common-lisp:export 'backend-apply "%LLAMA")
+
+
+(common-lisp:export 'backend-set-input "%LLAMA")
+
+
+(common-lisp:export 'sampler-i "%LLAMA")
+
+
+(common-lisp:export 'sampler-context-t "%LLAMA")
+
+
+(common-lisp:export 'iface "%LLAMA")
+
+
+(common-lisp:export 'ctx "%LLAMA")
+
+
+(common-lisp:export 'sampler "%LLAMA")
+
+
+(common-lisp:export 'sampler-seq-config "%LLAMA")
 
 
 (common-lisp:export 'n-ctx "%LLAMA")
@@ -2772,10 +3085,19 @@
 (common-lisp:export 'n-seq-max "%LLAMA")
 
 
+(common-lisp:export 'n-rs-seq "%LLAMA")
+
+
+(common-lisp:export 'n-outputs-max "%LLAMA")
+
+
 (common-lisp:export 'n-threads "%LLAMA")
 
 
 (common-lisp:export 'n-threads-batch "%LLAMA")
+
+
+(common-lisp:export 'ctx-type "%LLAMA")
 
 
 (common-lisp:export 'rope-freq-base "%LLAMA")
@@ -2838,7 +3160,25 @@
 (common-lisp:export 'kv-unified "%LLAMA")
 
 
+(common-lisp:export 'samplers "%LLAMA")
+
+
+(common-lisp:export 'n-samplers "%LLAMA")
+
+
+(common-lisp:export 'ctx-other "%LLAMA")
+
+
 (common-lisp:export 'context-params "%LLAMA")
+
+
+(common-lisp:export 'type "%LLAMA")
+
+
+(common-lisp:export 'model-tensor-override "%LLAMA")
+
+
+(common-lisp:export 'model-imatrix-data "%LLAMA")
 
 
 (common-lisp:export 'nthread "%LLAMA")
@@ -2865,10 +3205,13 @@
 (common-lisp:export 'keep-split "%LLAMA")
 
 
+(common-lisp:export 'dry-run "%LLAMA")
+
+
 (common-lisp:export 'imatrix "%LLAMA")
 
 
-(common-lisp:export 'tensor-types "%LLAMA")
+(common-lisp:export 'tt-overrides "%LLAMA")
 
 
 (common-lisp:export 'prune-layers "%LLAMA")
@@ -2907,9 +3250,6 @@
 (common-lisp:export 'model-quantize-default-params "%LLAMA")
 
 
-(common-lisp:export 'backend-init "%LLAMA")
-
-
 (common-lisp:export 'backend-free "%LLAMA")
 
 
@@ -2922,10 +3262,19 @@
 (common-lisp:export 'detach-threadpool "%LLAMA")
 
 
+(common-lisp:export 'model-set-tensor-data-t "%LLAMA")
+
+
+(common-lisp:export 'model-init-from-user "%LLAMA")
+
+
 (common-lisp:export 'load-model-from-file "%LLAMA")
 
 
 (common-lisp:export 'model-load-from-file "%LLAMA")
+
+
+(common-lisp:export 'model-load-from-file-ptr "%LLAMA")
 
 
 (common-lisp:export 'model-load-from-splits "%LLAMA")
@@ -2946,9 +3295,6 @@
 (common-lisp:export 'new-context-with-model "%LLAMA")
 
 
-(common-lisp:export 'free "%LLAMA")
-
-
 (common-lisp:export 'time-us "%LLAMA")
 
 
@@ -2956,6 +3302,9 @@
 
 
 (common-lisp:export 'max-parallel-sequences "%LLAMA")
+
+
+(common-lisp:export 'max-tensor-buft-overrides "%LLAMA")
 
 
 (common-lisp:export 'supports-mmap "%LLAMA")
@@ -3007,6 +3356,9 @@
 
 
 (common-lisp:export 'model-n-embd-inp "%LLAMA")
+
+
+(common-lisp:export 'model-n-embd-out "%LLAMA")
 
 
 (common-lisp:export 'model-n-layer "%LLAMA")
@@ -3105,16 +3457,10 @@
 (common-lisp:export 'adapter-get-alora-invocation-tokens "%LLAMA")
 
 
-(common-lisp:export 'set-adapter-lora "%LLAMA")
+(common-lisp:export 'set-adapters-lora "%LLAMA")
 
 
-(common-lisp:export 'rm-adapter-lora "%LLAMA")
-
-
-(common-lisp:export 'clear-adapter-lora "%LLAMA")
-
-
-(common-lisp:export 'apply-adapter-cvec "%LLAMA")
+(common-lisp:export 'set-adapter-cvec "%LLAMA")
 
 
 (common-lisp:export 'memory-clear "%LLAMA")
@@ -3247,6 +3593,27 @@
 
 
 (common-lisp:export 'get-embeddings-seq "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-token-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-probs-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-probs-count-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-logits-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-logits-count-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-candidates-ith "%LLAMA")
+
+
+(common-lisp:export 'get-sampled-candidates-count-ith "%LLAMA")
 
 
 (common-lisp:export 'vocab-get-text "%LLAMA")
@@ -3390,34 +3757,19 @@
 (common-lisp:export 'chat-builtin-templates "%LLAMA")
 
 
-(common-lisp:export 'sampler-context-t "%LLAMA")
+(common-lisp:export 'probs "%LLAMA")
 
 
-(common-lisp:export 'name "%LLAMA")
+(common-lisp:export 'sampled "%LLAMA")
 
 
-(common-lisp:export 'accept "%LLAMA")
+(common-lisp:export 'candidates "%LLAMA")
 
 
-(common-lisp:export 'apply "%LLAMA")
+(common-lisp:export 'sampler-data "%LLAMA")
 
 
-(common-lisp:export 'reset "%LLAMA")
-
-
-(common-lisp:export 'clone "%LLAMA")
-
-
-(common-lisp:export 'sampler-i "%LLAMA")
-
-
-(common-lisp:export 'iface "%LLAMA")
-
-
-(common-lisp:export 'ctx "%LLAMA")
-
-
-(common-lisp:export 'sampler "%LLAMA")
+(common-lisp:export 'set-sampler "%LLAMA")
 
 
 (common-lisp:export 'sampler-init "%LLAMA")
@@ -3507,6 +3859,9 @@
 (common-lisp:export 'sampler-init-dry "%LLAMA")
 
 
+(common-lisp:export 'sampler-init-adaptive-p "%LLAMA")
+
+
 (common-lisp:export 'sampler-init-logit-bias "%LLAMA")
 
 
@@ -3526,6 +3881,9 @@
 
 
 (common-lisp:export 'print-system-info "%LLAMA")
+
+
+(common-lisp:export 'log-get "%LLAMA")
 
 
 (common-lisp:export 'log-set "%LLAMA")
@@ -3580,9 +3938,6 @@
 
 
 (common-lisp:export 'perf-sampler-reset "%LLAMA")
-
-
-(common-lisp:export 'memory-breakdown-print "%LLAMA")
 
 
 (common-lisp:export 'opt-param-filter "%LLAMA")

@@ -29,7 +29,7 @@
     (cl-llama-cpp:with-fp-traps-masked
       ;; CLAW generates SRET (struct-return) convention: allocate result buffer
       ;; and pass as pointer; use foreign-funcall to bypass type translation.
-      (let ((buf (cffi:foreign-alloc :uint8 :count 120)))
+      (let ((buf (cffi:foreign-alloc :uint8 :count 160)))
         (unwind-protect
              (progn
                (cffi:foreign-funcall "llama_context_default_params" :pointer buf :void)
