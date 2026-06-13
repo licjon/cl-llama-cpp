@@ -58,3 +58,14 @@
                 (cl-llama-cpp:decode-error (c) c))
                'cl-llama-cpp:decode-error)
         "decode-error is catchable")))
+
+(deftest with-model-bad-path
+  (testing "with-model signals model-load-error on nonexistent path"
+    (cl-llama-cpp:with-fp-traps-masked
+      (%llama:backend-init)
+      (ok (handler-case
+              (cl-llama-cpp:with-model (model "/nonexistent/path/to/model.gguf")
+                nil)
+            (cl-llama-cpp:model-load-error (c)
+              (cl-llama-cpp:model-load-error-path c)))
+          "model-load-error was signaled for bad path"))))
