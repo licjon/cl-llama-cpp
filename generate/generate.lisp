@@ -82,6 +82,41 @@ Returns an alist of (numeric-id-symbol . parent-struct-name-string)."
                 (scan field-spec)))))))
     result))
 
+(defun sret-result-p (form)
+  "Return T if FORM is a defcfun with CLAW's SRET pattern: return type (:struct T)
+and a fabricated (result (:struct T)) parameter with the same struct type."
+  (and (listp form)
+       (eq (car form) 'cffi:defcfun)
+       (listp (caddr form))
+       (eq (car (caddr form)) :struct)
+       ;; Find the parameter list (skip name-spec, return-type, docstring)
+       (let* ((after-rettype (cdddr form))
+              (params (if (stringp (car after-rettype))
+                          (cdr after-rettype)
+                          after-rettype))
+              (first-param (car params)))
+         (and first-param
+              (listp first-param)
+              (eq (car first-param) 'result)
+              (equal (cadr first-param) (caddr form))))))
+
+(defun strip-sret-result (form)
+  "Remove the fabricated (result (:struct T)) parameter from an SRET defcfun.
+Returns the corrected form."
+  (let* ((name-spec (cadr form))
+         (return-type (caddr form))
+         (after-rettype (cdddr form))
+         (docstring (when (stringp (car after-rettype))
+                      (car after-rettype)))
+         (params (if docstring
+                     (cdr after-rettype)
+                     after-rettype))
+         ;; Remove the result param (always first)
+         (real-params (cdr params)))
+    (if docstring
+        `(cffi:defcfun ,name-spec ,return-type ,docstring ,@real-params)
+        `(cffi:defcfun ,name-spec ,return-type ,@real-params))))
+
 (defun fixup-expansion (forms)
   "Post-process the list of CLAW-generated forms to eliminate %CLAW.ANONYMOUS
 references and numeric-ID union/struct names."
@@ -92,6 +127,9 @@ references and numeric-ID union/struct names."
     ;; Process forms
     (dolist (form forms)
       (cond
+        ;; defcfun with SRET pattern -> strip fabricated result parameter
+        ((sret-result-p form)
+         (push (strip-sret-result form) result))
         ;; defcunion/defcstruct with numeric ID -> rename based on parent
         ((and (listp form)
               (member (car form) '(cffi:defcunion cffi:defcstruct))
