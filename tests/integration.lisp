@@ -29,3 +29,16 @@
               (format nil "tokenized to ~d tokens" (length tokens)))
           (ok (search "Hello" result)
               (format nil "detokenized back to: ~s" result)))))))
+
+(deftest generate-text
+  (when-model-available
+    (testing "generate produces text from a prompt"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:generate ctx "The capital of France is"
+                                               :max-tokens 16
+                                               :temp 0.1)))
+            (ok (stringp result)
+                (format nil "generated: ~s" result))
+            (ok (> (length result) 0)
+                "generated non-empty text")))))))

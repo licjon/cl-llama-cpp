@@ -100,3 +100,78 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
             (%llama:detokenize vocab tok-buf n-tokens
                                text-buf n-needed
                                remove-sp unparse-sp))))))))
+
+(defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy)
+  "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free."
+  (let ((chain (%llama:sampler-chain-init
+                (%llama:sampler-chain-default-params))))
+    (cond
+      (greedy
+       (%llama:sampler-chain-add chain (%llama:sampler-init-greedy)))
+      (t
+       (when top-k
+         (%llama:sampler-chain-add chain (%llama:sampler-init-top-k top-k)))
+       (when top-p
+         (%llama:sampler-chain-add chain (%llama:sampler-init-top-p (coerce top-p 'single-float) 1)))
+       (when min-p
+         (%llama:sampler-chain-add chain (%llama:sampler-init-min-p (coerce min-p 'single-float) 1)))
+       (%llama:sampler-chain-add chain (%llama:sampler-init-temp (coerce temp 'single-float)))
+       (%llama:sampler-chain-add chain (%llama:sampler-init-dist seed))))
+    chain))
+
+(defmacro with-sampler-chain ((var &rest args
+                                &key (temp 0.8) top-k top-p min-p
+                                     (seed 42) greedy) &body body)
+  "Create a sampler chain, bind to VAR, execute BODY, free the chain."
+  (declare (ignore temp top-k top-p min-p seed greedy))
+  (let ((chain (gensym "CHAIN")))
+    `(with-fp-traps-masked
+       (let ((,chain (build-sampler-chain ,@args)))
+         (unwind-protect
+              (let ((,var ,chain))
+                ,@body)
+           (%llama:sampler-free ,chain))))))
+
+(defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
+                                  top-k top-p min-p (seed 42))
+  "Generate text by continuing PROMPT. Returns the generated string.
+Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS."
+  (with-fp-traps-masked
+    (let* ((model (%llama:get-model ctx))
+           (vocab (%llama:model-get-vocab model))
+           (prompt-tokens (tokenize model prompt))
+           (n-prompt (length prompt-tokens))
+           (eos (%llama:token-eos vocab))
+           (generated (make-array 0 :element-type 'fixnum
+                                    :adjustable t :fill-pointer 0)))
+      ;; Decode the prompt
+      (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
+        (dotimes (i n-prompt)
+          (setf (cffi:mem-aref tok-buf '%llama:token i) (aref prompt-tokens i)))
+        (let* ((batch (%llama:batch-get-one tok-buf n-prompt))
+               (rc (%llama:decode ctx batch)))
+          (unless (zerop rc)
+            (error 'decode-error :code rc))))
+      ;; Generation loop
+      (let ((sampler (build-sampler-chain :temp temp :top-k top-k :top-p top-p
+                                          :min-p min-p :seed seed)))
+        (unwind-protect
+            (loop for i from 0 below max-tokens
+                  for new-token = (%llama:sampler-sample sampler ctx -1)
+                  do (%llama:sampler-accept sampler new-token)
+                  until (= new-token eos)
+                  do (vector-push-extend new-token generated)
+                     (cffi:with-foreign-object (tok-buf '%llama:token 1)
+                       (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
+                       (let* ((batch (%llama:batch-get-one tok-buf 1))
+                              (rc (%llama:decode ctx batch)))
+                         (unless (zerop rc)
+                           (error 'decode-error :code rc)))))
+          (%llama:sampler-free sampler)))
+      ;; Convert generated tokens to string
+      (if (zerop (length generated))
+          ""
+          (let ((result-tokens (make-array (length generated) :element-type 'fixnum)))
+            (dotimes (i (length generated))
+              (setf (aref result-tokens i) (aref generated i)))
+            (detokenize model result-tokens))))))
