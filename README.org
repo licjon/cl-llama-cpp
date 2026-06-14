@@ -13,12 +13,13 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Chat template formatting and safe multi-turn tokenization
 - Embeddings
 - LoRA adapters
+- KV cache / memory management (clear, copy, shift, divide, query)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
 - Grammar / structured output
 - Batched / parallel decoding
-- KV cache management and state save/restore
+- KV cache state save/restore
 - Model quantization
 - Speculative decoding
 - Multimodal inputs (vision, audio)
@@ -129,6 +130,24 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =lora-metadata adapter= --- Return metadata from =adapter= as an alist of =(key . value)= string pairs.
 
+*** KV Cache / Memory Management
+
+- =clear-kv-cache ctx= --- Clear all KV cache state for =ctx=.
+
+- =kv-cache-seq-rm ctx seq-id p0 p1= --- Remove cached tokens in positions =[p0, p1)= for =seq-id=. =p0=-1= means from the start, =p1=-1= means to the end. Returns =T= if cells were removed, =NIL= if no matching data.
+
+- =kv-cache-seq-cp ctx src-seq dst-seq p0 p1= --- Copy cached data from =src-seq= to =dst-seq= for positions =[p0, p1)=.
+
+- =kv-cache-seq-keep ctx seq-id= --- Keep only =seq-id='s cached data, removing all other sequences.
+
+- =kv-cache-seq-add ctx seq-id p0 p1 delta= --- Shift positions in =[p0, p1)= for =seq-id= by =delta=.
+
+- =kv-cache-seq-div ctx seq-id p0 p1 d= --- Divide positions in =[p0, p1)= for =seq-id= by =d=. =d= must be non-zero.
+
+- =kv-cache-pos ctx seq-id= --- Return the minimum and maximum cached positions for =seq-id= as =(values min max)=.
+
+- =kv-cache-can-shift-p ctx= --- Return =T= if =ctx='s memory supports position shifting, =NIL= otherwise.
+
 *** Conditions
 
 All conditions inherit from =llama-error=.
@@ -200,6 +219,32 @@ The full =llama.h= API is available in the =%llama= package as CFFI function wra
 #+end_src
 
 See =examples/lora.lisp= for a complete walkthrough including adapter download and GGUF conversion.
+
+*** KV Cache Management
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    ;; After decoding a system prompt on seq 0, share it with seq 1
+    (cl-llama-cpp:kv-cache-seq-cp ctx 0 1 0 -1)
+
+    ;; Query cached positions for a sequence
+    (multiple-value-bind (min max)
+        (cl-llama-cpp:kv-cache-pos ctx 1)
+      (format t "Seq 1 cached: [~D .. ~D]~%" min max))
+
+    ;; Sliding window: remove old tokens, shift remaining back
+    (cl-llama-cpp:kv-cache-seq-rm ctx 0 0 128)
+    (cl-llama-cpp:kv-cache-seq-add ctx 0 128 -1 -128)
+
+    ;; Keep only seq 0, discard all others
+    (cl-llama-cpp:kv-cache-seq-keep ctx 0)
+
+    ;; Clear everything
+    (cl-llama-cpp:clear-kv-cache ctx)))
+#+end_src
+
+See =examples/kv-cache.lisp= for a full multi-user chat server simulation with assert-driven verification.
 
 ** Running Tests
 
