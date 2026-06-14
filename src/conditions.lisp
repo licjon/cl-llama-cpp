@@ -31,3 +31,15 @@
   (:report (lambda (c s)
              (declare (ignore c))
              (format s "Chat template formatting failed"))))
+
+(define-condition lora-load-error (llama-error)
+  ((path :initarg :path :reader lora-load-error-path))
+  (:report (lambda (c s)
+             (format s "Failed to load LoRA adapter from ~S"
+                     (lora-load-error-path c)))))
+
+(define-condition lora-apply-error (llama-error)
+  ((code :initarg :code :reader lora-apply-error-code))
+  (:report (lambda (c s)
+             (format s "Failed to apply LoRA adapter (code ~D)"
+                     (lora-apply-error-code c)))))
