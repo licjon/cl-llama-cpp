@@ -16,7 +16,7 @@ Provides a high-level, Lisp-idiomatic interface for loading GGUF models, tokeniz
 
 ** Requirements
 
-- A Common Lisp implementation (tested with SBCL)
+- *SBCL* (required — llama.cpp triggers floating-point exceptions that only SBCL's =sb-int:with-float-traps-masked= handles correctly)
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 
