@@ -6,6 +6,8 @@
   (:export
    ;; Utility
    #:with-fp-traps-masked
+   #:*binding-deps*
+   #:check-binding-deps
    ;; Conditions
    #:llama-error
    #:model-load-error

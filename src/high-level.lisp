@@ -1,5 +1,49 @@
 (in-package #:cl-llama-cpp)
 
+;;; Every %llama symbol the high-level API depends on.  After regenerating
+;;; bindings, call (cl-llama-cpp:check-binding-deps) to verify none were
+;;; removed upstream.  The generator also reads this list to flag removals.
+(defparameter *binding-deps*
+  '(;; Lifecycle
+    %llama:backend-init
+    %llama:model-default-params %llama:model-load-from-file %llama:model-free
+    %llama:context-default-params %llama:new-context-with-model %llama:free
+    %llama:get-model %llama:get-memory %llama:memory-clear
+    ;; Tokenization
+    %llama:model-get-vocab %llama:tokenize %llama:detokenize %llama:token
+    %llama:token-bos %llama:token-is-eog
+    ;; Generation
+    %llama:batch-get-one %llama:decode %llama:encode
+    %llama:sampler-chain-default-params %llama:sampler-chain-init
+    %llama:sampler-chain-add %llama:sampler-sample %llama:sampler-accept
+    %llama:sampler-free
+    %llama:sampler-init-greedy %llama:sampler-init-temp
+    %llama:sampler-init-top-k %llama:sampler-init-top-p %llama:sampler-init-min-p
+    %llama:sampler-init-dist
+    ;; Embeddings
+    %llama:model-n-embd %llama:get-embeddings-ith
+    ;; Chat templates
+    %llama:chat-apply-template %llama:chat-builtin-templates
+    %llama:chat-message %llama:model-chat-template))
+
+(defun check-binding-deps ()
+  "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.
+Returns T if all present, signals a warning per missing symbol."
+  (let ((missing nil))
+    (dolist (sym *binding-deps*)
+      (unless (or (fboundp sym)
+                  (ignore-errors (cffi:foreign-type-size sym))
+                  (ignore-errors (cffi:foreign-type-size `(:struct ,sym))))
+        (push sym missing)))
+    (if missing
+        (progn
+          (warn "~D binding~:P missing from %llama after regeneration:~%~{  ~S~%~}"
+                (length missing) (nreverse missing))
+          nil)
+        (progn
+          (format t "~&All ~D binding dependencies present.~%" (length *binding-deps*))
+          t))))
+
 (defvar *backend-initialized* nil)
 
 (defun ensure-backend ()

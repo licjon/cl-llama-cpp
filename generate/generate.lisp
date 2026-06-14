@@ -214,16 +214,85 @@ references and numeric-ID union/struct names."
           (terpri out)
           (terpri out))))))
 
+(defun extract-exported-symbols (file)
+  "Read FILE and return a list of symbol-name strings that appear in
+(common-lisp:export 'SYM ...) forms."
+  (when (probe-file file)
+    (let ((names nil))
+      (with-open-file (in file :external-format :utf-8)
+        (let ((*package* (or (find-package :%llama) *package*))
+              (*read-eval* nil))
+          (handler-case
+              (loop for form = (read in nil :eof)
+                    until (eq form :eof)
+                    when (and (listp form)
+                              (eq (car form) 'common-lisp:export)
+                              (listp (cadr form))
+                              (eq (car (cadr form)) 'quote))
+                    do (push (symbol-name (cadr (cadr form))) names))
+            (error ()))))
+      (nreverse names))))
+
+(defun report-binding-diff (old-file new-file)
+  "Compare exports between OLD-FILE's symbols and NEW-FILE, print a summary.
+Flags removals that affect high-level API dependencies."
+  (let* ((old-names (extract-exported-symbols old-file))
+         (new-names (extract-exported-symbols new-file))
+         (old-set (make-hash-table :test 'equal))
+         (new-set (make-hash-table :test 'equal))
+         (added nil)
+         (removed nil))
+    (dolist (n old-names) (setf (gethash n old-set) t))
+    (dolist (n new-names) (setf (gethash n new-set) t))
+    (dolist (n new-names)
+      (unless (gethash n old-set) (push n added)))
+    (dolist (n old-names)
+      (unless (gethash n new-set) (push n removed)))
+    (when added
+      (format t "~&  + ~D symbol~:P added~%" (length added)))
+    (when removed
+      (format t "~&  - ~D symbol~:P removed:~%" (length removed))
+      (dolist (name (sort removed #'string<))
+        (format t "      ~A~%" name)))
+    ;; Check against high-level dependency manifest
+    (let ((deps (when (find-package :cl-llama-cpp)
+                  (let ((sym (find-symbol "*BINDING-DEPS*" :cl-llama-cpp)))
+                    (when (and sym (boundp sym))
+                      (mapcar #'symbol-name (symbol-value sym))))))
+          (broken nil))
+      (dolist (name removed)
+        (when (member name deps :test #'string=)
+          (push name broken)))
+      (when broken
+        (format t "~&  *** ~D removal~:P affect the high-level API:~%" (length broken))
+        (dolist (name (sort broken #'string<))
+          (format t "      ~A  <-- used by high-level.lisp~%" name))))
+    (unless (or added removed)
+      (format t "~&  No symbol changes.~%"))))
+
 (defun generate (&key (output (project-path "src/bindings.lisp"))
                       rebuild-spec)
   "Generate CFFI bindings from llama.h via CLAW.
 When REBUILD-SPEC is true, force c2ffi to re-parse headers even if
-spec files exist (use after bumping the llama.cpp submodule)."
+spec files exist (use after bumping the llama.cpp submodule).
+After writing, diffs the old and new exported symbols and flags any
+removals that affect the high-level API dependency manifest."
   (when rebuild-spec
     (pushnew :claw-rebuild-spec *features*))
   (pushnew :claw-local-only *features*)
-  (let* ((form (build-wrapper-form))
-         (expansion (macroexpand-1 form)))
-    (write-bindings expansion output)
-    (format t "~&Bindings written to ~a~%" output)
-    output))
+  ;; Snapshot old exports before overwriting
+  (let ((old-exports-file (when (probe-file output)
+                            (let ((tmp (merge-pathnames "bindings-old.lisp"
+                                                        (uiop:temporary-directory))))
+                              (uiop:copy-file output tmp)
+                              tmp))))
+    (let* ((form (build-wrapper-form))
+           (expansion (macroexpand-1 form)))
+      (write-bindings expansion output)
+      (format t "~&Bindings written to ~a~%" output)
+      ;; Diff symbols
+      (when old-exports-file
+        (format t "~&Symbol diff:~%")
+        (report-binding-diff old-exports-file output)
+        (delete-file old-exports-file))
+      output)))
