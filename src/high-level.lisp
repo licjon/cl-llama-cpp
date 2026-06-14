@@ -391,21 +391,27 @@ on subsequent turns. Returns a token vector suitable for GENERATE's :prompt-toke
   "Load a LoRA adapter from PATH for MODEL, bind it to VAR, execute BODY, free the adapter."
   (let ((adapter-ptr (gensym "ADAPTER"))
         (path-val (gensym "PATH")))
-    `(with-fp-traps-masked
-       (let* ((,path-val ,path)
-              (,adapter-ptr (%llama:adapter-lora-init ,model ,path-val)))
-         (when (cffi:null-pointer-p ,adapter-ptr)
-           (error 'lora-load-error :path ,path-val))
-         (let ((,var ,adapter-ptr))
-           (unwind-protect
-                (progn ,@body)
-             (%llama:adapter-lora-free ,var)))))))
+    `(progn
+       (ensure-backend)
+       (with-fp-traps-masked
+         (let* ((,path-val ,path)
+                (,adapter-ptr (%llama:adapter-lora-init ,model ,path-val)))
+           (when (cffi:null-pointer-p ,adapter-ptr)
+             (error 'lora-load-error :path ,path-val))
+           (let ((,var ,adapter-ptr))
+             (unwind-protect
+                  (progn ,@body)
+               (%llama:adapter-lora-free ,var))))))))
 
 (defun apply-lora (ctx adapter &key (scale 1.0))
-  "Attach a LoRA ADAPTER to context CTX with the given SCALE factor.
+  "Set the active LoRA adapter on CTX to ADAPTER with the given SCALE factor.
+Replaces any previously applied adapters — calling this twice does not
+compose; only the last call's adapter remains active.
 Returns NIL on success, signals LORA-APPLY-ERROR on failure."
   (with-fp-traps-masked
     (let ((scale-f (coerce scale 'single-float)))
+      (unless (<= most-negative-single-float scale-f most-positive-single-float)
+        (error 'type-error :datum scale :expected-type 'single-float))
       (cffi:with-foreign-objects ((adapters-buf :pointer 1)
                                   (scales-buf :float 1))
         (setf (cffi:mem-aref adapters-buf :pointer 0) adapter)
@@ -419,14 +425,14 @@ Returns NIL on success, signals LORA-APPLY-ERROR on failure."
   "Read a metadata string from ADAPTER at INDEX using READER-FN.
 READER-FN is called as (funcall reader-fn adapter index buf buf-size)."
   (let ((buf-size 256))
-    (cffi:with-foreign-pointer-as-string (buf buf-size)
+    (cffi:with-foreign-pointer (buf buf-size)
       (let ((n (funcall reader-fn adapter index buf buf-size)))
-        (when (> n buf-size)
-          (setf buf-size n)
-          (cffi:with-foreign-pointer-as-string (buf2 buf-size)
-            (funcall reader-fn adapter index buf2 buf-size)
-            (return-from read-adapter-meta-string
-              (cffi:foreign-string-to-lisp buf2 :count (min n buf-size)))))
+        (when (>= n buf-size)
+          (let ((retry-size (1+ n)))
+            (cffi:with-foreign-pointer (buf2 retry-size)
+              (let ((n2 (funcall reader-fn adapter index buf2 retry-size)))
+                (return-from read-adapter-meta-string
+                  (cffi:foreign-string-to-lisp buf2 :count (max 0 n2)))))))
         (cffi:foreign-string-to-lisp buf :count (max 0 n))))))
 
 (defun lora-metadata (adapter)
