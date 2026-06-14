@@ -24,15 +24,17 @@ against the default plist keys by symbol name."
 (defmacro with-model ((var path &rest params) &body body)
   "Load a model from PATH, bind it to VAR, execute BODY, free the model.
 PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 99)."
-  (let ((model-ptr (gensym "MODEL")))
+  (let ((model-ptr (gensym "MODEL"))
+        (path-val (gensym "PATH")))
     `(progn
        (ensure-backend)
        (with-fp-traps-masked
-         (let* ((defaults (%llama:model-default-params))
+         (let* ((,path-val ,path)
+                (defaults (%llama:model-default-params))
                 (model-params (override-params defaults (list ,@params)))
-                (,model-ptr (%llama:model-load-from-file ,path model-params)))
+                (,model-ptr (%llama:model-load-from-file ,path-val model-params)))
            (when (cffi:null-pointer-p ,model-ptr)
-             (error 'model-load-error :path ,path))
+             (error 'model-load-error :path ,path-val))
            (let ((,var ,model-ptr))
              (unwind-protect
                   (progn ,@body)
@@ -98,7 +100,7 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
           ;; Second pass: fill text buffer
           (cffi:with-foreign-pointer-as-string (text-buf (1+ n-needed))
             (%llama:detokenize vocab tok-buf n-tokens
-                               text-buf n-needed
+                               text-buf (1+ n-needed)
                                remove-sp unparse-sp))))))))
 
 (defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy)
