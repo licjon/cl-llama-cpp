@@ -211,3 +211,55 @@
     (let ((info (cl-llama-cpp:system-info)))
       (ok (stringp info) "system-info returned a string")
       (ok (> (length info) 0) "system-info is non-empty"))))
+
+;;; Grammar / constrained generation wrapper tests
+
+(deftest grammar-symbols-exported
+  (testing "grammar wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(grammar-error
+                   grammar-error-grammar
+                   make-grammar-sampler
+                   make-grammar-sampler-lazy
+                   make-infill-sampler
+                   with-grammar-sampler))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest grammar-functions-fbound
+  (testing "grammar wrapper functions are fbound"
+    (dolist (sym-name '("MAKE-GRAMMAR-SAMPLER"
+                        "MAKE-GRAMMAR-SAMPLER-LAZY"
+                        "MAKE-INFILL-SAMPLER"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest grammar-condition-hierarchy
+  (testing "grammar-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:grammar-error 'cl-llama-cpp:llama-error)
+        "grammar-error is a llama-error")))
+
+(deftest grammar-condition-signaling
+  (testing "grammar-error can be signaled and caught with grammar slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:grammar-error :grammar "test grammar")
+                    (cl-llama-cpp:grammar-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:grammar-error)
+          "grammar-error is catchable")
+      (ok (string= "test grammar" (cl-llama-cpp:grammar-error-grammar caught))
+          "grammar-error-grammar accessor works"))))
+
+(deftest grammar-binding-deps
+  (testing "grammar bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:sampler-init-grammar
+                     %llama:sampler-init-grammar-lazy
+                     %llama:sampler-init-grammar-lazy-patterns
+                     %llama:sampler-init-infill))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))

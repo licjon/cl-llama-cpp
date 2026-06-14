@@ -55,4 +55,11 @@
    #:model-info
    #:model-cls-label
    #:context-info
-   #:system-info))
+   #:system-info
+   ;; Grammar / constrained generation
+   #:grammar-error
+   #:grammar-error-grammar
+   #:make-grammar-sampler
+   #:make-grammar-sampler-lazy
+   #:make-infill-sampler
+   #:with-grammar-sampler))
