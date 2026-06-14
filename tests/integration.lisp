@@ -288,3 +288,99 @@
               (cl-llama-cpp:kv-cache-pos ctx 0)
             (ok (>= mn mx)
                 (format nil "after clear, min (~A) >= max (~A) indicates empty" mn mx))))))))
+
+;;; Model / context introspection integration tests
+
+(deftest model-description-returns-string
+  (when-model-available
+    (testing "model-description returns a non-empty string"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((desc (cl-llama-cpp:model-description model)))
+          (ok (stringp desc) "model-description returned a string")
+          (ok (> (length desc) 0)
+              (format nil "model-description: ~S" desc)))))))
+
+(deftest model-metadata-returns-alist
+  (when-model-available
+    (testing "model-metadata returns an alist of string pairs"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((metadata (cl-llama-cpp:model-metadata model)))
+          (ok (listp metadata) "metadata is a list")
+          (ok (> (length metadata) 0) "metadata is non-empty")
+          (ok (every (lambda (entry)
+                       (and (consp entry)
+                            (stringp (car entry))
+                            (stringp (cdr entry))))
+                     metadata)
+              "all entries are (string . string) pairs"))))))
+
+(deftest model-info-returns-plist
+  (when-model-available
+    (testing "model-info returns a plist with expected keys"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((info (cl-llama-cpp:model-info model)))
+          (ok (listp info) "model-info returned a list")
+          (ok (integerp (getf info :n-params))
+              (format nil ":n-params is integer: ~A" (getf info :n-params)))
+          (ok (integerp (getf info :n-layers))
+              (format nil ":n-layers is integer: ~A" (getf info :n-layers)))
+          (ok (integerp (getf info :n-ctx-train))
+              (format nil ":n-ctx-train is integer: ~A" (getf info :n-ctx-train)))
+          (ok (integerp (getf info :size-bytes))
+              (format nil ":size-bytes is integer: ~A" (getf info :size-bytes)))
+          (ok (integerp (getf info :n-heads))
+              (format nil ":n-heads is integer: ~A" (getf info :n-heads)))
+          (ok (integerp (getf info :n-heads-kv))
+              (format nil ":n-heads-kv is integer: ~A" (getf info :n-heads-kv)))
+          (ok (numberp (getf info :rope-freq-scale))
+              (format nil ":rope-freq-scale is number: ~A" (getf info :rope-freq-scale)))
+          (ok (typep (getf info :encoder-p) '(member t nil))
+              (format nil ":encoder-p is boolean: ~A" (getf info :encoder-p)))
+          (ok (typep (getf info :decoder-p) '(member t nil))
+              (format nil ":decoder-p is boolean: ~A" (getf info :decoder-p)))
+          (ok (typep (getf info :recurrent-p) '(member t nil))
+              (format nil ":recurrent-p is boolean: ~A" (getf info :recurrent-p)))
+          (ok (typep (getf info :hybrid-p) '(member t nil))
+              (format nil ":hybrid-p is boolean: ~A" (getf info :hybrid-p)))
+          (ok (typep (getf info :diffusion-p) '(member t nil))
+              (format nil ":diffusion-p is boolean: ~A" (getf info :diffusion-p))))))))
+
+(deftest model-info-values-sensible
+  (when-model-available
+    (testing "model-info values are within sensible ranges"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((info (cl-llama-cpp:model-info model)))
+          (ok (> (getf info :n-params) 0) "n-params > 0")
+          (ok (> (getf info :n-layers) 0) "n-layers > 0")
+          (ok (> (getf info :n-ctx-train) 0) "n-ctx-train > 0")
+          (ok (> (getf info :size-bytes) 0) "size-bytes > 0")
+          (ok (> (getf info :n-heads) 0) "n-heads > 0"))))))
+
+(deftest context-info-returns-plist
+  (when-model-available
+    (testing "context-info returns a plist with expected keys"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((info (cl-llama-cpp:context-info ctx)))
+            (ok (listp info) "context-info returned a list")
+            (ok (= 512 (getf info :n-ctx))
+                (format nil ":n-ctx matches requested value: ~A" (getf info :n-ctx)))
+            (ok (integerp (getf info :n-batch))
+                (format nil ":n-batch is integer: ~A" (getf info :n-batch)))
+            (ok (integerp (getf info :n-ubatch))
+                (format nil ":n-ubatch is integer: ~A" (getf info :n-ubatch)))
+            (ok (integerp (getf info :n-seq-max))
+                (format nil ":n-seq-max is integer: ~A" (getf info :n-seq-max)))
+            (ok (integerp (getf info :n-threads))
+                (format nil ":n-threads is integer: ~A" (getf info :n-threads)))
+            (ok (integerp (getf info :n-threads-batch))
+                (format nil ":n-threads-batch is integer: ~A" (getf info :n-threads-batch)))))))))
+
+(deftest context-info-positive-values
+  (when-model-available
+    (testing "context-info values are positive"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((info (cl-llama-cpp:context-info ctx)))
+            (ok (> (getf info :n-batch) 0) "n-batch > 0")
+            (ok (> (getf info :n-threads) 0) "n-threads > 0")))))))
