@@ -81,3 +81,28 @@
             (cl-llama-cpp:model-load-error (c)
               (cl-llama-cpp:model-load-error-path c)))
           "model-load-error was signaled for bad path"))))
+
+;;; LoRA adapter wrapper tests
+
+(deftest lora-condition-hierarchy
+  (testing "lora-load-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:lora-load-error 'cl-llama-cpp:llama-error)
+        "lora-load-error is a llama-error"))
+  (testing "lora-apply-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:lora-apply-error 'cl-llama-cpp:llama-error)
+        "lora-apply-error is a llama-error")))
+
+(deftest lora-condition-signaling
+  (testing "lora-load-error can be signaled and caught with path slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:lora-load-error :path "/bad/lora.gguf")
+                    (cl-llama-cpp:lora-load-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:lora-load-error)
+          "lora-load-error is catchable")
+      (ok (string= "/bad/lora.gguf" (cl-llama-cpp:lora-load-error-path caught))
+          "lora-load-error-path accessor works")))
+  (testing "lora-apply-error can be signaled and caught"
+    (ok (typep (handler-case (error 'cl-llama-cpp:lora-apply-error :code -1)
+                (cl-llama-cpp:lora-apply-error (c) c))
+               'cl-llama-cpp:lora-apply-error)
+        "lora-apply-error is catchable")))

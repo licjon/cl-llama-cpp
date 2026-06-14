@@ -9,3 +9,4 @@
 .#*
 llama.cpp/build/
 examples/my-chat.lisp
+/examples/my-lora.lisp

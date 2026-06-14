@@ -12,11 +12,11 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Token streaming via callback
 - Chat template formatting and safe multi-turn tokenization
 - Embeddings
+- LoRA adapters
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
 - Grammar / structured output
-- LoRA adapters
 - Batched / parallel decoding
 - KV cache management and state save/restore
 - Model quantization
@@ -121,6 +121,14 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =list-chat-templates= --- Return a list of built-in chat template names.
 
+*** LoRA Adapters
+
+- =with-lora (var model path) &body body= --- Load a LoRA adapter GGUF from =path= for =model=, bind to =var=, free on exit. Signals =lora-load-error= on failure.
+
+- =apply-lora ctx adapter &key scale= --- Set the active LoRA adapter on =ctx=. =scale= (default 1.0) controls the adapter strength. Replaces any previously applied adapter. Signals =lora-apply-error= on failure.
+
+- =lora-metadata adapter= --- Return metadata from =adapter= as an alist of =(key . value)= string pairs.
+
 *** Conditions
 
 All conditions inherit from =llama-error=.
@@ -132,6 +140,8 @@ All conditions inherit from =llama-error=.
 | =tokenization-error=     | =text= | Tokenization fails            |
 | =decode-error=           | =code= | =llama_decode= returns non-zero |
 | =chat-template-error=   |      | Chat template rendering fails |
+| =lora-load-error=       | =path= | LoRA adapter file cannot be loaded |
+| =lora-apply-error=      | =code= | =set-adapters-lora= returns non-zero |
 
 *** Low-level Access
 
@@ -171,6 +181,26 @@ The full =llama.h= API is available in the =%llama= package as CFFI function wra
       (format t "~D dimensions~%" (length vec)))))
 #+end_src
 
+*** LoRA Adapters
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+      (cl-llama-cpp:apply-lora ctx adapter :scale 1.0)
+      (let* ((messages (list (list :role "user" :content "Hello!")))
+             (tokens (cl-llama-cpp:tokenize-chat model messages)))
+        (cl-llama-cpp:generate ctx nil
+          :prompt-tokens tokens
+          :max-tokens 256
+          :token-callback (lambda (tok)
+                            (write-string tok)
+                            (force-output)
+                            t))))))
+#+end_src
+
+See =examples/lora.lisp= for a complete walkthrough including adapter download and GGUF conversion.
+
 ** Running Tests
 
 Smoke tests run without a model:
@@ -181,11 +211,12 @@ sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
      --eval '(quit)'
 #+end_src
 
-Integration tests require a GGUF model:
+Integration tests require GGUF model files:
 
 #+begin_src bash
 LLAMA_TEST_MODEL=/path/to/model.gguf \
 LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+LLAMA_TEST_LORA=/path/to/adapter.gguf \
 sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
      --eval '(asdf:test-system "cl-llama-cpp/tests")' \
      --eval '(quit)'

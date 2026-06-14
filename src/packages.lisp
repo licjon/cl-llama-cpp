@@ -31,4 +31,12 @@
    #:format-chat
    #:tokenize-chat
    #:model-chat-template
-   #:list-chat-templates))
+   #:list-chat-templates
+   ;; LoRA adapters
+   #:lora-load-error
+   #:lora-load-error-path
+   #:lora-apply-error
+   #:lora-apply-error-code
+   #:with-lora
+   #:apply-lora
+   #:lora-metadata))
