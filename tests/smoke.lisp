@@ -106,3 +106,51 @@
                 (cl-llama-cpp:lora-apply-error (c) c))
                'cl-llama-cpp:lora-apply-error)
         "lora-apply-error is catchable")))
+
+;;; KV cache / memory management wrapper tests
+
+(deftest kv-cache-symbols-exported
+  (testing "KV cache wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(clear-kv-cache
+                   kv-cache-seq-rm
+                   kv-cache-seq-cp
+                   kv-cache-seq-keep
+                   kv-cache-pos
+                   kv-cache-can-shift-p
+                   kv-cache-seq-add
+                   kv-cache-seq-div))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest kv-cache-functions-fbound
+  (testing "KV cache wrapper symbols are fbound"
+    (dolist (sym-name '("CLEAR-KV-CACHE"
+                        "KV-CACHE-SEQ-RM"
+                        "KV-CACHE-SEQ-CP"
+                        "KV-CACHE-SEQ-KEEP"
+                        "KV-CACHE-POS"
+                        "KV-CACHE-CAN-SHIFT-P"
+                        "KV-CACHE-SEQ-ADD"
+                        "KV-CACHE-SEQ-DIV"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest kv-cache-binding-deps
+  (testing "memory bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:memory-seq-rm
+                     %llama:memory-seq-cp
+                     %llama:memory-seq-keep
+                     %llama:memory-seq-add
+                     %llama:memory-seq-div
+                     %llama:memory-seq-pos-min
+                     %llama:memory-seq-pos-max
+                     %llama:memory-can-shift))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
