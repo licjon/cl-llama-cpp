@@ -39,4 +39,13 @@
    #:lora-apply-error-code
    #:with-lora
    #:apply-lora
-   #:lora-metadata))
+   #:lora-metadata
+   ;; KV cache / memory management
+   #:clear-kv-cache
+   #:kv-cache-seq-rm
+   #:kv-cache-seq-cp
+   #:kv-cache-seq-keep
+   #:kv-cache-seq-add
+   #:kv-cache-seq-div
+   #:kv-cache-pos
+   #:kv-cache-can-shift-p))
