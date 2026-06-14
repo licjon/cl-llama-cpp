@@ -97,11 +97,13 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
                                               remove-sp unparse-sp))))
           (when (<= n-needed 0)
             (return-from detokenize ""))
-          ;; Second pass: fill text buffer
-          (cffi:with-foreign-pointer-as-string (text-buf (1+ n-needed))
-            (%llama:detokenize vocab tok-buf n-tokens
-                               text-buf (1+ n-needed)
-                               remove-sp unparse-sp)))))))
+          ;; Second pass: fill text buffer (llama API does not null-terminate)
+          (cffi:with-foreign-pointer (text-buf (1+ n-needed))
+            (let ((n-written (%llama:detokenize vocab tok-buf n-tokens
+                                                text-buf n-needed
+                                                remove-sp unparse-sp)))
+              (cffi:foreign-string-to-lisp text-buf :count n-written))))))))
+
 
 (defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy)
   "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free."
@@ -135,17 +137,27 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
            (%llama:sampler-free ,chain))))))
 
 (defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
-                                  top-k top-p min-p (seed 42))
-  "Generate text by continuing PROMPT. Returns the generated string.
-Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS."
+                                  top-k top-p min-p (seed 42)
+                                  (parse-special t) prompt-tokens
+                                  token-callback)
+  "Generate text by continuing PROMPT. Returns two values: the generated string
+and a stop reason (:eog, :length, or :callback).
+Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
+When PARSE-SPECIAL is true (default), special tokens in PROMPT are parsed
+rather than treated as literal text — required for chat-template prompts.
+When PROMPT-TOKENS is provided, it is used directly (skipping tokenization of
+PROMPT). Use TOKENIZE-CHAT to build safe token sequences for chat prompts.
+When TOKEN-CALLBACK is provided, it is called with each decoded token string
+as it is produced. Return NIL from the callback to stop generation early."
   (with-fp-traps-masked
     (let* ((model (%llama:get-model ctx))
            (vocab (%llama:model-get-vocab model))
-           (prompt-tokens (tokenize model prompt))
+           (prompt-tokens (or prompt-tokens
+                              (tokenize model prompt :parse-special parse-special)))
            (n-prompt (length prompt-tokens))
-           (eos (%llama:token-eos vocab))
            (generated (make-array 0 :element-type 'fixnum
                                     :adjustable t :fill-pointer 0)))
+      (%llama:memory-clear (%llama:get-memory ctx) 1)
       ;; Decode the prompt
       (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
         (dotimes (i n-prompt)
@@ -156,13 +168,24 @@ Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS."
             (error 'decode-error :code rc))))
       ;; Generation loop
       (let ((sampler (build-sampler-chain :temp temp :top-k top-k :top-p top-p
-                                          :min-p min-p :seed seed)))
+                                          :min-p min-p :seed seed))
+            (emitted-len 0))
         (unwind-protect
             (loop for i from 0 below max-tokens
                   for new-token = (%llama:sampler-sample sampler ctx -1)
                   do (%llama:sampler-accept sampler new-token)
-                  until (= new-token eos)
+                  until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
+                     (when token-callback
+                       (handler-case
+                           (let* ((full (detokenize model generated
+                                                    :remove-special t))
+                                  (new-text (subseq full emitted-len)))
+                             (when (plusp (length new-text))
+                               (setf emitted-len (length full))
+                               (unless (funcall token-callback new-text)
+                                 (loop-finish))))
+                         (error ())))
                      (cffi:with-foreign-object (tok-buf '%llama:token 1)
                        (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
                        (let* ((batch (%llama:batch-get-one tok-buf 1))
@@ -171,12 +194,16 @@ Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS."
                            (error 'decode-error :code rc)))))
           (%llama:sampler-free sampler)))
       ;; Convert generated tokens to string
-      (if (zerop (length generated))
-          ""
-          (let ((result-tokens (make-array (length generated) :element-type 'fixnum)))
-            (dotimes (i (length generated))
-              (setf (aref result-tokens i) (aref generated i)))
-            (detokenize model result-tokens))))))
+      (let ((text (if (zerop (length generated))
+                      ""
+                      (let ((result-tokens (make-array (length generated)
+                                                       :element-type 'fixnum)))
+                        (dotimes (i (length generated))
+                          (setf (aref result-tokens i) (aref generated i)))
+                        (detokenize model result-tokens :remove-special t))))
+            (stop-reason (cond ((= (length generated) max-tokens) :length)
+                               (t :eog))))
+        (values text stop-reason)))))
 
 (defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.
@@ -230,6 +257,8 @@ Uses MODEL's embedded chat template unless TEMPLATE is provided."
   (with-fp-traps-masked
     (let* ((tmpl (or template (model-chat-template model)))
            (tmpl-arg (or tmpl (cffi:null-pointer)))
+           ;; Gemma templates use "model" instead of "assistant"
+           (model-role (and (stringp tmpl) (search "'model'" tmpl)))
            (n-msg (length messages))
            (add-ass (if add-assistant-prefix 1 0))
            (msg-size (cffi:foreign-type-size '(:struct %llama:chat-message)))
@@ -240,7 +269,10 @@ Uses MODEL's embedded chat template unless TEMPLATE is provided."
               (loop for msg in messages
                     for i from 0
                     for msg-ptr = (cffi:inc-pointer chat (* i msg-size))
-                    for role-ptr = (cffi:foreign-string-alloc (getf msg :role))
+                    for role = (let ((r (getf msg :role)))
+                                 (if (and model-role (string= r "assistant"))
+                                     "model" r))
+                    for role-ptr = (cffi:foreign-string-alloc role)
                     for content-ptr = (cffi:foreign-string-alloc (getf msg :content))
                     do (push role-ptr foreign-strings)
                        (push content-ptr foreign-strings)
@@ -257,3 +289,45 @@ Uses MODEL's embedded chat template unless TEMPLATE is provided."
                    buf (1+ n-needed)))))
           (dolist (ptr foreign-strings)
             (cffi:foreign-string-free ptr)))))))
+
+(defun tokenize-chat (model messages &key template (add-assistant-prefix t))
+  "Tokenize a chat conversation safely. Template markers are parsed as special
+tokens; message content is not. This prevents content that resembles special
+tokens (e.g. a model hallucinating <end_of_turn>) from corrupting the prompt
+on subsequent turns. Returns a token vector suitable for GENERATE's :prompt-tokens."
+  (let* ((formatted (format-chat model messages
+                      :template template
+                      :add-assistant-prefix add-assistant-prefix))
+         (vocab (%llama:model-get-vocab model))
+         (bos (%llama:token-bos vocab))
+         (all-tokens (make-array 0 :element-type 'fixnum
+                                   :adjustable t :fill-pointer 0))
+         (pos 0))
+    ;; Explicitly prepend BOS and skip the template's bos_token rendering
+    (vector-push-extend bos all-tokens)
+    (let ((bos-text (detokenize model (make-array 1 :element-type 'fixnum
+                                                    :initial-element bos))))
+      (when (and (plusp (length bos-text))
+                 (eql 0 (search bos-text formatted)))
+        (setf pos (length bos-text))))
+    (dolist (msg messages)
+      (let* ((content (getf msg :content))
+             (content-start (search content formatted :start2 pos)))
+        (when content-start
+          (when (> content-start pos)
+            (let ((toks (tokenize model (subseq formatted pos content-start)
+                          :add-special nil :parse-special t)))
+              (loop for tok across toks do (vector-push-extend tok all-tokens))))
+          (when (plusp (length content))
+            (let ((toks (tokenize model content
+                          :add-special nil :parse-special nil)))
+              (loop for tok across toks do (vector-push-extend tok all-tokens))))
+          (setf pos (+ content-start (length content))))))
+    (when (< pos (length formatted))
+      (let ((toks (tokenize model (subseq formatted pos)
+                    :add-special nil :parse-special t)))
+        (loop for tok across toks do (vector-push-extend tok all-tokens))))
+    (let ((result (make-array (length all-tokens) :element-type 'fixnum)))
+      (dotimes (i (length all-tokens))
+        (setf (aref result i) (aref all-tokens i)))
+      result)))

@@ -27,5 +27,6 @@
    ;; Chat templates
    #:chat-template-error
    #:format-chat
+   #:tokenize-chat
    #:model-chat-template
    #:list-chat-templates))

@@ -14,6 +14,13 @@
                  (:file "conditions")
                  (:file "high-level")))))
 
+(defsystem "cl-llama-cpp/examples"
+  :description "Example programs for cl-llama-cpp"
+  :depends-on ("cl-llama-cpp")
+  :components ((:module "examples"
+                :components
+                ((:file "chat")))))
+
 (defsystem "cl-llama-cpp/generate"
   :description "Binding generator for cl-llama-cpp (developers only)"
   :depends-on ("claw" "cl-llama-cpp")
