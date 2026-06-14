@@ -14,6 +14,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Embeddings
 - LoRA adapters
 - KV cache / memory management (clear, copy, shift, divide, query)
+- Model & context introspection (description, metadata, properties, system info)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
@@ -148,6 +149,20 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =kv-cache-can-shift-p ctx= --- Return =T= if =ctx='s memory supports position shifting, =NIL= otherwise.
 
+*** Model & Context Introspection
+
+- =model-description model= --- Return the model's description string (e.g. ="gemma3 1B Q4_K - Medium"=).
+
+- =model-metadata model= --- Return all GGUF metadata as an alist of =(key . value)= string pairs.
+
+- =model-info model= --- Return a plist of model properties: =:n-params=, =:n-layers=, =:n-ctx-train=, =:size-bytes=, =:n-heads=, =:n-heads-kv=, =:n-embd-in=, =:n-embd-out=, =:n-swa=, =:rope-type=, =:rope-freq-scale=, =:n-cls-out=, =:encoder-p=, =:decoder-p=, =:recurrent-p=, =:hybrid-p=, =:diffusion-p=.
+
+- =model-cls-label model index= --- Return the classification label string at =index=, or =NIL= if unavailable.
+
+- =context-info ctx= --- Return a plist of context configuration: =:n-ctx=, =:n-batch=, =:n-ubatch=, =:n-seq-max=, =:n-threads=, =:n-threads-batch=, =:pooling-type=.
+
+- =system-info= --- Return a string describing the llama.cpp build and CPU capabilities.
+
 *** Conditions
 
 All conditions inherit from =llama-error=.
@@ -245,6 +260,31 @@ See =examples/lora.lisp= for a complete walkthrough including adapter download a
 #+end_src
 
 See =examples/kv-cache.lisp= for a full multi-user chat server simulation with assert-driven verification.
+
+*** Model Introspection
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 0)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; Model description
+    (format t "Model: ~A~%" (cl-llama-cpp:model-description model))
+
+    ;; Numeric/boolean properties
+    (let ((info (cl-llama-cpp:model-info model)))
+      (format t "Parameters: ~D, Layers: ~D, Training ctx: ~D~%"
+              (getf info :n-params) (getf info :n-layers) (getf info :n-ctx-train)))
+
+    ;; Context configuration
+    (let ((info (cl-llama-cpp:context-info ctx)))
+      (format t "Context: ~D tokens, ~D threads~%"
+              (getf info :n-ctx) (getf info :n-threads)))
+
+    ;; GGUF metadata
+    (dolist (entry (cl-llama-cpp:model-metadata model))
+      (format t "  ~A = ~A~%" (car entry) (cdr entry)))))
+#+end_src
+
+See =examples/introspection.lisp= for a formatted report of all introspection data.
 
 ** Running Tests
 
