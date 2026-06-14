@@ -384,3 +384,176 @@
           (let ((info (cl-llama-cpp:context-info ctx)))
             (ok (> (getf info :n-batch) 0) "n-batch > 0")
             (ok (> (getf info :n-threads) 0) "n-threads > 0")))))))
+
+;;; Grammar / constrained generation integration tests
+
+(defvar *json-grammar*
+  "root   ::= \"{\" ws kv (ws \",\" ws kv)* ws \"}\"
+kv     ::= string ws \":\" ws value
+value  ::= string | number | \"true\" | \"false\" | \"null\"
+string ::= \"\\\"\" [a-zA-Z0-9 ]* \"\\\"\"
+number ::= [0-9]+
+ws     ::= [ \\t\\n]*")
+
+(deftest make-grammar-sampler-creates-sampler
+  (when-model-available
+    (testing "make-grammar-sampler returns a non-null pointer"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-grammar-sampler model *json-grammar*)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "grammar sampler pointer is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest make-grammar-sampler-custom-root
+  (when-model-available
+    (testing "make-grammar-sampler accepts a custom root rule"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-grammar-sampler
+                        model *json-grammar* :root "root")))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "grammar sampler with custom root is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest make-grammar-sampler-empty-grammar-signals-error
+  (when-model-available
+    (testing "make-grammar-sampler signals grammar-error for empty grammar"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (ok (handler-case
+                (progn (cl-llama-cpp:make-grammar-sampler model "") nil)
+              (cl-llama-cpp:grammar-error (c)
+                (cl-llama-cpp:grammar-error-grammar c)))
+            "grammar-error was signaled for empty grammar")))))
+
+(deftest make-grammar-sampler-lazy-creates-sampler
+  (when-model-available
+    (testing "make-grammar-sampler-lazy returns a non-null pointer"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-grammar-sampler-lazy
+                        model *json-grammar*)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "lazy grammar sampler is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest make-grammar-sampler-lazy-with-trigger-words
+  (when-model-available
+    (testing "make-grammar-sampler-lazy accepts trigger words"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-grammar-sampler-lazy
+                        model *json-grammar*
+                        :trigger-words '("{" "["))))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "lazy grammar sampler with trigger words is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest make-grammar-sampler-lazy-with-trigger-patterns
+  (when-model-available
+    (testing "make-grammar-sampler-lazy accepts trigger patterns"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-grammar-sampler-lazy
+                        model *json-grammar*
+                        :trigger-patterns '("\\{" "\\["))))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "lazy grammar sampler with trigger patterns is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest make-grammar-sampler-lazy-words-and-patterns-error
+  (when-model-available
+    (testing "make-grammar-sampler-lazy rejects both trigger-words and trigger-patterns"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (ok (handler-case
+                (progn (cl-llama-cpp:make-grammar-sampler-lazy
+                        model *json-grammar*
+                        :trigger-words '("{")
+                        :trigger-patterns '("\\{"))
+                       nil)
+              (error () t))
+            "error was signaled for conflicting trigger args")))))
+
+(deftest make-infill-sampler-creates-sampler
+  (when-model-available
+    (testing "make-infill-sampler returns a non-null pointer"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((sampler (cl-llama-cpp:make-infill-sampler model)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p sampler))
+                   "infill sampler is non-null")
+            (cl-llama-cpp:with-fp-traps-masked
+              (%llama:sampler-free sampler))))))))
+
+(deftest with-grammar-sampler-binds-and-frees
+  (when-model-available
+    (testing "with-grammar-sampler creates sampler, executes body, and cleans up"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((captured nil))
+          (cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*)
+            (setf captured gs)
+            (ok (not (cffi:null-pointer-p gs))
+                "grammar sampler is non-null inside body"))
+          (ok captured "sampler pointer was captured"))))))
+
+(deftest with-grammar-sampler-lazy-mode
+  (when-model-available
+    (testing "with-grammar-sampler with :lazy t creates a lazy sampler"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*
+                                               :lazy t
+                                               :trigger-words '("{"))
+          (ok (not (cffi:null-pointer-p gs))
+              "lazy grammar sampler is non-null inside body"))))))
+
+(deftest with-grammar-sampler-cleanup-on-error
+  (when-model-available
+    (testing "with-grammar-sampler frees sampler on non-local exit"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((saved nil))
+          (ignore-errors
+            (cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*)
+              (setf saved gs)
+              (error "deliberate error")))
+          (ok saved "sampler pointer was captured before error"))))))
+
+(deftest generate-with-grammar
+  (when-model-available
+    (testing "generate with :grammar constrains output"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "Output a JSON object:"
+                                     :max-tokens 64
+                                     :temp 0.1
+                                     :grammar *json-grammar*)
+            (ok (stringp text)
+                (format nil "generated with grammar: ~S" text))
+            (ok (member stop-reason '(:eog :length))
+                (format nil "stop reason is valid: ~A" stop-reason))))))))
+
+(deftest with-sampler-chain-with-grammar
+  (when-model-available
+    (testing "with-sampler-chain accepts grammar keywords"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain :model model
+                                                :grammar *json-grammar*
+                                                :grammar-root "root"
+                                                :temp 0.1)
+          (ok (not (cffi:null-pointer-p chain))
+              "sampler chain with grammar is non-null"))))))
+
+(deftest build-sampler-chain-grammar-without-model-signals-error
+  (testing "build-sampler-chain with :grammar but no :model signals error"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-fp-traps-masked
+                (cl-llama-cpp::build-sampler-chain :grammar *json-grammar*))
+              nil)
+          (error () t))
+        "error was signaled for grammar without model")))
