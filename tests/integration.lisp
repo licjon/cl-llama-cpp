@@ -4,6 +4,7 @@
 (in-package #:cl-llama-cpp/tests/integration)
 
 (defvar *test-model-path* (uiop:getenv "LLAMA_TEST_MODEL"))
+(defvar *test-embed-model-path* (uiop:getenv "LLAMA_TEST_EMBED_MODEL"))
 
 (defmacro when-model-available (&body body)
   `(if *test-model-path*
@@ -44,15 +45,16 @@
                 "generated non-empty text")))))))
 
 (deftest embed-text
-  (when-model-available
-    (testing "embed produces a float vector"
-      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
-                                              :pooling-type 1)
-          (let ((embedding (cl-llama-cpp:embed ctx "Hello, world!")))
-            (ok (vectorp embedding)
-                "embed returned a vector")
-            (ok (> (length embedding) 0)
-                (format nil "embedding has ~d dimensions" (length embedding)))
-            (ok (every #'numberp embedding)
-                "all elements are numbers")))))))
+  (if *test-embed-model-path*
+      (testing "embed produces a float vector"
+        (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+          (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
+                                                :pooling-type 1)
+            (let ((embedding (cl-llama-cpp:embed ctx "Hello, world!")))
+              (ok (vectorp embedding)
+                  "embed returned a vector")
+              (ok (> (length embedding) 0)
+                  (format nil "embedding has ~d dimensions" (length embedding)))
+              (ok (every #'numberp embedding)
+                  "all elements are numbers")))))
+      (skip "LLAMA_TEST_EMBED_MODEL not set — skipping")))

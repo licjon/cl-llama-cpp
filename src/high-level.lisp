@@ -53,7 +53,7 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
          (let ((,var ,ctx-ptr))
            (unwind-protect
                 (progn ,@body)
-             (%llama:free ,var))))))
+             (%llama:free ,var)))))))
 
 (defun tokenize (model text &key (add-special t) (parse-special nil))
   "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers."
@@ -101,7 +101,7 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
           (cffi:with-foreign-pointer-as-string (text-buf (1+ n-needed))
             (%llama:detokenize vocab tok-buf n-tokens
                                text-buf (1+ n-needed)
-                               remove-sp unparse-sp))))))))
+                               remove-sp unparse-sp)))))))
 
 (defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy)
   "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free."
