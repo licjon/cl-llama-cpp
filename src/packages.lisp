@@ -48,4 +48,11 @@
    #:kv-cache-seq-add
    #:kv-cache-seq-div
    #:kv-cache-pos
-   #:kv-cache-can-shift-p))
+   #:kv-cache-can-shift-p
+   ;; Model / context introspection
+   #:model-description
+   #:model-metadata
+   #:model-info
+   #:model-cls-label
+   #:context-info
+   #:system-info))
