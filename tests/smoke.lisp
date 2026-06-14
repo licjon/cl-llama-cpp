@@ -154,3 +154,60 @@
                      %llama:memory-can-shift))
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
+
+;;; Model / context introspection wrapper tests
+
+(deftest introspection-symbols-exported
+  (testing "introspection wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(model-description
+                   model-metadata
+                   model-info
+                   model-cls-label
+                   context-info
+                   system-info))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest introspection-functions-fbound
+  (testing "introspection wrapper symbols are fbound"
+    (dolist (sym-name '("MODEL-DESCRIPTION"
+                        "MODEL-METADATA"
+                        "MODEL-INFO"
+                        "MODEL-CLS-LABEL"
+                        "CONTEXT-INFO"
+                        "SYSTEM-INFO"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest introspection-binding-deps
+  (testing "introspection bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:model-desc %llama:model-size %llama:model-n-params
+                     %llama:model-n-ctx-train %llama:model-n-layer
+                     %llama:model-n-head %llama:model-n-head-kv
+                     %llama:model-n-embd-inp %llama:model-n-embd-out
+                     %llama:model-n-swa %llama:model-rope-type
+                     %llama:model-rope-freq-scale-train
+                     %llama:model-has-encoder %llama:model-has-decoder
+                     %llama:model-is-recurrent %llama:model-is-hybrid
+                     %llama:model-is-diffusion
+                     %llama:model-n-cls-out %llama:model-cls-label
+                     %llama:model-meta-count %llama:model-meta-key-by-index
+                     %llama:model-meta-val-str %llama:model-meta-val-str-by-index
+                     %llama:n-ctx %llama:n-batch %llama:n-ubatch %llama:n-seq-max
+                     %llama:n-threads %llama:n-threads-batch %llama:pooling-type
+                     %llama:print-system-info))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest system-info-returns-string
+  (testing "system-info returns a non-empty string without needing a model"
+    (let ((info (cl-llama-cpp:system-info)))
+      (ok (stringp info) "system-info returned a string")
+      (ok (> (length info) 0) "system-info is non-empty"))))

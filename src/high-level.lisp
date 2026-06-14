@@ -38,7 +38,23 @@
     %llama:memory-seq-rm %llama:memory-seq-cp %llama:memory-seq-keep
     %llama:memory-seq-add %llama:memory-seq-div
     %llama:memory-seq-pos-min %llama:memory-seq-pos-max
-    %llama:memory-can-shift))
+    %llama:memory-can-shift
+    ;; Model / context introspection
+    %llama:model-desc %llama:model-size %llama:model-n-params
+    %llama:model-n-ctx-train %llama:model-n-layer
+    %llama:model-n-head %llama:model-n-head-kv
+    %llama:model-n-embd-inp %llama:model-n-embd-out
+    %llama:model-n-swa %llama:model-rope-type
+    %llama:model-rope-freq-scale-train
+    %llama:model-has-encoder %llama:model-has-decoder
+    %llama:model-is-recurrent %llama:model-is-hybrid
+    %llama:model-is-diffusion
+    %llama:model-n-cls-out %llama:model-cls-label
+    %llama:model-meta-count %llama:model-meta-key-by-index
+    %llama:model-meta-val-str %llama:model-meta-val-str-by-index
+    %llama:n-ctx %llama:n-batch %llama:n-ubatch %llama:n-seq-max
+    %llama:n-threads %llama:n-threads-batch %llama:pooling-type
+    %llama:print-system-info))
 
 (defun check-binding-deps ()
   "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.
@@ -504,3 +520,79 @@ Returns T if cells were removed, NIL if no matching data."
   "Return T if CTX's memory supports position shifting, NIL otherwise."
   (with-fp-traps-masked
     (not (zerop (%llama:memory-can-shift (%llama:get-memory ctx))))))
+
+;;; Model / context introspection wrappers
+
+(defun read-model-buffer-string (model reader-fn &rest extra-args)
+  "Read a buffer-probe string from MODEL using READER-FN.
+READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
+  (let ((buf-size 256))
+    (cffi:with-foreign-pointer (buf buf-size)
+      (let ((n (apply reader-fn model (append extra-args (list buf buf-size)))))
+        (when (< n 0)
+          (return-from read-model-buffer-string nil))
+        (when (>= n buf-size)
+          (let ((retry-size (1+ n)))
+            (cffi:with-foreign-pointer (buf2 retry-size)
+              (let ((n2 (apply reader-fn model (append extra-args (list buf2 retry-size)))))
+                (return-from read-model-buffer-string
+                  (cffi:foreign-string-to-lisp buf2 :count (max 0 n2)))))))
+        (cffi:foreign-string-to-lisp buf :count n)))))
+
+(defun model-description (model)
+  "Return MODEL's description as a string."
+  (with-fp-traps-masked
+    (read-model-buffer-string model #'%llama:model-desc)))
+
+(defun model-metadata (model)
+  "Return all metadata from MODEL as an alist of (key . value) string pairs."
+  (with-fp-traps-masked
+    (let ((count (%llama:model-meta-count model)))
+      (loop for i from 0 below count
+            collect (cons
+                     (read-model-buffer-string
+                      model #'%llama:model-meta-key-by-index i)
+                     (read-model-buffer-string
+                      model #'%llama:model-meta-val-str-by-index i))))))
+
+(defun model-info (model)
+  "Return a plist of MODEL's numeric and boolean properties."
+  (with-fp-traps-masked
+    (list :n-params (%llama:model-n-params model)
+          :n-layers (%llama:model-n-layer model)
+          :n-ctx-train (%llama:model-n-ctx-train model)
+          :size-bytes (%llama:model-size model)
+          :n-heads (%llama:model-n-head model)
+          :n-heads-kv (%llama:model-n-head-kv model)
+          :n-embd-in (%llama:model-n-embd-inp model)
+          :n-embd-out (%llama:model-n-embd-out model)
+          :n-swa (%llama:model-n-swa model)
+          :rope-type (%llama:model-rope-type model)
+          :rope-freq-scale (%llama:model-rope-freq-scale-train model)
+          :n-cls-out (%llama:model-n-cls-out model)
+          :encoder-p (not (zerop (%llama:model-has-encoder model)))
+          :decoder-p (not (zerop (%llama:model-has-decoder model)))
+          :recurrent-p (not (zerop (%llama:model-is-recurrent model)))
+          :hybrid-p (not (zerop (%llama:model-is-hybrid model)))
+          :diffusion-p (not (zerop (%llama:model-is-diffusion model))))))
+
+(defun model-cls-label (model index)
+  "Return the classification label string at INDEX, or NIL if unavailable."
+  (with-fp-traps-masked
+    (%llama:model-cls-label model index)))
+
+(defun context-info (ctx)
+  "Return a plist of CTX's configuration properties."
+  (with-fp-traps-masked
+    (list :n-ctx (%llama:n-ctx ctx)
+          :n-batch (%llama:n-batch ctx)
+          :n-ubatch (%llama:n-ubatch ctx)
+          :n-seq-max (%llama:n-seq-max ctx)
+          :n-threads (%llama:n-threads ctx)
+          :n-threads-batch (%llama:n-threads-batch ctx)
+          :pooling-type (%llama:pooling-type ctx))))
+
+(defun system-info ()
+  "Return a string describing the llama.cpp build and system capabilities."
+  (with-fp-traps-masked
+    (%llama:print-system-info)))
