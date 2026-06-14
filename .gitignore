@@ -8,3 +8,4 @@
 *~
 .#*
 llama.cpp/build/
+examples/my-chat.lisp
