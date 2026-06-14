@@ -1,5 +1,7 @@
 * cl-llama-cpp
 
+THIS IS A WORK IN PROGRESS! DO NOT USE!
+
 Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via CFFI.
 
 Provides a high-level, Lisp-idiomatic interface for loading GGUF models, tokenization, text generation, and embeddings, with automatic resource management.
