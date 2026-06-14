@@ -206,3 +206,54 @@ When NORMALIZE is true (default), L2-normalizes the result."
               (dotimes (i (length result))
                 (setf (aref result i) (/ (aref result i) norm))))))
         result))))
+
+(defun model-chat-template (model &optional name)
+  "Return the chat template string embedded in MODEL.
+If NAME is given, look up a specific named template."
+  (with-fp-traps-masked
+    (%llama:model-chat-template model (or name (cffi:null-pointer)))))
+
+(defun list-chat-templates ()
+  "Return a list of built-in chat template name strings."
+  (let ((n (%llama:chat-builtin-templates (cffi:null-pointer) 0)))
+    (when (> n 0)
+      (cffi:with-foreign-object (output :pointer n)
+        (%llama:chat-builtin-templates output n)
+        (loop for i below n
+              collect (cffi:foreign-string-to-lisp
+                       (cffi:mem-aref output :pointer i)))))))
+
+(defun format-chat (model messages &key template (add-assistant-prefix t))
+  "Format MESSAGES as a chat prompt string using a Jinja-style chat template.
+MESSAGES is a list of plists with :role and :content keys.
+Uses MODEL's embedded chat template unless TEMPLATE is provided."
+  (with-fp-traps-masked
+    (let* ((tmpl (or template (model-chat-template model)))
+           (tmpl-arg (or tmpl (cffi:null-pointer)))
+           (n-msg (length messages))
+           (add-ass (if add-assistant-prefix 1 0))
+           (msg-size (cffi:foreign-type-size '(:struct %llama:chat-message)))
+           (foreign-strings nil))
+      (cffi:with-foreign-object (chat '(:struct %llama:chat-message) n-msg)
+        (unwind-protect
+            (progn
+              (loop for msg in messages
+                    for i from 0
+                    for msg-ptr = (cffi:inc-pointer chat (* i msg-size))
+                    for role-ptr = (cffi:foreign-string-alloc (getf msg :role))
+                    for content-ptr = (cffi:foreign-string-alloc (getf msg :content))
+                    do (push role-ptr foreign-strings)
+                       (push content-ptr foreign-strings)
+                       (setf (cffi:mem-ref msg-ptr :pointer 0) role-ptr
+                             (cffi:mem-ref msg-ptr :pointer 8) content-ptr))
+              (let ((n-needed (%llama:chat-apply-template
+                               tmpl-arg chat n-msg add-ass
+                               (cffi:null-pointer) 0)))
+                (when (< n-needed 0)
+                  (error 'chat-template-error))
+                (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
+                  (%llama:chat-apply-template
+                   tmpl-arg chat n-msg add-ass
+                   buf (1+ n-needed)))))
+          (dolist (ptr foreign-strings)
+            (cffi:foreign-string-free ptr)))))))

@@ -23,4 +23,9 @@
    #:tokenize
    #:detokenize
    #:generate
-   #:embed))
+   #:embed
+   ;; Chat templates
+   #:chat-template-error
+   #:format-chat
+   #:model-chat-template
+   #:list-chat-templates))

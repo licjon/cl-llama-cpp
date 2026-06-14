@@ -59,6 +59,18 @@
                'cl-llama-cpp:decode-error)
         "decode-error is catchable")))
 
+(deftest chat-template-condition
+  (testing "chat-template-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:chat-template-error 'cl-llama-cpp:llama-error)
+        "chat-template-error is a llama-error")))
+
+(deftest list-chat-templates
+  (testing "list-chat-templates returns built-in template names"
+    (let ((templates (cl-llama-cpp:list-chat-templates)))
+      (ok (listp templates) "result is a list")
+      (ok (> (length templates) 0) "at least one built-in template")
+      (ok (every #'stringp templates) "all elements are strings"))))
+
 (deftest with-model-bad-path
   (testing "with-model signals model-load-error on nonexistent path"
     (cl-llama-cpp:with-fp-traps-masked

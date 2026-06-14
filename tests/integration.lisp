@@ -44,6 +44,28 @@
             (ok (> (length result) 0)
                 "generated non-empty text")))))))
 
+(deftest model-chat-template
+  (when-model-available
+    (testing "model-chat-template retrieves model template"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((tmpl (cl-llama-cpp:model-chat-template model)))
+          (ok (or (null tmpl) (stringp tmpl))
+              (format nil "template is nil or string: ~s"
+                      (if tmpl (subseq tmpl 0 (min 50 (length tmpl))) nil))))))))
+
+(deftest format-chat-basic
+  (when-model-available
+    (testing "format-chat produces a formatted string"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (cl-llama-cpp:format-chat
+                       model
+                       '((:role "user" :content "Hello")
+                         (:role "assistant" :content "Hi there!")
+                         (:role "user" :content "How are you?")))))
+          (ok (stringp result) "result is a string")
+          (ok (> (length result) 0) "result is non-empty")
+          (ok (search "Hello" result) "result contains message content"))))))
+
 (deftest embed-text
   (if *test-embed-model-path*
       (testing "embed produces a float vector"

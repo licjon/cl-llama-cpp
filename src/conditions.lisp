@@ -25,3 +25,9 @@
   ((code :initarg :code :reader decode-error-code))
   (:report (lambda (c s)
              (format s "llama_decode failed with code ~D" (decode-error-code c)))))
+
+(define-condition chat-template-error (llama-error)
+  ()
+  (:report (lambda (c s)
+             (declare (ignore c))
+             (format s "Chat template formatting failed"))))
