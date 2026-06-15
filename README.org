@@ -15,10 +15,10 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - LoRA adapters
 - KV cache / memory management (clear, copy, shift, divide, query)
 - Model & context introspection (description, metadata, properties, system info)
+- Grammar / constrained generation (GBNF grammars, lazy grammars, infill)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
-- Grammar / structured output
 - Batched / parallel decoding
 - KV cache state save/restore
 - Model quantization
@@ -101,7 +101,7 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure.
 
-- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy) &body body= --- Build a sampler chain, bind to =var=, free on exit.
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy grammar grammar-lazy grammar-trigger-words infill model) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar keywords require =:model=.
 
 *** Operations
 
@@ -109,7 +109,7 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string.
 
-- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog= or =:length=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early.
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog= or =:length=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=).
 
 - =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings 1=.
 
@@ -130,6 +130,16 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 - =apply-lora ctx adapter &key scale= --- Set the active LoRA adapter on =ctx=. =scale= (default 1.0) controls the adapter strength. Replaces any previously applied adapter. Signals =lora-apply-error= on failure.
 
 - =lora-metadata adapter= --- Return metadata from =adapter= as an alist of =(key . value)= string pairs.
+
+*** Grammar / Constrained Generation
+
+- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a GBNF =grammar= string and =root= rule (default ="root"=). Returns a sampler pointer; caller must free or add to a chain. Signals =grammar-error= if the grammar is empty or invalid.
+
+- =make-grammar-sampler-lazy model grammar &key root trigger-words= --- Create a lazy grammar sampler that stays inactive until a trigger word appears in the output. =trigger-words= is a list of strings (e.g. ='("{")=).
+
+- =make-infill-sampler model= --- Create an infill sampler for fill-in-the-middle generation.
+
+- =with-grammar-sampler (var model grammar &key root) &body body= --- Create a grammar sampler, bind to =var=, free on exit.
 
 *** KV Cache / Memory Management
 
@@ -176,6 +186,7 @@ All conditions inherit from =llama-error=.
 | =chat-template-error=   |      | Chat template rendering fails |
 | =lora-load-error=       | =path= | LoRA adapter file cannot be loaded |
 | =lora-apply-error=      | =code= | =set-adapters-lora= returns non-zero |
+| =grammar-error=         | =grammar= | Empty or invalid GBNF grammar string |
 
 *** Low-level Access
 
@@ -234,6 +245,26 @@ The full =llama.h= API is available in the =%llama= package as CFFI function wra
 #+end_src
 
 See =examples/lora.lisp= for a complete walkthrough including adapter download and GGUF conversion.
+
+*** Grammar-Constrained Generation
+
+#+begin_src lisp
+;; Force JSON output with a GBNF grammar
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (cl-llama-cpp:generate ctx "Output a JSON object describing a cat."
+                           :max-tokens 128 :temp 0.3
+                           :grammar "root    ::= \"{\" ws members ws \"}\"
+members ::= pair (\",\" ws pair)*
+pair    ::= string ws \":\" ws value
+value   ::= string | number
+string  ::= \"\\\"\" [a-zA-Z0-9_ ]* \"\\\"\"
+number  ::= [0-9]+
+ws      ::= [ ]*")))
+;; => "{\"name\": \"Whiskers\", \"age\": 3, \"color\": \"gray\"}"
+#+end_src
+
+See =examples/sampler-showcase.lisp= for demos of strict grammars, lazy grammars with trigger words, and error handling.
 
 *** KV Cache Management
 

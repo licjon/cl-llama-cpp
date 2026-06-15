@@ -43,3 +43,9 @@
   (:report (lambda (c s)
              (format s "Failed to apply LoRA adapter (code ~D)"
                      (lora-apply-error-code c)))))
+
+(define-condition grammar-error (llama-error)
+  ((grammar :initarg :grammar :reader grammar-error-grammar))
+  (:report (lambda (c s)
+             (format s "Failed to create grammar sampler for grammar of length ~D"
+                     (length (grammar-error-grammar c))))))
