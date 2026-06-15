@@ -39,6 +39,9 @@
     %llama:memory-seq-add %llama:memory-seq-div
     %llama:memory-seq-pos-min %llama:memory-seq-pos-max
     %llama:memory-can-shift
+    ;; Grammar / constrained generation
+    %llama:sampler-init-grammar %llama:sampler-init-grammar-lazy
+    %llama:sampler-init-grammar-lazy-patterns %llama:sampler-init-infill
     ;; Model / context introspection
     %llama:model-desc %llama:model-size %llama:model-n-params
     %llama:model-n-ctx-train %llama:model-n-layer
@@ -179,10 +182,28 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
               (cffi:foreign-string-to-lisp text-buf :count n-written))))))))
 
 
-(defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy)
-  "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free."
+(defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy
+                                  model grammar (grammar-root "root") grammar-lazy
+                                  grammar-trigger-words grammar-trigger-patterns
+                                  grammar-trigger-tokens infill)
+  "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free.
+When GRAMMAR is provided, a grammar sampler is added (requires MODEL).
+When INFILL is true, an infill sampler is added (requires MODEL)."
   (let ((chain (%llama:sampler-chain-init
                 (%llama:sampler-chain-default-params))))
+    (when grammar
+      (unless model (error ":GRAMMAR requires :MODEL"))
+      (%llama:sampler-chain-add
+       chain (if grammar-lazy
+                 (make-grammar-sampler-lazy model grammar
+                   :root grammar-root
+                   :trigger-words grammar-trigger-words
+                   :trigger-patterns grammar-trigger-patterns
+                   :trigger-tokens grammar-trigger-tokens)
+                 (make-grammar-sampler model grammar :root grammar-root))))
+    (when infill
+      (unless model (error ":INFILL requires :MODEL"))
+      (%llama:sampler-chain-add chain (make-infill-sampler model)))
     (cond
       (greedy
        (%llama:sampler-chain-add chain (%llama:sampler-init-greedy)))
@@ -199,9 +220,16 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
 
 (defmacro with-sampler-chain ((var &rest args
                                 &key (temp 0.8) top-k top-p min-p
-                                     (seed 42) greedy) &body body)
+                                     (seed 42) greedy
+                                     model grammar (grammar-root "root")
+                                     grammar-lazy grammar-trigger-words
+                                     grammar-trigger-patterns grammar-trigger-tokens
+                                     infill) &body body)
   "Create a sampler chain, bind to VAR, execute BODY, free the chain."
-  (declare (ignore temp top-k top-p min-p seed greedy))
+  (declare (ignore temp top-k top-p min-p seed greedy
+                   model grammar grammar-root grammar-lazy
+                   grammar-trigger-words grammar-trigger-patterns
+                   grammar-trigger-tokens infill))
   (let ((chain (gensym "CHAIN")))
     `(with-fp-traps-masked
        (let ((,chain (build-sampler-chain ,@args)))
@@ -213,7 +241,8 @@ PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048)
 (defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
                                   (parse-special t) prompt-tokens
-                                  token-callback)
+                                  token-callback
+                                  grammar (grammar-root "root"))
   "Generate text by continuing PROMPT. Returns two values: the generated string
 and a stop reason (:eog, :length, or :callback).
 Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
@@ -222,7 +251,9 @@ rather than treated as literal text — required for chat-template prompts.
 When PROMPT-TOKENS is provided, it is used directly (skipping tokenization of
 PROMPT). Use TOKENIZE-CHAT to build safe token sequences for chat prompts.
 When TOKEN-CALLBACK is provided, it is called with each decoded token string
-as it is produced. Return NIL from the callback to stop generation early."
+as it is produced. Return NIL from the callback to stop generation early.
+When GRAMMAR is provided (a GBNF grammar string), output is constrained to
+match the grammar. GRAMMAR-ROOT specifies the root rule (default \"root\")."
   (with-fp-traps-masked
     (let* ((model (%llama:get-model ctx))
            (vocab (%llama:model-get-vocab model))
@@ -242,12 +273,15 @@ as it is produced. Return NIL from the callback to stop generation early."
             (error 'decode-error :code rc))))
       ;; Generation loop
       (let ((sampler (build-sampler-chain :temp temp :top-k top-k :top-p top-p
-                                          :min-p min-p :seed seed))
+                                          :min-p min-p :seed seed
+                                          :model model :grammar grammar
+                                          :grammar-root grammar-root))
             (emitted-len 0))
         (unwind-protect
+            ;; sampler-sample already calls sampler-accept internally — do NOT
+            ;; call sampler-accept again or the grammar FSM double-advances.
             (loop for i from 0 below max-tokens
                   for new-token = (%llama:sampler-sample sampler ctx -1)
-                  do (%llama:sampler-accept sampler new-token)
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
@@ -520,6 +554,102 @@ Returns T if cells were removed, NIL if no matching data."
   "Return T if CTX's memory supports position shifting, NIL otherwise."
   (with-fp-traps-masked
     (not (zerop (%llama:memory-can-shift (%llama:get-memory ctx))))))
+
+;;; Grammar / constrained generation wrappers
+
+(defun make-grammar-sampler (model grammar &key (root "root"))
+  "Create a grammar sampler from a GBNF grammar string and root rule.
+Returns a sampler pointer. Caller must free with %llama:sampler-free,
+or add to a sampler chain (which frees it automatically)."
+  (check-type grammar string)
+  (when (zerop (length grammar))
+    (error 'grammar-error :grammar grammar))
+  (with-fp-traps-masked
+    (let* ((vocab (%llama:model-get-vocab model))
+           (sampler (%llama:sampler-init-grammar vocab grammar root)))
+      (when (cffi:null-pointer-p sampler)
+        (error 'grammar-error :grammar grammar))
+      sampler)))
+
+(defun make-grammar-sampler-lazy (model grammar &key (root "root")
+                                                      trigger-words
+                                                      trigger-patterns
+                                                      trigger-tokens)
+  "Create a lazy grammar sampler that activates only when triggered.
+When TRIGGER-PATTERNS is provided, uses pattern matching; otherwise uses
+TRIGGER-WORDS for exact word matching. TRIGGER-TOKENS are token IDs that
+also trigger grammar activation.
+Returns a sampler pointer. Caller must free with %llama:sampler-free."
+  (check-type grammar string)
+  (when (zerop (length grammar))
+    (error 'grammar-error :grammar grammar))
+  (when (and trigger-words trigger-patterns)
+    (error "Cannot specify both :TRIGGER-WORDS and :TRIGGER-PATTERNS"))
+  (with-fp-traps-masked
+    (let* ((vocab (%llama:model-get-vocab model))
+           (use-patterns-p (not (null trigger-patterns)))
+           (strings (if use-patterns-p trigger-patterns (or trigger-words nil)))
+           (n-strings (length strings))
+           (n-tokens (if trigger-tokens (length trigger-tokens) 0))
+           (foreign-strings nil))
+      (unwind-protect
+          (cffi:with-foreign-objects ((str-buf :pointer (max 1 n-strings))
+                                     (tok-buf '%llama:token (max 1 n-tokens)))
+            (loop for s in strings
+                  for i from 0
+                  for fstr = (cffi:foreign-string-alloc s)
+                  do (push fstr foreign-strings)
+                     (setf (cffi:mem-aref str-buf :pointer i) fstr))
+            (when trigger-tokens
+              (dotimes (i n-tokens)
+                (setf (cffi:mem-aref tok-buf '%llama:token i)
+                      (elt trigger-tokens i))))
+            (let* ((str-ptr (if (plusp n-strings) str-buf (cffi:null-pointer)))
+                   (tok-ptr (if (plusp n-tokens) tok-buf (cffi:null-pointer)))
+                   (sampler (if use-patterns-p
+                                (%llama:sampler-init-grammar-lazy-patterns
+                                 vocab grammar root
+                                 str-ptr n-strings tok-ptr n-tokens)
+                                (%llama:sampler-init-grammar-lazy
+                                 vocab grammar root
+                                 str-ptr n-strings tok-ptr n-tokens))))
+              (when (cffi:null-pointer-p sampler)
+                (error 'grammar-error :grammar grammar))
+              sampler))
+        (dolist (ptr foreign-strings)
+          (cffi:foreign-string-free ptr))))))
+
+(defun make-infill-sampler (model)
+  "Create a fill-in-the-middle sampler for FIM-capable models.
+Returns a sampler pointer. Caller must free with %llama:sampler-free."
+  (with-fp-traps-masked
+    (let* ((vocab (%llama:model-get-vocab model))
+           (sampler (%llama:sampler-init-infill vocab)))
+      (when (cffi:null-pointer-p sampler)
+        (error 'grammar-error :grammar "<infill>"))
+      sampler)))
+
+(defmacro with-grammar-sampler ((var model grammar &key (root "root") lazy
+                                                         trigger-words
+                                                         trigger-patterns
+                                                         trigger-tokens)
+                                &body body)
+  "Create a grammar sampler, bind to VAR, execute BODY, free the sampler.
+When LAZY is true, creates a lazy grammar sampler with optional trigger args."
+  (let ((sampler-ptr (gensym "GRAMMAR-SAMPLER")))
+    `(with-fp-traps-masked
+       (let ((,sampler-ptr (if ,lazy
+                               (make-grammar-sampler-lazy
+                                ,model ,grammar
+                                :root ,root
+                                :trigger-words ,trigger-words
+                                :trigger-patterns ,trigger-patterns
+                                :trigger-tokens ,trigger-tokens)
+                               (make-grammar-sampler ,model ,grammar :root ,root))))
+         (unwind-protect
+              (let ((,var ,sampler-ptr))
+                ,@body)
+           (%llama:sampler-free ,sampler-ptr))))))
 
 ;;; Model / context introspection wrappers
 
