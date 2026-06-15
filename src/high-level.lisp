@@ -278,9 +278,10 @@ match the grammar. GRAMMAR-ROOT specifies the root rule (default \"root\")."
                                           :grammar-root grammar-root))
             (emitted-len 0))
         (unwind-protect
+            ;; sampler-sample already calls sampler-accept internally — do NOT
+            ;; call sampler-accept again or the grammar FSM double-advances.
             (loop for i from 0 below max-tokens
                   for new-token = (%llama:sampler-sample sampler ctx -1)
-                  do (%llama:sampler-accept sampler new-token)
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
