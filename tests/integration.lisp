@@ -557,3 +557,200 @@ ws     ::= [ \\t\\n]*")
               nil)
           (error () t))
         "error was signaled for grammar without model")))
+
+;;; Extended sampler wrapper integration tests
+
+(deftest build-sampler-chain-with-typical-p
+  (when-model-available
+    (testing "build-sampler-chain with :typical-p creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain :typical-p 0.9)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with typical-p is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-xtc
+  (when-model-available
+    (testing "build-sampler-chain with :xtc-probability creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain
+                      :xtc-probability 0.5 :xtc-threshold 0.1)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with xtc is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-top-n-sigma
+  (when-model-available
+    (testing "build-sampler-chain with :top-n-sigma creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain :top-n-sigma 2.0)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with top-n-sigma is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-penalties
+  (when-model-available
+    (testing "build-sampler-chain with penalty keywords creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain
+                      :repeat-penalty 1.1
+                      :frequency-penalty 0.1
+                      :presence-penalty 0.1
+                      :penalty-last-n 128)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with penalties is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-dynamic-temp
+  (when-model-available
+    (testing "build-sampler-chain with :dynamic-temp-range uses temp-ext"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain
+                      :dynamic-temp-range 0.2
+                      :dynamic-temp-exponent 1.5)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with dynamic temp is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-adaptive-p
+  (when-model-available
+    (testing "build-sampler-chain with :adaptive-p creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain
+                      :adaptive-p 0.5 :adaptive-p-decay 0.01)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with adaptive-p is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-mirostat-v2
+  (when-model-available
+    (testing "build-sampler-chain with :mirostat-v2 creates a valid chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain
+                      :mirostat-v2 t :mirostat-tau 5.0 :mirostat-eta 0.1)))
+          (unwind-protect
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain with mirostat-v2 is non-null")
+            (%llama:sampler-free chain)))))))
+
+(deftest build-sampler-chain-with-mirostat-v1
+  (when-model-available
+    (testing "build-sampler-chain with :mirostat requires model and creates a valid chain"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-fp-traps-masked
+          (let ((chain (cl-llama-cpp::build-sampler-chain
+                        :model model :mirostat t
+                        :mirostat-tau 5.0 :mirostat-eta 0.1)))
+            (unwind-protect
+                 (ok (not (cffi:null-pointer-p chain))
+                     "chain with mirostat v1 is non-null")
+              (%llama:sampler-free chain))))))))
+
+(deftest build-sampler-chain-mirostat-mutual-exclusion
+  (testing "build-sampler-chain rejects both :mirostat and :mirostat-v2"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-fp-traps-masked
+                (cl-llama-cpp::build-sampler-chain :mirostat t :mirostat-v2 t))
+              nil)
+          (error () t))
+        "error was signaled for mirostat + mirostat-v2")))
+
+(deftest build-sampler-chain-mirostat-requires-model
+  (testing "build-sampler-chain with :mirostat but no :model signals error"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-fp-traps-masked
+                (cl-llama-cpp::build-sampler-chain :mirostat t))
+              nil)
+          (error () t))
+        "error was signaled for mirostat without model")))
+
+(deftest build-sampler-chain-dry-requires-model
+  (testing "build-sampler-chain with :dry-multiplier but no :model signals error"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-fp-traps-masked
+                (cl-llama-cpp::build-sampler-chain :dry-multiplier 0.8))
+              nil)
+          (error () t))
+        "error was signaled for dry without model")))
+
+(deftest build-sampler-chain-logit-bias-requires-model
+  (testing "build-sampler-chain with :logit-bias but no :model signals error"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-fp-traps-masked
+                (cl-llama-cpp::build-sampler-chain :logit-bias '((1 . -100.0))))
+              nil)
+          (error () t))
+        "error was signaled for logit-bias without model")))
+
+(deftest build-sampler-chain-with-logit-bias
+  (when-model-available
+    (testing "build-sampler-chain with :logit-bias creates a valid chain"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-fp-traps-masked
+          (let ((chain (cl-llama-cpp::build-sampler-chain
+                        :model model
+                        :logit-bias '((1 . -100.0) (2 . 50.0)))))
+            (unwind-protect
+                 (ok (not (cffi:null-pointer-p chain))
+                     "chain with logit-bias is non-null")
+              (%llama:sampler-free chain))))))))
+
+(deftest build-sampler-chain-with-dry
+  (when-model-available
+    (testing "build-sampler-chain with :dry-multiplier creates a valid chain"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-fp-traps-masked
+          (let ((chain (cl-llama-cpp::build-sampler-chain
+                        :model model
+                        :dry-multiplier 0.8
+                        :dry-base 1.75
+                        :dry-allowed-length 2
+                        :dry-penalty-last-n 256
+                        :dry-seq-breakers '("\n" ":" "\"" "*"))))
+            (unwind-protect
+                 (ok (not (cffi:null-pointer-p chain))
+                     "chain with DRY is non-null")
+              (%llama:sampler-free chain))))))))
+
+(deftest sampler-seed-returns-integer
+  (when-model-available
+    (testing "sampler-seed returns an integer from a sampler chain"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((chain (cl-llama-cpp::build-sampler-chain :seed 12345)))
+          (unwind-protect
+               (let ((seed (cl-llama-cpp:sampler-seed chain)))
+                 (ok (integerp seed)
+                     (format nil "sampler-seed returned integer: ~A" seed)))
+            (%llama:sampler-free chain)))))))
+
+(deftest generate-with-extended-samplers
+  (when-model-available
+    (testing "generate accepts extended sampler keywords"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:generate ctx "Hello"
+                                               :max-tokens 8
+                                               :temp 0.8
+                                               :typical-p 0.95
+                                               :repeat-penalty 1.1
+                                               :frequency-penalty 0.1)))
+            (ok (stringp result)
+                (format nil "generated with extended samplers: ~S" result))))))))
