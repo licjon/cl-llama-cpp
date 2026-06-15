@@ -4,7 +4,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 
 ** Status
 
-*Early-stage / work in progress.* The bindings cover the full =llama.h= C API (auto-generated via [[https://github.com/borodust/claw][CLAW]]), but the high-level Lisp interface only wraps a small subset so far:
+*Early-stage / work in progress.* The bindings cover the full llama.h C API (auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced llama.cpp features currently require using the raw %llama bindings directly. These are the current high-level wrappers:
 
 - Model loading and context creation
 - Tokenization / detokenization
@@ -13,9 +13,10 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Chat template formatting and safe multi-turn tokenization
 - Embeddings
 - LoRA adapters
-- KV cache / memory management (clear, copy, shift, divide, query)
+- KV cache management (clear, copy, shift, divide, query)
 - Model & context introspection (description, metadata, properties, system info)
-- Grammar / constrained generation (GBNF grammars, lazy grammars, infill)
+- Grammar / constrained generation (GBNF grammars, lazy grammars)
+- Infill generation
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
