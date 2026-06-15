@@ -62,4 +62,6 @@
    #:make-grammar-sampler
    #:make-grammar-sampler-lazy
    #:make-infill-sampler
-   #:with-grammar-sampler))
+   #:with-grammar-sampler
+   ;; Sampler utilities
+   #:sampler-seed))

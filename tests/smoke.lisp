@@ -263,3 +263,36 @@
                      %llama:sampler-init-infill))
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
+
+;;; Extended sampler wrapper tests
+
+(deftest sampler-seed-symbol-exported
+  (testing "sampler-seed is exported from cl-llama-cpp"
+    (multiple-value-bind (sym status)
+        (find-symbol "SAMPLER-SEED" :cl-llama-cpp)
+      (ok sym "SAMPLER-SEED is accessible")
+      (ok (eq status :external) "SAMPLER-SEED is exported"))))
+
+(deftest sampler-seed-fbound
+  (testing "sampler-seed is fbound"
+    (let ((sym (find-symbol "SAMPLER-SEED" :cl-llama-cpp)))
+      (ok (and sym (fboundp sym)) "SAMPLER-SEED is fbound"))))
+
+(deftest extended-sampler-binding-deps
+  (testing "extended sampler bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:sampler-init-typical
+                     %llama:sampler-init-xtc
+                     %llama:sampler-init-top-n-sigma
+                     %llama:sampler-init-mirostat
+                     %llama:sampler-init-mirostat-v2
+                     %llama:sampler-init-temp-ext
+                     %llama:sampler-init-penalties
+                     %llama:sampler-init-dry
+                     %llama:sampler-init-logit-bias
+                     %llama:sampler-init-adaptive-p
+                     %llama:sampler-get-seed
+                     %llama:logit-bias
+                     %llama:vocab-n-tokens))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
