@@ -15,6 +15,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Embeddings
 - LoRA adapters
 - KV cache management (clear, copy, shift, divide, query)
+- Session state save/load (file-based and in-memory persistence)
 - Model & context introspection (description, metadata, properties, system info)
 - Grammar / constrained generation (GBNF grammars, lazy grammars)
 - Infill generation
@@ -22,7 +23,6 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
 - Batched / parallel decoding
-- KV cache state save/restore
 - Model quantization
 - Speculative decoding
 - Multimodal inputs (vision, audio)
@@ -208,6 +208,28 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =kv-cache-can-shift-p ctx= --- Return =T= if =ctx='s memory supports position shifting, =NIL= otherwise.
 
+*** Session State Save/Load
+
+*File-based persistence* --- save and restore context state (including KV cache) to disk. Enables prompt caching across process restarts.
+
+- =save-session ctx path &optional tokens= --- Save full context state to a session file at =path=. =tokens= is an optional vector of token integers stored alongside the state. Signals =session-save-error= on failure.
+
+- =load-session ctx path= --- Load context state from a session file at =path=. Returns a vector of cached token integers that were stored with the state. Signals =session-load-error= on failure.
+
+- =save-session-seq ctx path seq-id &optional tokens= --- Save a single sequence's state to a file.
+
+- =load-session-seq ctx path seq-id= --- Load a single sequence's state from a file. Returns a vector of cached token integers.
+
+*Memory-based persistence* --- serialize context state to Lisp octet vectors. Enables in-process snapshotting, context forking, and custom storage backends.
+
+- =save-state ctx= --- Serialize full context state to an octet vector.
+
+- =load-state ctx state-bytes= --- Restore context state from an octet vector. Returns the number of bytes consumed.
+
+- =save-state-seq ctx seq-id &key flags= --- Serialize one sequence's state to an octet vector. When =:flags= is provided, uses the extended variant with =llama_state_seq_flags=.
+
+- =load-state-seq ctx seq-id state-bytes &key flags= --- Restore one sequence's state from an octet vector. Returns the number of bytes consumed.
+
 *** Model & Context Introspection
 
 - =model-description model= --- Return the model's description string (e.g. ="gemma3 1B Q4_K - Medium"=).
@@ -235,6 +257,8 @@ All conditions inherit from =llama-error=.
 | =chat-template-error=    |         | Chat template rendering fails        |
 | =lora-load-error=        | =path=    | LoRA adapter file cannot be loaded   |
 | =lora-apply-error=       | =code=    | =set-adapters-lora= returns non-zero   |
+| =session-save-error=     | =path=    | Session file save fails              |
+| =session-load-error=     | =path=    | Session file load fails              |
 | =grammar-error=          | =grammar= | Empty or invalid GBNF grammar string |
 
 *** Low-level Access
@@ -373,6 +397,34 @@ See =examples/sampler-comparison.lisp= for a side-by-side comparison of all exte
 #+end_src
 
 See =examples/kv-cache.lisp= for a full multi-user chat server simulation with assert-driven verification.
+
+*** Session State Save/Load
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; Process a prompt, then snapshot the state
+    (cl-llama-cpp:generate ctx "Once upon a time" :max-tokens 0)
+    (let ((snapshot (cl-llama-cpp:save-state ctx)))
+      ;; Fork: restore and generate multiple continuations
+      (cl-llama-cpp:load-state ctx snapshot)
+      (format t "Branch A: ~A~%"
+              (cl-llama-cpp:generate ctx nil :prompt-tokens tokens
+                                     :max-tokens 32 :temp 0.1 :seed 42))
+      (cl-llama-cpp:load-state ctx snapshot)
+      (format t "Branch B: ~A~%"
+              (cl-llama-cpp:generate ctx nil :prompt-tokens tokens
+                                     :max-tokens 32 :temp 1.2 :seed 42)))
+
+    ;; File-based persistence (survives process restarts)
+    (let ((tokens (cl-llama-cpp:tokenize model "Hello world")))
+      (cl-llama-cpp:save-session ctx "/tmp/session.bin" tokens)
+      (cl-llama-cpp:clear-kv-cache ctx)
+      (let ((loaded-tokens (cl-llama-cpp:load-session ctx "/tmp/session.bin")))
+        (format t "Restored ~D tokens~%" (length loaded-tokens))))))
+#+end_src
+
+See =examples/context-fork.lisp= for a full context-forking demo with file persistence and assert-driven verification.
 
 *** Model Introspection
 

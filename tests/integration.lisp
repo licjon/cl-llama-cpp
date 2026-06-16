@@ -558,6 +558,191 @@ ws     ::= [ \\t\\n]*")
           (error () t))
         "error was signaled for grammar without model")))
 
+;;; Session state save/load integration tests
+
+(deftest save-session-creates-file
+  (when-model-available
+    (testing "save-session writes a session file"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Hello world"))
+          (let ((path (namestring (merge-pathnames "test-session.bin"
+                                                    (uiop:temporary-directory)))))
+            (unwind-protect
+                (progn
+                  (ok (null (cl-llama-cpp:save-session ctx path))
+                      "save-session returned NIL (success)")
+                  (ok (probe-file path)
+                      "session file was created on disk"))
+              (when (probe-file path)
+                (delete-file path)))))))))
+
+(deftest save-session-with-tokens
+  (when-model-available
+    (testing "save-session accepts optional token vector"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Hello world"))
+                (path (namestring (merge-pathnames "test-session-tok.bin"
+                                                    (uiop:temporary-directory)))))
+            (decode-tokens ctx tokens)
+            (unwind-protect
+                (ok (null (cl-llama-cpp:save-session ctx path tokens))
+                    "save-session with tokens returned NIL (success)")
+              (when (probe-file path)
+                (delete-file path)))))))))
+
+(deftest load-session-roundtrip
+  (when-model-available
+    (testing "save-session + load-session roundtrip returns tokens"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Hello world"))
+                (path (namestring (merge-pathnames "test-session-rt.bin"
+                                                    (uiop:temporary-directory)))))
+            (decode-tokens ctx tokens)
+            (unwind-protect
+                (progn
+                  (cl-llama-cpp:save-session ctx path tokens)
+                  (cl-llama-cpp:clear-kv-cache ctx)
+                  (let ((loaded-tokens (cl-llama-cpp:load-session ctx path)))
+                    (ok (vectorp loaded-tokens)
+                        "load-session returned a vector")
+                    (ok (= (length tokens) (length loaded-tokens))
+                        (format nil "roundtrip token count matches: ~D = ~D"
+                                (length tokens) (length loaded-tokens)))
+                    (ok (equalp tokens loaded-tokens)
+                        "roundtrip token values match")))
+              (when (probe-file path)
+                (delete-file path)))))))))
+
+(deftest load-session-bad-path-signals-error
+  (when-model-available
+    (testing "load-session signals session-load-error on nonexistent path"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:load-session ctx "/nonexistent/session.bin") nil)
+                (cl-llama-cpp:session-load-error (c)
+                  (cl-llama-cpp:session-load-error-path c)))
+              "session-load-error was signaled for bad path"))))))
+
+(deftest save-state-returns-octet-vector
+  (when-model-available
+    (testing "save-state returns an octet vector"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "State test"))
+          (let ((state (cl-llama-cpp:save-state ctx)))
+            (ok (vectorp state) "save-state returned a vector")
+            (ok (> (length state) 0) "state vector is non-empty")
+            (ok (typep state '(simple-array (unsigned-byte 8) (*)))
+                "state vector element type is (unsigned-byte 8)")))))))
+
+(deftest save-load-state-roundtrip
+  (when-model-available
+    (testing "save-state + load-state roundtrip restores state"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "State roundtrip"))
+          (let ((state (cl-llama-cpp:save-state ctx)))
+            (cl-llama-cpp:clear-kv-cache ctx)
+            (let ((bytes-read (cl-llama-cpp:load-state ctx state)))
+              (ok (integerp bytes-read) "load-state returned an integer")
+              (ok (> bytes-read 0) "load-state consumed bytes"))))))))
+
+(deftest load-state-empty-vector
+  (when-model-available
+    (testing "load-state with empty vector returns 0"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:load-state
+                         ctx (make-array 0 :element-type '(unsigned-byte 8)))))
+            (ok (zerop result) "load-state returned 0 for empty input")))))))
+
+(deftest save-session-seq-creates-file
+  (when-model-available
+    (testing "save-session-seq writes a per-sequence session file"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Seq test"))
+          (let ((path (namestring (merge-pathnames "test-seq-session.bin"
+                                                    (uiop:temporary-directory)))))
+            (unwind-protect
+                (progn
+                  (ok (null (cl-llama-cpp:save-session-seq ctx path 0))
+                      "save-session-seq returned NIL (success)")
+                  (ok (probe-file path)
+                      "sequence session file was created on disk"))
+              (when (probe-file path)
+                (delete-file path)))))))))
+
+(deftest load-session-seq-roundtrip
+  (when-model-available
+    (testing "save-session-seq + load-session-seq roundtrip"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Seq roundtrip"))
+                (path (namestring (merge-pathnames "test-seq-rt.bin"
+                                                    (uiop:temporary-directory)))))
+            (decode-tokens ctx tokens)
+            (unwind-protect
+                (progn
+                  (cl-llama-cpp:save-session-seq ctx path 0 tokens)
+                  (cl-llama-cpp:clear-kv-cache ctx)
+                  (let ((loaded-tokens (cl-llama-cpp:load-session-seq ctx path 0)))
+                    (ok (vectorp loaded-tokens)
+                        "load-session-seq returned a vector")
+                    (ok (= (length tokens) (length loaded-tokens))
+                        (format nil "seq roundtrip token count matches: ~D = ~D"
+                                (length tokens) (length loaded-tokens)))))
+              (when (probe-file path)
+                (delete-file path)))))))))
+
+(deftest load-session-seq-bad-path-signals-error
+  (when-model-available
+    (testing "load-session-seq signals session-load-error on nonexistent path"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:load-session-seq ctx "/nonexistent/seq.bin" 0) nil)
+                (cl-llama-cpp:session-load-error (c)
+                  (cl-llama-cpp:session-load-error-path c)))
+              "session-load-error was signaled for bad seq path"))))))
+
+(deftest save-state-seq-returns-octet-vector
+  (when-model-available
+    (testing "save-state-seq returns an octet vector"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Seq state"))
+          (let ((state (cl-llama-cpp:save-state-seq ctx 0)))
+            (ok (vectorp state) "save-state-seq returned a vector")
+            (ok (> (length state) 0) "seq state vector is non-empty")
+            (ok (typep state '(simple-array (unsigned-byte 8) (*)))
+                "seq state vector element type is (unsigned-byte 8)")))))))
+
+(deftest save-load-state-seq-roundtrip
+  (when-model-available
+    (testing "save-state-seq + load-state-seq roundtrip"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Seq state roundtrip"))
+          (let ((state (cl-llama-cpp:save-state-seq ctx 0)))
+            (cl-llama-cpp:clear-kv-cache ctx)
+            (let ((bytes-read (cl-llama-cpp:load-state-seq ctx 0 state)))
+              (ok (integerp bytes-read) "load-state-seq returned an integer")
+              (ok (> bytes-read 0) "load-state-seq consumed bytes"))))))))
+
+(deftest load-state-seq-empty-vector
+  (when-model-available
+    (testing "load-state-seq with empty vector returns 0"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:load-state-seq
+                         ctx 0 (make-array 0 :element-type '(unsigned-byte 8)))))
+            (ok (zerop result) "load-state-seq returned 0 for empty input")))))))
+
 ;;; Extended sampler wrapper integration tests
 
 (deftest build-sampler-chain-with-typical-p
