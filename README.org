@@ -19,16 +19,22 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Model & context introspection (description, metadata, properties, system info)
 - Grammar / constrained generation (GBNF grammars, lazy grammars)
 - Infill generation
+- Batch API and parallel decoding
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
-- Batched / parallel decoding
 - Model quantization
 - Speculative decoding
 - Multimodal inputs (vision, audio)
 - Fine-grained sequence control
 
 The API is unstable and will change without notice.
+
+** Beyond llama.cpp
+
+These features provide functionality above what the llama.cpp C API offers directly:
+
+- =generate-parallel= --- Complete multiple prompts simultaneously in shared forward passes. A single function call handles batch allocation, multi-sequence decoding, per-sequence sampling, and result collection. The C API provides batch primitives but no built-in parallel generation loop.
 
 ** Requirements
 
@@ -114,6 +120,8 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string.
 
 - =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog=, =:length=, or =:callback=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). See the extended sampler keywords below for advanced sampling control.
+
+- =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
 - =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings 1=.
 
@@ -244,6 +252,26 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =system-info= --- Return a string describing the llama.cpp build and CPU capabilities.
 
+*** Batch API
+
+For most use cases, =generate-parallel= (above) is sufficient. These lower-level batch functions are available when you need direct control over token-level batching, such as custom decoding loops or embedding batches.
+
+- =with-batch (var n-tokens &key n-embd n-seq-max) &body body= --- Allocate a batch with capacity for =n-tokens=, bind to =var=, free on exit. =n-embd= non-zero allocates embedding slots instead of token slots. =n-seq-max= is the maximum sequence IDs per token (default 1). Signals =batch-init-error= if =n-tokens= <= 0 or allocation fails.
+
+- =batch-add-token batch token pos seq-ids &key logits= --- Add one token to =batch= at position =pos= for the given sequence(s). =seq-ids= is an integer or a list of integers. =logits= when true requests logit computation for this token. Signals =batch-overflow-error= if =batch= is at capacity.
+
+- =batch-add-embedding batch embedding pos seq-ids &key logits= --- Add one embedding vector to =batch=. =embedding= must match the =n-embd= used when creating the batch.
+
+- =batch-add-sequence batch tokens seq-id &key start-pos logits= --- Add a vector of =tokens= with sequential positions. =logits= controls which tokens get logit computation: =:last= (default), =:all=, or =nil=.
+
+- =batch-clear batch= --- Reset =batch='s active token count to 0. Existing slot contents remain allocated and will be overwritten by subsequent add calls.
+
+- =batch-token-count batch= --- Return the current number of tokens in =batch=.
+
+- =batch-decode ctx batch= --- Decode =batch= using context =ctx=. Signals =decode-error= on failure.
+
+- =batch-encode ctx batch= --- Encode =batch= using context =ctx=. Signals =decode-error= on failure.
+
 *** Conditions
 
 All conditions inherit from =llama-error=.
@@ -260,6 +288,8 @@ All conditions inherit from =llama-error=.
 | =session-save-error=     | =path=    | Session file save fails              |
 | =session-load-error=     | =path=    | Session file load fails              |
 | =grammar-error=          | =grammar= | Empty or invalid GBNF grammar string |
+| =batch-init-error=       | =n-tokens= | Batch allocation fails               |
+| =batch-overflow-error=   | =capacity=, =token-count= | Batch add exceeds capacity |
 
 *** Low-level Access
 
@@ -425,6 +455,26 @@ See =examples/kv-cache.lisp= for a full multi-user chat server simulation with a
 #+end_src
 
 See =examples/context-fork.lisp= for a full context-forking demo with file persistence and assert-driven verification.
+
+*** Parallel Generation
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  ;; :n-seq-max must be >= the number of prompts
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048 :n-seq-max 8)
+    (multiple-value-bind (texts stop-reasons)
+        (cl-llama-cpp:generate-parallel ctx
+          '("The capital of France is"
+            "The largest ocean on Earth is"
+            "The speed of light is approximately")
+          :max-tokens 64 :temp 0.7)
+      (loop for text in texts
+            for reason in stop-reasons
+            for i from 1
+            do (format t "[~D] ~A  (stopped: ~A)~%" i text reason)))))
+#+end_src
+
+See =examples/parallel.lisp= for a complete example.
 
 *** Model Introspection
 
