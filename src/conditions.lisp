@@ -44,6 +44,18 @@
              (format s "Failed to apply LoRA adapter (code ~D)"
                      (lora-apply-error-code c)))))
 
+(define-condition session-save-error (llama-error)
+  ((path :initarg :path :reader session-save-error-path))
+  (:report (lambda (c s)
+             (format s "Failed to save session state to ~S"
+                     (session-save-error-path c)))))
+
+(define-condition session-load-error (llama-error)
+  ((path :initarg :path :reader session-load-error-path))
+  (:report (lambda (c s)
+             (format s "Failed to load session state from ~S"
+                     (session-load-error-path c)))))
+
 (define-condition grammar-error (llama-error)
   ((grammar :initarg :grammar :reader grammar-error-grammar))
   (:report (lambda (c s)
