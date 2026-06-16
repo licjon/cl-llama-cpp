@@ -25,6 +25,7 @@
    #:tokenize
    #:detokenize
    #:generate
+   #:generate-parallel
    #:embed
    ;; Chat templates
    #:chat-template-error
@@ -77,4 +78,18 @@
    #:make-infill-sampler
    #:with-grammar-sampler
    ;; Sampler utilities
-   #:sampler-seed))
+   #:sampler-seed
+   ;; Batch API
+   #:batch-init-error
+   #:batch-init-error-n-tokens
+   #:batch-overflow-error
+   #:batch-overflow-error-capacity
+   #:batch-overflow-error-token-count
+   #:with-batch
+   #:batch-add-token
+   #:batch-add-embedding
+   #:batch-add-sequence
+   #:batch-clear
+   #:batch-token-count
+   #:batch-decode
+   #:batch-encode))
