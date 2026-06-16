@@ -1112,7 +1112,10 @@ and batch decoding (N-THREADS-BATCH). Both values are required together."
   nil)
 
 (defun set-embeddings (ctx embeddings-p)
-  "Enable or disable embedding mode on CTX."
+  "Set the embedding-output flag on CTX to EMBEDDINGS-P. Must match the mode
+the context was created with: enable only on contexts created with :embeddings
+non-nil, disable only on contexts created without it. Toggling on a mismatched
+context leaves internal C state inconsistent."
   (with-fp-traps-masked
     (%llama:set-embeddings ctx (%bool->c embeddings-p)))
   nil)
