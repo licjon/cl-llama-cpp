@@ -20,6 +20,8 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Grammar / constrained generation (GBNF grammars, lazy grammars)
 - Infill generation
 - Batch API and parallel decoding
+- Backend lifecycle management (=with-backend=, NUMA init, proper init/free)
+- Context runtime configuration (thread counts, mode flags, abort callbacks, threadpool management)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
@@ -38,7 +40,7 @@ These features provide functionality above what the llama.cpp C API offers direc
 
 ** Requirements
 
-- A Common Lisp implementation (*SBCL recommended* --- llama.cpp triggers floating-point exceptions that SBCL masks automatically via =sb-int:with-float-traps-masked=; other implementations may work if they do not trap FP exceptions by default, but are untested)
+- *SBCL* (required --- llama.cpp triggers floating-point exceptions that must be masked via =sb-int:with-float-traps-masked=; the library signals a compile-time error on other implementations)
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 
@@ -112,6 +114,26 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 - =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure.
 
 - =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
+
+*** Backend Lifecycle
+
+- =with-backend (&key numa) &body body= --- Initialize the llama backend, execute =body=, then call =backend-free= on exit (including non-local exit). Nesting is safe: only the outermost =with-backend= shuts down the backend. When =:numa= is a GGML NUMA strategy keyword (=:distribute=, =:isolate=, =:numactl=, =:mirror=), calls =llama-numa-init= before executing =body=. Prefer this over bare =ensure-backend= calls.
+
+- =set-n-threads ctx n-threads n-threads-batch= --- Set thread counts on =ctx= for single-token decoding (=n-threads=) and batch decoding (=n-threads-batch=). Both are required in one call. Takes effect on the next decode. Both arguments must be non-negative integers.
+
+- =set-warmup ctx warmup-p= --- Enable or disable the warmup pass on =ctx=. Disabling after the first decode avoids redundant computation.
+
+- =set-causal-attn ctx causal-attn-p= --- Enable or disable causal (autoregressive) attention on =ctx=. Disable for bidirectional attention models; takes effect on the next decode.
+
+- =set-embeddings ctx embeddings-p= --- Set the embedding-output flag on =ctx=. Must match the mode the context was created with: enable only on contexts created with =:embeddings= non-nil, disable only on contexts created without it.
+
+- =synchronize ctx= --- Block until all pending async compute on =ctx= is complete. Call before reading logits or embeddings after non-blocking work.
+
+- =set-abort-callback ctx callback &optional data= --- Register a foreign function as an abort callback on =ctx=. =callback= must be a foreign pointer obtained from =cffi:callback=, or =nil= to clear the callback. =data= is an optional opaque pointer passed through to each callback invocation. The callback is invoked from ggml worker threads, so it must only touch foreign memory --- CL dynamic bindings are not visible there. Returns non-zero from the callback to abort the current =llama-decode= call.
+
+- =attach-threadpool ctx threadpool &optional threadpool-batch= --- Attach an external =ggml-threadpool= to =ctx=. =threadpool-batch= optionally specifies a separate threadpool for batch operations; when omitted =threadpool= is used for both. The caller retains ownership; =detach-threadpool= does not free it.
+
+- =detach-threadpool ctx= --- Detach the threadpool from =ctx=. Does not free the threadpool.
 
 *** Operations
 
@@ -475,6 +497,46 @@ See =examples/context-fork.lisp= for a full context-forking demo with file persi
 #+end_src
 
 See =examples/parallel.lisp= for a complete example.
+
+*** Backend Lifecycle
+
+#+begin_src lisp
+;; with-backend replaces bare ensure-backend calls and guarantees
+;; backend-free on exit, even on non-local transfer of control.
+(cl-llama-cpp:with-backend ()
+  (cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 0)
+    (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+
+      ;; Adjust thread counts at runtime without recreating the context.
+      (cl-llama-cpp:set-n-threads ctx 4 4)
+
+      ;; Time-limited generation via abort callback.
+      ;; The callback must only touch foreign memory — CL dynamic
+      ;; bindings are not visible from ggml worker threads.
+      (cffi:defcallback my-abort :bool ((flag :pointer))
+        (not (zerop (cffi:mem-ref flag :uint8))))
+
+      (let ((abort-flag (cffi:foreign-alloc :uint8 :initial-element 0)))
+        (unwind-protect
+            (progn
+              (cl-llama-cpp:set-abort-callback
+               ctx (cffi:callback my-abort) abort-flag)
+              ;; Arm via a timer; cancel it if generate returns early.
+              (let ((timer (sb-ext:make-timer
+                             (lambda ()
+                               (setf (cffi:mem-ref abort-flag :uint8) 1)))))
+                (sb-ext:schedule-timer timer 2.0)
+                (unwind-protect
+                    (handler-case
+                        (cl-llama-cpp:generate ctx "Count from one:"
+                                               :max-tokens 512 :temp 0.1)
+                      (cl-llama-cpp:decode-error () "aborted"))
+                  (sb-ext:unschedule-timer timer)))
+              (cl-llama-cpp:set-abort-callback ctx nil))
+          (cffi:foreign-free abort-flag))))))
+#+end_src
+
+See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tuning, mode toggles, synchronize, and time-limited generation.
 
 *** Model Introspection
 
