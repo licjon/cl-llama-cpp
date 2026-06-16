@@ -49,6 +49,19 @@
    #:kv-cache-seq-div
    #:kv-cache-pos
    #:kv-cache-can-shift-p
+   ;; Session state save/load
+   #:session-save-error
+   #:session-save-error-path
+   #:session-load-error
+   #:session-load-error-path
+   #:save-session
+   #:load-session
+   #:save-session-seq
+   #:load-session-seq
+   #:save-state
+   #:load-state
+   #:save-state-seq
+   #:load-state-seq
    ;; Model / context introspection
    #:model-description
    #:model-metadata
