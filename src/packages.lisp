@@ -25,6 +25,7 @@
    #:tokenize
    #:detokenize
    #:generate
+   #:generate-parallel
    #:embed
    ;; Chat templates
    #:chat-template-error
