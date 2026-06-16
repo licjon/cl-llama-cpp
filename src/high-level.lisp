@@ -1224,3 +1224,128 @@ Signals DECODE-ERROR on failure. Returns NIL on success."
       (unless (zerop rc)
         (error 'decode-error :code rc))
       nil)))
+
+(defun generate-parallel (ctx prompts &key (max-tokens 256) (temp 0.8)
+                                           top-k top-p min-p (seed 42)
+                                           (parse-special t)
+                                           typical-p
+                                           xtc-probability xtc-threshold
+                                           top-n-sigma
+                                           mirostat mirostat-v2
+                                           (mirostat-tau 5.0) (mirostat-eta 0.1)
+                                           repeat-penalty frequency-penalty
+                                           presence-penalty (penalty-last-n 64)
+                                           dry-multiplier (dry-base 1.75)
+                                           (dry-allowed-length 2)
+                                           (dry-penalty-last-n -1)
+                                           dry-seq-breakers
+                                           logit-bias
+                                           dynamic-temp-range
+                                           (dynamic-temp-exponent 1.0)
+                                           adaptive-p (adaptive-p-decay 0.0))
+  "Generate text for multiple PROMPTS in parallel using the batch API.
+Each element of PROMPTS is a string or a pre-tokenized token vector.
+All sequences share the same sampler configuration; each gets a unique
+seed derived from SEED + sequence-index for independent sampling.
+The context must be created with :N-SEQ-MAX >= (length prompts).
+Returns two values: a list of generated strings and a list of stop
+reasons (:eog or :length) corresponding to each prompt."
+  (when (endp prompts)
+    (return-from generate-parallel (values nil nil)))
+  (with-fp-traps-masked
+    (let* ((model (%llama:get-model ctx))
+           (vocab (%llama:model-get-vocab model))
+           (n-seq (length prompts))
+           (token-vecs (mapcar (lambda (p)
+                                 (etypecase p
+                                   (string (tokenize model p
+                                                     :parse-special parse-special))
+                                   (vector p)))
+                               prompts))
+           (total-prompt-tokens (reduce #'+ token-vecs :key #'length))
+           (gen-tokens (loop repeat n-seq
+                             collect (make-array 0 :element-type 'fixnum
+                                                   :adjustable t
+                                                   :fill-pointer 0)))
+           (positions (mapcar #'length token-vecs))
+           (active (make-list n-seq :initial-element t))
+           (samplers '()))
+      (%llama:memory-clear (%llama:get-memory ctx) 1)
+      (unwind-protect
+           (progn
+             (dotimes (seq n-seq)
+               (push (build-sampler-chain
+                      :temp temp :top-k top-k :top-p top-p
+                      :min-p min-p :seed (+ seed seq)
+                      :model model
+                      :typical-p typical-p
+                      :xtc-probability xtc-probability
+                      :xtc-threshold xtc-threshold
+                      :top-n-sigma top-n-sigma
+                      :mirostat mirostat :mirostat-v2 mirostat-v2
+                      :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
+                      :repeat-penalty repeat-penalty
+                      :frequency-penalty frequency-penalty
+                      :presence-penalty presence-penalty
+                      :penalty-last-n penalty-last-n
+                      :dry-multiplier dry-multiplier :dry-base dry-base
+                      :dry-allowed-length dry-allowed-length
+                      :dry-penalty-last-n dry-penalty-last-n
+                      :dry-seq-breakers dry-seq-breakers
+                      :logit-bias logit-bias
+                      :dynamic-temp-range dynamic-temp-range
+                      :dynamic-temp-exponent dynamic-temp-exponent
+                      :adaptive-p adaptive-p
+                      :adaptive-p-decay adaptive-p-decay)
+                     samplers))
+             (setf samplers (nreverse samplers))
+             (with-batch (batch total-prompt-tokens)
+               (loop for tokens in token-vecs
+                     for seq from 0
+                     do (batch-add-sequence batch tokens seq :logits :last))
+               (batch-decode ctx batch)
+               (let ((logit-indices
+                       (let ((acc 0))
+                         (mapcar (lambda (tv)
+                                   (prog1 (+ acc (1- (length tv)))
+                                     (incf acc (length tv))))
+                                 token-vecs))))
+                 (dotimes (step max-tokens)
+                   (unless (some #'identity active) (return))
+                   (let ((new-tokens
+                           (loop for seq from 0 below n-seq
+                                 for smpl in samplers
+                                 for idx in logit-indices
+                                 collect (when (nth seq active)
+                                           (%llama:sampler-sample
+                                            smpl ctx idx)))))
+                     (loop for tok in new-tokens
+                           for seq from 0
+                           when (and tok (nth seq active))
+                           do (if (not (zerop (%llama:token-is-eog
+                                              vocab tok)))
+                                  (setf (nth seq active) nil)
+                                  (vector-push-extend
+                                   tok (nth seq gen-tokens))))
+                     (when (some #'identity active)
+                       (batch-clear batch)
+                       (let ((batch-idx 0))
+                         (loop for tok in new-tokens
+                               for seq from 0
+                               when (and tok (nth seq active))
+                               do (batch-add-token batch tok
+                                                   (nth seq positions)
+                                                   seq :logits t)
+                                  (setf (nth seq logit-indices) batch-idx)
+                                  (incf (nth seq positions))
+                                  (incf batch-idx)))
+                       (batch-decode ctx batch)))))))
+        (dolist (s samplers)
+          (%llama:sampler-free s)))
+      (values (loop for tokens in gen-tokens
+                    collect (if (zerop (length tokens))
+                                ""
+                                (detokenize model tokens
+                                            :remove-special t)))
+              (loop for is-active in active
+                    collect (if is-active :length :eog))))))
