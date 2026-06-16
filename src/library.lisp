@@ -16,4 +16,4 @@
   #+sbcl `(sb-int:with-float-traps-masked
               (:overflow :invalid :divide-by-zero :underflow :inexact)
             ,@body)
-  #-sbcl `(progn ,@body))
+  #-sbcl (error "cl-llama-cpp requires SBCL"))

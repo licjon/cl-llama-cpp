@@ -92,4 +92,16 @@
    #:batch-clear
    #:batch-token-count
    #:batch-decode
-   #:batch-encode))
+   #:batch-encode
+   ;; Backend lifecycle
+   #:with-backend
+   ;; Context runtime configuration
+   #:set-n-threads
+   #:set-warmup
+   #:set-causal-attn
+   #:set-embeddings
+   #:synchronize
+   #:set-abort-callback
+   ;; Threadpool management
+   #:attach-threadpool
+   #:detach-threadpool))
