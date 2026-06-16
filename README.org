@@ -4,18 +4,20 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 
 ** Status
 
-*Early-stage / work in progress.* The bindings cover the full =llama.h= C API (auto-generated via [[https://github.com/borodust/claw][CLAW]]), but the high-level Lisp interface only wraps a small subset so far:
+*Work in progress.* The bindings cover the full llama.h C API (auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced llama.cpp features currently require using the raw %llama bindings directly. These are the current high-level wrappers:
 
 - Model loading and context creation
 - Tokenization / detokenization
-- Text generation with sampling (temperature, top-k, top-p, min-p, greedy)
+- Text generation with sampling (temperature, top-k, top-p, min-p, greedy, and extended samplers)
+  - Extended samplers: typical-p, XTC, top-n-sigma, mirostat v1/v2, repetition/frequency/presence penalties, DRY anti-repetition, logit bias, dynamic temperature, adaptive-p
 - Token streaming via callback
 - Chat template formatting and safe multi-turn tokenization
 - Embeddings
 - LoRA adapters
-- KV cache / memory management (clear, copy, shift, divide, query)
+- KV cache management (clear, copy, shift, divide, query)
 - Model & context introspection (description, metadata, properties, system info)
-- Grammar / constrained generation (GBNF grammars, lazy grammars, infill)
+- Grammar / constrained generation (GBNF grammars, lazy grammars)
+- Infill generation
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
@@ -30,9 +32,11 @@ The API is unstable and will change without notice.
 
 ** Requirements
 
-- *SBCL* (required --- llama.cpp triggers floating-point exceptions that only SBCL's =sb-int:with-float-traps-masked= handles correctly)
+- A Common Lisp implementation (*SBCL recommended* --- llama.cpp triggers floating-point exceptions that SBCL masks automatically via =sb-int:with-float-traps-masked=; other implementations may work if they do not trap FP exceptions by default, but are untested)
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
+
+*Platform notes:* Tested on Linux. macOS should work (the library loader handles =.dylib=). Windows is untested and would require building llama.cpp as a DLL.
 
 ** Installation
 
@@ -101,7 +105,7 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure.
 
-- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy grammar grammar-lazy grammar-trigger-words infill model) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar keywords require =:model=.
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
 
 *** Operations
 
@@ -109,7 +113,7 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string.
 
-- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog= or =:length=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=).
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog=, =:length=, or =:callback=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). See the extended sampler keywords below for advanced sampling control.
 
 - =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings 1=.
 
@@ -130,6 +134,51 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 - =apply-lora ctx adapter &key scale= --- Set the active LoRA adapter on =ctx=. =scale= (default 1.0) controls the adapter strength. Replaces any previously applied adapter. Signals =lora-apply-error= on failure.
 
 - =lora-metadata adapter= --- Return metadata from =adapter= as an alist of =(key . value)= string pairs.
+
+*** Extended Sampler Keywords
+
+These keywords are accepted by =generate=, =with-sampler-chain=, and =build-sampler-chain=. They compose in a fixed order: logit bias → penalties → DRY → grammar → sampling strategy.
+
+*Token filtering:*
+
+| Keyword           | Default | Description                                                |
+|-------------------+---------+------------------------------------------------------------|
+| =:typical-p=        |         | Keep tokens whose information content is near the expected |
+| =:xtc-probability=  |         | Probability of excluding top choices (XTC)                 |
+| =:xtc-threshold=    |     0.5 | Minimum probability for a token to be excludable           |
+| =:top-n-sigma=      |         | Keep tokens within N standard deviations of the top logit  |
+| =:adaptive-p=       |         | Dynamic top-p target probability (experimental)            |
+| =:adaptive-p-decay= |     0.0 | Rate at which adaptive-p converges to target               |
+
+*Repetition control:*
+
+| Keyword             | Default | Description                                               |
+|---------------------+---------+-----------------------------------------------------------|
+| =:repeat-penalty=     |         | Penalise exact token repeats (1.0 = no penalty)           |
+| =:frequency-penalty=  |         | Penalty scaling with token frequency (0.0 = off)          |
+| =:presence-penalty=   |         | Flat penalty if token appeared at all (0.0 = off)         |
+| =:penalty-last-n=     |      64 | How many recent tokens to consider for penalties          |
+| =:dry-multiplier=     |         | DRY sequence-repetition penalty strength (requires model) |
+| =:dry-base=           |    1.75 | DRY exponential base                                      |
+| =:dry-allowed-length= |       2 | Minimum sequence length before DRY applies                |
+| =:dry-penalty-last-n= |      -1 | Token window for DRY (-1 = use context size)              |
+| =:dry-seq-breakers=   |         | List of strings that reset DRY matching (e.g. newlines)   |
+| =:logit-bias=         |         | Alist of =(token-id . bias)= pairs (requires model)         |
+
+*Sampling strategy:*
+
+| Keyword                | Default | Description                                               |
+|------------------------+---------+-----------------------------------------------------------|
+| =:mirostat=              |         | Enable Mirostat V1 (requires model; replaces normal path) |
+| =:mirostat-v2=           |         | Enable Mirostat V2 (replaces normal path)                 |
+| =:mirostat-tau=          |     5.0 | Target surprise level (lower = more focused)              |
+| =:mirostat-eta=          |     0.1 | Learning rate for mirostat adaptation                     |
+| =:dynamic-temp-range=    |         | +/- range for entropy-adaptive temperature                |
+| =:dynamic-temp-exponent= |     1.0 | Exponent shaping the dynamic temperature curve            |
+
+*** Sampler Utilities
+
+- =sampler-seed sampler= --- Return the current RNG seed from =sampler= as an integer. Useful for logging the seed that produced a given output.
 
 *** Grammar / Constrained Generation
 
@@ -177,16 +226,16 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 All conditions inherit from =llama-error=.
 
-| Condition              | Slot | When                          |
-|------------------------+------+-------------------------------|
-| =model-load-error=       | =path= | Model file cannot be loaded   |
-| =context-creation-error= |      | Context allocation fails      |
-| =tokenization-error=     | =text= | Tokenization fails            |
-| =decode-error=           | =code= | =llama_decode= returns non-zero |
-| =chat-template-error=   |      | Chat template rendering fails |
-| =lora-load-error=       | =path= | LoRA adapter file cannot be loaded |
-| =lora-apply-error=      | =code= | =set-adapters-lora= returns non-zero |
-| =grammar-error=         | =grammar= | Empty or invalid GBNF grammar string |
+| Condition              | Slot    | When                                 |
+|------------------------+---------+--------------------------------------|
+| =model-load-error=       | =path=    | Model file cannot be loaded          |
+| =context-creation-error= |         | Context allocation fails             |
+| =tokenization-error=     | =text=    | Tokenization fails                   |
+| =decode-error=           | =code=    | =llama_decode= returns non-zero        |
+| =chat-template-error=    |         | Chat template rendering fails        |
+| =lora-load-error=        | =path=    | LoRA adapter file cannot be loaded   |
+| =lora-apply-error=       | =code=    | =set-adapters-lora= returns non-zero   |
+| =grammar-error=          | =grammar= | Empty or invalid GBNF grammar string |
 
 *** Low-level Access
 
@@ -265,6 +314,39 @@ ws      ::= [ ]*")))
 #+end_src
 
 See =examples/sampler-showcase.lisp= for demos of strict grammars, lazy grammars with trigger words, and error handling.
+
+*** Extended Samplers
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; Mirostat V2 — adaptive perplexity-targeted sampling
+    (cl-llama-cpp:generate ctx "Invent a mythological creature:"
+                           :max-tokens 128
+                           :mirostat-v2 t :mirostat-tau 5.0)
+
+    ;; Repetition penalties + DRY for diverse, non-repetitive text
+    (cl-llama-cpp:generate ctx "Describe five flowers:"
+                           :max-tokens 256 :temp 0.7
+                           :repeat-penalty 1.2
+                           :frequency-penalty 0.4
+                           :presence-penalty 0.4
+                           :dry-multiplier 0.8
+                           :dry-seq-breakers '("\n" "." ":"))
+
+    ;; Ban specific tokens via logit bias
+    (let* ((bad-tokens (cl-llama-cpp:tokenize model "red" :add-special nil))
+           (biases (map 'list (lambda (tok) (cons tok -100.0)) bad-tokens)))
+      (cl-llama-cpp:generate ctx "Name three colors:"
+                             :max-tokens 32 :temp 0.3
+                             :logit-bias biases))
+
+    ;; Inspect sampler seed for reproducibility
+    (cl-llama-cpp:with-sampler-chain (chain :temp 0.8 :seed 42)
+      (format t "Seed: ~A~%" (cl-llama-cpp:sampler-seed chain)))))
+#+end_src
+
+See =examples/sampler-comparison.lisp= for a side-by-side comparison of all extended sampler strategies.
 
 *** KV Cache Management
 
