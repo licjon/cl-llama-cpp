@@ -61,3 +61,17 @@
   (:report (lambda (c s)
              (format s "Failed to create grammar sampler for grammar of length ~D"
                      (length (grammar-error-grammar c))))))
+
+(define-condition batch-init-error (llama-error)
+  ((n-tokens :initarg :n-tokens :reader batch-init-error-n-tokens))
+  (:report (lambda (c s)
+             (format s "Failed to allocate batch for ~D tokens"
+                     (batch-init-error-n-tokens c)))))
+
+(define-condition batch-overflow-error (llama-error)
+  ((capacity :initarg :capacity :reader batch-overflow-error-capacity)
+   (token-count :initarg :token-count :reader batch-overflow-error-token-count))
+  (:report (lambda (c s)
+             (format s "Batch overflow: ~D tokens already at capacity ~D"
+                     (batch-overflow-error-token-count c)
+                     (batch-overflow-error-capacity c)))))

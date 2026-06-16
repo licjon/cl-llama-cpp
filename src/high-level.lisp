@@ -12,8 +12,9 @@
     ;; Tokenization
     %llama:model-get-vocab %llama:tokenize %llama:detokenize %llama:token
     %llama:token-bos %llama:token-is-eog
-    ;; Generation
-    %llama:batch-get-one %llama:decode %llama:encode
+    ;; Generation / batch
+    %llama:batch-get-one %llama:batch-init %llama:batch-free
+    %llama:decode %llama:encode
     %llama:sampler-chain-default-params %llama:sampler-chain-init
     %llama:sampler-chain-add %llama:sampler-sample %llama:sampler-accept
     %llama:sampler-free
@@ -1065,3 +1066,161 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
   "Return the current RNG seed from SAMPLER as an integer."
   (with-fp-traps-masked
     (%llama:sampler-get-seed sampler)))
+
+;;; Batch API wrappers
+
+(defstruct (%batch-handle (:constructor %make-batch-handle)
+                           (:conc-name %batch-))
+  (capacity 0 :type fixnum)
+  (n-embd 0 :type fixnum)
+  (data nil :type list))
+
+(defun %batch-check-overflow (batch)
+  (let ((count (getf (%batch-data batch) '%llama:n-tokens))
+        (cap (%batch-capacity batch)))
+    (when (>= count cap)
+      (error 'batch-overflow-error :capacity cap :token-count count))))
+
+(defmacro with-batch ((var n-tokens &key (n-embd 0) (n-seq-max 1)) &body body)
+  "Allocate a batch with capacity for N-TOKENS, bind to VAR, execute BODY, free.
+N-EMBD when non-zero allocates embedding slots instead of token slots.
+N-SEQ-MAX is the maximum number of sequences per token (default 1).
+Signals BATCH-INIT-ERROR if N-TOKENS <= 0 or allocation fails."
+  (let ((cap (gensym "CAP"))
+        (embd-val (gensym "EMBD"))
+        (seq-max-val (gensym "SEQ-MAX"))
+        (plist (gensym "PLIST"))
+        (handle (gensym "HANDLE")))
+    `(with-fp-traps-masked
+       (let* ((,cap ,n-tokens)
+              (,embd-val ,n-embd)
+              (,seq-max-val ,n-seq-max))
+         (when (<= ,cap 0)
+           (error 'batch-init-error :n-tokens ,cap))
+         (let ((,plist (%llama:batch-init ,cap ,embd-val ,seq-max-val)))
+           (let ((key-ptr (if (zerop ,embd-val)
+                              (getf ,plist '%llama:token)
+                              (getf ,plist '%llama:embd))))
+             (when (cffi:null-pointer-p key-ptr)
+               (error 'batch-init-error :n-tokens ,cap)))
+           (let ((,handle (%make-batch-handle :capacity ,cap
+                                              :n-embd ,embd-val
+                                              :data ,plist)))
+             (unwind-protect
+                  (let ((,var ,handle))
+                    ,@body)
+               (%llama:batch-free (%batch-data ,handle)))))))))
+
+(defun batch-token-count (batch)
+  "Return the current number of tokens in BATCH."
+  (getf (%batch-data batch) '%llama:n-tokens))
+
+(defun batch-clear (batch)
+  "Reset BATCH's active token count to 0.
+Existing slot contents remain allocated and will be overwritten
+by subsequent batch-add-token or batch-add-embedding calls."
+  (setf (getf (%batch-data batch) '%llama:n-tokens) 0)
+  nil)
+
+(defun batch-add-token (batch token pos seq-ids &key logits)
+  "Add one token to BATCH at position POS for the given sequence(s).
+TOKEN is a token integer. POS is the position integer.
+SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
+LOGITS when true requests logit computation for this token.
+Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity."
+  (%batch-check-overflow batch)
+  (let* ((plist (%batch-data batch))
+         (idx (getf plist '%llama:n-tokens))
+         (tok-ptr (getf plist '%llama:token))
+         (pos-ptr (getf plist '%llama:pos))
+         (n-seq-ptr (getf plist '%llama:n-seq-id))
+         (seq-ptr (getf plist '%llama:seq-id))
+         (logits-ptr (getf plist '%llama:logits))
+         (seq-list (if (listp seq-ids) seq-ids (list seq-ids)))
+         (n-seq (length seq-list)))
+    (setf (cffi:mem-aref tok-ptr '%llama:token idx) token)
+    (setf (cffi:mem-aref pos-ptr '%llama:pos idx) pos)
+    (setf (cffi:mem-aref n-seq-ptr '%llama:int32-t idx) n-seq)
+    (let ((seq-arr (cffi:mem-aref seq-ptr :pointer idx)))
+      (loop for s in seq-list
+            for j from 0
+            do (setf (cffi:mem-aref seq-arr '%llama:seq-id j) s)))
+    (setf (cffi:mem-aref logits-ptr '%llama:int8-t idx) (if logits 1 0))
+    (setf (getf (%batch-data batch) '%llama:n-tokens) (1+ idx)))
+  nil)
+
+(defun batch-add-embedding (batch embedding pos seq-ids &key logits)
+  "Add one embedding vector to BATCH at position POS for the given sequence(s).
+EMBEDDING is a sequence of floats whose length must match the N-EMBD
+used when creating the batch.
+SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
+LOGITS when true requests logit computation for this slot.
+Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity."
+  (%batch-check-overflow batch)
+  (let* ((plist (%batch-data batch))
+         (n-embd (%batch-n-embd batch))
+         (idx (getf plist '%llama:n-tokens))
+         (embd-ptr (getf plist '%llama:embd))
+         (pos-ptr (getf plist '%llama:pos))
+         (n-seq-ptr (getf plist '%llama:n-seq-id))
+         (seq-ptr (getf plist '%llama:seq-id))
+         (logits-ptr (getf plist '%llama:logits))
+         (seq-list (if (listp seq-ids) seq-ids (list seq-ids)))
+         (n-seq (length seq-list))
+         (embd-offset (* idx n-embd)))
+    (when (/= (length embedding) n-embd)
+      (error "Embedding length ~D does not match batch n-embd ~D"
+             (length embedding) n-embd))
+    (etypecase embedding
+      (vector (dotimes (j n-embd)
+                (setf (cffi:mem-aref embd-ptr :float (+ embd-offset j))
+                      (coerce (aref embedding j) 'single-float))))
+      (list (loop for v in embedding
+                  for j from 0
+                  do (setf (cffi:mem-aref embd-ptr :float (+ embd-offset j))
+                           (coerce v 'single-float)))))
+    (setf (cffi:mem-aref pos-ptr '%llama:pos idx) pos)
+    (setf (cffi:mem-aref n-seq-ptr '%llama:int32-t idx) n-seq)
+    (let ((seq-arr (cffi:mem-aref seq-ptr :pointer idx)))
+      (loop for s in seq-list
+            for j from 0
+            do (setf (cffi:mem-aref seq-arr '%llama:seq-id j) s)))
+    (setf (cffi:mem-aref logits-ptr '%llama:int8-t idx) (if logits 1 0))
+    (setf (getf (%batch-data batch) '%llama:n-tokens) (1+ idx)))
+  nil)
+
+(defun batch-add-sequence (batch tokens seq-id &key (start-pos 0) (logits :last))
+  "Add a sequence of tokens to BATCH with sequential positions.
+TOKENS is a vector of token integers. SEQ-ID is the sequence identifier.
+START-POS is the first position (default 0).
+LOGITS controls which tokens get logit computation:
+  :LAST (default) — only the final token
+  :ALL — every token
+  NIL — no tokens
+Signals BATCH-OVERFLOW-ERROR if BATCH would exceed capacity."
+  (let ((n (length tokens)))
+    (dotimes (i n)
+      (batch-add-token batch (aref tokens i) (+ start-pos i) seq-id
+                       :logits (ecase logits
+                                 (:last (= i (1- n)))
+                                 (:all t)
+                                 ((nil) nil)))))
+  nil)
+
+(defun batch-decode (ctx batch)
+  "Decode BATCH using context CTX.
+Signals DECODE-ERROR on failure. Returns NIL on success."
+  (with-fp-traps-masked
+    (let ((rc (%llama:decode ctx (%batch-data batch))))
+      (unless (zerop rc)
+        (error 'decode-error :code rc))
+      nil)))
+
+(defun batch-encode (ctx batch)
+  "Encode BATCH using context CTX.
+Signals DECODE-ERROR on failure. Returns NIL on success."
+  (with-fp-traps-masked
+    (let ((rc (%llama:encode ctx (%batch-data batch))))
+      (unless (zerop rc)
+        (error 'decode-error :code rc))
+      nil)))

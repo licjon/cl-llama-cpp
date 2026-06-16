@@ -361,3 +361,77 @@
                      %llama:vocab-n-tokens))
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
+
+;;; Batch API wrapper tests
+
+(deftest batch-symbols-exported
+  (testing "batch API symbols are exported from cl-llama-cpp"
+    (dolist (sym '(batch-init-error
+                   batch-init-error-n-tokens
+                   batch-overflow-error
+                   batch-overflow-error-capacity
+                   batch-overflow-error-token-count
+                   with-batch
+                   batch-add-token
+                   batch-add-embedding
+                   batch-add-sequence
+                   batch-clear
+                   batch-token-count
+                   batch-decode
+                   batch-encode))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest batch-functions-fbound
+  (testing "batch API functions are fbound"
+    (dolist (sym-name '("BATCH-ADD-TOKEN"
+                        "BATCH-ADD-EMBEDDING"
+                        "BATCH-ADD-SEQUENCE"
+                        "BATCH-CLEAR"
+                        "BATCH-TOKEN-COUNT"
+                        "BATCH-DECODE"
+                        "BATCH-ENCODE"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest batch-condition-hierarchy
+  (testing "batch-init-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:batch-init-error 'cl-llama-cpp:llama-error)
+        "batch-init-error is a llama-error"))
+  (testing "batch-overflow-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:batch-overflow-error 'cl-llama-cpp:llama-error)
+        "batch-overflow-error is a llama-error")))
+
+(deftest batch-condition-signaling
+  (testing "batch-init-error can be signaled and caught with n-tokens slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:batch-init-error :n-tokens 0)
+                    (cl-llama-cpp:batch-init-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:batch-init-error)
+          "batch-init-error is catchable")
+      (ok (zerop (cl-llama-cpp:batch-init-error-n-tokens caught))
+          "batch-init-error-n-tokens accessor works")))
+  (testing "batch-overflow-error can be signaled and caught"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:batch-overflow-error
+                             :capacity 10 :token-count 10)
+                    (cl-llama-cpp:batch-overflow-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:batch-overflow-error)
+          "batch-overflow-error is catchable")
+      (ok (= 10 (cl-llama-cpp:batch-overflow-error-capacity caught))
+          "batch-overflow-error-capacity accessor works")
+      (ok (= 10 (cl-llama-cpp:batch-overflow-error-token-count caught))
+          "batch-overflow-error-token-count accessor works"))))
+
+(deftest batch-binding-deps
+  (testing "batch bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:batch-init %llama:batch-free))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
