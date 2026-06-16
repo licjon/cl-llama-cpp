@@ -212,6 +212,71 @@
       (ok (stringp info) "system-info returned a string")
       (ok (> (length info) 0) "system-info is non-empty"))))
 
+;;; Session state save/load wrapper tests
+
+(deftest session-symbols-exported
+  (testing "session state wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(save-session load-session
+                   save-session-seq load-session-seq
+                   save-state load-state
+                   save-state-seq load-state-seq))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest session-functions-fbound
+  (testing "session state wrapper symbols are fbound"
+    (dolist (sym-name '("SAVE-SESSION" "LOAD-SESSION"
+                        "SAVE-SESSION-SEQ" "LOAD-SESSION-SEQ"
+                        "SAVE-STATE" "LOAD-STATE"
+                        "SAVE-STATE-SEQ" "LOAD-STATE-SEQ"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest session-condition-hierarchy
+  (testing "session-save-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:session-save-error 'cl-llama-cpp:llama-error)
+        "session-save-error is a llama-error"))
+  (testing "session-load-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:session-load-error 'cl-llama-cpp:llama-error)
+        "session-load-error is a llama-error")))
+
+(deftest session-condition-signaling
+  (testing "session-save-error can be signaled and caught with path slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:session-save-error :path "/bad/session.bin")
+                    (cl-llama-cpp:session-save-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:session-save-error)
+          "session-save-error is catchable")
+      (ok (string= "/bad/session.bin" (cl-llama-cpp:session-save-error-path caught))
+          "session-save-error-path accessor works")))
+  (testing "session-load-error can be signaled and caught with path slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:session-load-error :path "/bad/session.bin")
+                    (cl-llama-cpp:session-load-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:session-load-error)
+          "session-load-error is catchable")
+      (ok (string= "/bad/session.bin" (cl-llama-cpp:session-load-error-path caught))
+          "session-load-error-path accessor works"))))
+
+(deftest session-binding-deps
+  (testing "session state bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:state-get-size %llama:state-get-data %llama:state-set-data
+                     %llama:state-save-file %llama:state-load-file
+                     %llama:state-seq-get-size %llama:state-seq-get-data
+                     %llama:state-seq-set-data
+                     %llama:state-seq-save-file %llama:state-seq-load-file
+                     %llama:state-seq-get-size-ext %llama:state-seq-get-data-ext
+                     %llama:state-seq-set-data-ext))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
 ;;; Grammar / constrained generation wrapper tests
 
 (deftest grammar-symbols-exported
