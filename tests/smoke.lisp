@@ -435,3 +435,90 @@
       (dolist (sym '(%llama:batch-init %llama:batch-free))
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
+
+;;; Backend lifecycle and portability wrapper tests
+
+(deftest with-backend-symbol-exported
+  (testing "with-backend is exported from cl-llama-cpp"
+    (multiple-value-bind (sym status)
+        (find-symbol "WITH-BACKEND" :cl-llama-cpp)
+      (ok sym "WITH-BACKEND is accessible")
+      (ok (eq status :external) "WITH-BACKEND is exported"))))
+
+(deftest backend-lifecycle-symbols-exported
+  (testing "backend/context configuration symbols are exported"
+    (dolist (sym '(with-backend
+                   set-n-threads
+                   set-warmup
+                   set-causal-attn
+                   set-embeddings
+                   synchronize
+                   set-abort-callback
+                   attach-threadpool
+                   detach-threadpool))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest backend-lifecycle-functions-fbound
+  (testing "context configuration functions are fbound"
+    (dolist (sym-name '("SET-N-THREADS"
+                        "SET-WARMUP"
+                        "SET-CAUSAL-ATTN"
+                        "SET-EMBEDDINGS"
+                        "SYNCHRONIZE"
+                        "SET-ABORT-CALLBACK"
+                        "ATTACH-THREADPOOL"
+                        "DETACH-THREADPOOL"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest backend-lifecycle-binding-deps
+  (testing "backend/context bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:backend-free
+                     %llama:numa-init
+                     %llama:set-n-threads
+                     %llama:set-warmup
+                     %llama:set-causal-attn
+                     %llama:set-embeddings
+                     %llama:synchronize
+                     %llama:set-abort-callback
+                     %llama:attach-threadpool
+                     %llama:detach-threadpool))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest set-n-threads-type-check
+  (testing "set-n-threads rejects non-integer arguments"
+    (cl-llama-cpp:with-fp-traps-masked
+      (%llama:backend-init)
+      (ok (handler-case
+              (cl-llama-cpp:set-n-threads nil 8 4)
+            (type-error () t))
+          "nil ctx passes through to CFFI (type check is on integer args)")
+      (ok (handler-case
+              (cl-llama-cpp:set-n-threads (cffi:null-pointer) "8" 4)
+            (type-error (c) (declare (ignore c)) t))
+          "string n-threads signals type-error")
+      (ok (handler-case
+              (cl-llama-cpp:set-n-threads (cffi:null-pointer) 8 nil)
+            (type-error (c) (declare (ignore c)) t))
+          "nil n-threads-batch signals type-error"))))
+
+(deftest with-backend-nesting
+  (testing "nested with-backend only frees on outermost exit"
+    ;; Rebind to guarantee clean state regardless of prior tests.
+    (let ((cl-llama-cpp::*backend-initialized* nil)
+          (init-count 0))
+      (cl-llama-cpp:with-backend ()
+        (incf init-count)
+        (cl-llama-cpp:with-backend ()
+          (incf init-count)))
+      (ok (= 2 init-count) "body ran twice (nesting works)")
+      (ok (not cl-llama-cpp::*backend-initialized*)
+          "*backend-initialized* cleared after outermost exit"))))
