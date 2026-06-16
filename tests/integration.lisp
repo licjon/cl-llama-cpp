@@ -939,3 +939,217 @@ ws     ::= [ \\t\\n]*")
                                                :frequency-penalty 0.1)))
             (ok (stringp result)
                 (format nil "generated with extended samplers: ~S" result))))))))
+
+;;; Batch API integration tests
+
+(deftest with-batch-creates-batch
+  (when-model-available
+    (testing "with-batch allocates a batch and binds a handle"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 32)
+          (ok batch "batch handle is non-nil")
+          (ok (zerop (cl-llama-cpp:batch-token-count batch))
+              "new batch has 0 tokens"))))))
+
+(deftest with-batch-invalid-capacity
+  (testing "with-batch signals batch-init-error for n-tokens <= 0"
+    (ok (handler-case
+            (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-batch (batch 0)
+                (declare (ignore batch))
+                nil))
+          (cl-llama-cpp:batch-init-error (c)
+            (zerop (cl-llama-cpp:batch-init-error-n-tokens c))))
+        "batch-init-error was signaled for n-tokens=0")))
+
+(deftest with-batch-negative-capacity
+  (testing "with-batch signals batch-init-error for negative n-tokens"
+    (ok (handler-case
+            (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-batch (batch -1)
+                (declare (ignore batch))
+                nil))
+          (cl-llama-cpp:batch-init-error () t))
+        "batch-init-error was signaled for n-tokens=-1")))
+
+(deftest batch-add-token-basic
+  (when-model-available
+    (testing "batch-add-token adds tokens and increments count"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 32)
+          (cl-llama-cpp:batch-add-token batch 100 0 0)
+          (ok (= 1 (cl-llama-cpp:batch-token-count batch))
+              "count is 1 after first add")
+          (cl-llama-cpp:batch-add-token batch 200 1 0)
+          (ok (= 2 (cl-llama-cpp:batch-token-count batch))
+              "count is 2 after second add"))))))
+
+(deftest batch-add-token-with-logits
+  (when-model-available
+    (testing "batch-add-token accepts :logits keyword"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 32)
+          (cl-llama-cpp:batch-add-token batch 100 0 0 :logits nil)
+          (cl-llama-cpp:batch-add-token batch 200 1 0 :logits t)
+          (ok (= 2 (cl-llama-cpp:batch-token-count batch))
+              "two tokens added with logits flags"))))))
+
+(deftest batch-add-token-multi-seq
+  (when-model-available
+    (testing "batch-add-token accepts a list of seq-ids"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 32 :n-seq-max 3)
+          (cl-llama-cpp:batch-add-token batch 100 0 '(0 1 2))
+          (ok (= 1 (cl-llama-cpp:batch-token-count batch))
+              "token added with 3 seq-ids"))))))
+
+(deftest batch-add-token-overflow
+  (when-model-available
+    (testing "batch-add-token signals batch-overflow-error at capacity"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 2)
+          (cl-llama-cpp:batch-add-token batch 100 0 0)
+          (cl-llama-cpp:batch-add-token batch 200 1 0)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:batch-add-token batch 300 2 0) nil)
+                (cl-llama-cpp:batch-overflow-error (c)
+                  (and (= 2 (cl-llama-cpp:batch-overflow-error-capacity c))
+                       (= 2 (cl-llama-cpp:batch-overflow-error-token-count c)))))
+              "batch-overflow-error signaled with correct slots"))))))
+
+(deftest batch-clear-resets-count
+  (when-model-available
+    (testing "batch-clear resets token count to 0"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 32)
+          (cl-llama-cpp:batch-add-token batch 100 0 0)
+          (cl-llama-cpp:batch-add-token batch 200 1 0)
+          (ok (= 2 (cl-llama-cpp:batch-token-count batch))
+              "count is 2 before clear")
+          (ok (null (cl-llama-cpp:batch-clear batch))
+              "batch-clear returns NIL")
+          (ok (zerop (cl-llama-cpp:batch-token-count batch))
+              "count is 0 after clear"))))))
+
+(deftest batch-clear-allows-reuse
+  (when-model-available
+    (testing "batch can be reused after clear"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 2)
+          (cl-llama-cpp:batch-add-token batch 100 0 0)
+          (cl-llama-cpp:batch-add-token batch 200 1 0)
+          (cl-llama-cpp:batch-clear batch)
+          (cl-llama-cpp:batch-add-token batch 300 0 0)
+          (ok (= 1 (cl-llama-cpp:batch-token-count batch))
+              "batch reused after clear"))))))
+
+(deftest batch-add-sequence-basic
+  (when-model-available
+    (testing "batch-add-sequence adds all tokens from a vector"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-batch (batch 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Hello world")))
+            (ok (null (cl-llama-cpp:batch-add-sequence batch tokens 0))
+                "batch-add-sequence returns NIL")
+            (ok (= (length tokens) (cl-llama-cpp:batch-token-count batch))
+                (format nil "token count matches: ~D" (length tokens)))))))))
+
+(deftest batch-add-sequence-with-start-pos
+  (when-model-available
+    (testing "batch-add-sequence respects :start-pos"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-batch (batch 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Test")))
+            (cl-llama-cpp:batch-add-sequence batch tokens 0 :start-pos 10)
+            (ok (= (length tokens) (cl-llama-cpp:batch-token-count batch))
+                "tokens added with start-pos offset")))))))
+
+(deftest batch-add-sequence-logits-modes
+  (when-model-available
+    (testing "batch-add-sequence accepts :logits :last, :all, and nil"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 64)
+          (cl-llama-cpp:batch-add-sequence batch #(1 2 3) 0 :logits :last)
+          (ok (= 3 (cl-llama-cpp:batch-token-count batch))
+              ":last mode added 3 tokens"))
+        (cl-llama-cpp:with-batch (batch 64)
+          (cl-llama-cpp:batch-add-sequence batch #(1 2 3) 0 :logits :all)
+          (ok (= 3 (cl-llama-cpp:batch-token-count batch))
+              ":all mode added 3 tokens"))
+        (cl-llama-cpp:with-batch (batch 64)
+          (cl-llama-cpp:batch-add-sequence batch #(1 2 3) 0 :logits nil)
+          (ok (= 3 (cl-llama-cpp:batch-token-count batch))
+              "nil mode added 3 tokens"))))))
+
+(deftest batch-add-sequence-overflow
+  (when-model-available
+    (testing "batch-add-sequence signals overflow when exceeding capacity"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (cl-llama-cpp:with-batch (batch 2)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:batch-add-sequence batch #(1 2 3) 0) nil)
+                (cl-llama-cpp:batch-overflow-error () t))
+              "batch-overflow-error signaled for oversized sequence"))))))
+
+(deftest batch-decode-happy-path
+  (when-model-available
+    (testing "batch-decode decodes a batch of tokens"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-batch (batch 512)
+            (let ((tokens (cl-llama-cpp:tokenize model "Hello world")))
+              (cl-llama-cpp:batch-add-sequence batch tokens 0 :logits :last)
+              (ok (null (cl-llama-cpp:batch-decode ctx batch))
+                  "batch-decode returned NIL (success)"))))))))
+
+(deftest batch-decode-clear-reuse
+  (when-model-available
+    (testing "batch can be cleared and reused for multiple decodes"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-batch (batch 512)
+            (let ((tokens (cl-llama-cpp:tokenize model "Hello")))
+              (cl-llama-cpp:batch-add-sequence batch tokens 0 :logits :last)
+              (cl-llama-cpp:batch-decode ctx batch)
+              (cl-llama-cpp:batch-clear batch)
+              (cl-llama-cpp:batch-add-token batch 42 (length tokens) 0 :logits t)
+              (ok (null (cl-llama-cpp:batch-decode ctx batch))
+                  "second decode after clear succeeded"))))))))
+
+(deftest batch-parallel-sequences
+  (when-model-available
+    (testing "batch supports multiple sequences for parallel decoding"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :n-seq-max 2)
+          (cl-llama-cpp:with-batch (batch 512 :n-seq-max 2)
+            (let ((tokens-0 (cl-llama-cpp:tokenize model "Hello"))
+                  (tokens-1 (cl-llama-cpp:tokenize model "World")))
+              (cl-llama-cpp:batch-add-sequence batch tokens-0 0 :logits :last)
+              (cl-llama-cpp:batch-add-sequence batch tokens-1 1
+                                               :start-pos 0 :logits :last)
+              (ok (= (+ (length tokens-0) (length tokens-1))
+                     (cl-llama-cpp:batch-token-count batch))
+                  "batch contains both sequences")
+              (ok (null (cl-llama-cpp:batch-decode ctx batch))
+                  "parallel decode succeeded"))))))))
+
+(deftest with-batch-cleanup-on-error
+  (when-model-available
+    (testing "with-batch frees batch on non-local exit"
+      (cl-llama-cpp:with-fp-traps-masked
+        (%llama:backend-init)
+        (let ((captured nil))
+          (ignore-errors
+            (cl-llama-cpp:with-batch (batch 32)
+              (setf captured batch)
+              (error "deliberate error")))
+          (ok captured "batch handle was captured before error"))))))
