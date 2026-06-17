@@ -14,7 +14,13 @@
                      (:includes ,(project-path "llama.cpp/include/")
                                 ,(project-path "llama.cpp/ggml/include/"))
                      (:spec-path ,(project-path "spec/"))
-                     (:include-definitions "^(llama|LLAMA)_\\w+")
+                     ;; Cover the full public surface of everything llama.h
+                     ;; pulls in: llama (llama_/LLAMA_), ggml core + backends
+                     ;; (ggml_/GGML_), and gguf (gguf_/GGUF_). Audited against the
+                     ;; c2ffi spec: matches 100% of project symbols and 0 system
+                     ;; (libc) symbols. :symbolicate-names below only strips the
+                     ;; llama_ prefix, so ggml_/gguf_ names keep their prefix.
+                     (:include-definitions "^(llama|LLAMA|ggml|GGML|gguf|GGUF)_\\w+")
                      (:language :c))
      :in-package :%llama
      :trim-enum-prefix t
@@ -118,6 +124,45 @@ Returns the corrected form."
         `(cffi:defcfun ,name-spec ,return-type ,docstring ,@real-params)
         `(cffi:defcfun ,name-spec ,return-type ,@real-params))))
 
+(defun dedupe-defcfun-params (form)
+  "Ensure a cffi:defcfun's parameter names are unique.
+Some C functions (e.g. ggml_gated_delta_net) use parameter names that differ
+only in case (k vs K). Common Lisp symbol names are case-insensitive by
+default, so both collapse to one symbol, producing an illegal lambda list
+\(\"the variable K occurs more than once\"). Rename later duplicates to
+NAME-2, NAME-3, ... preserving each parameter's type. Non-defcfun forms and
+non-list params (e.g. &rest) pass through untouched."
+  (if (and (listp form) (eq (car form) 'cffi:defcfun))
+      (let* ((name-spec (cadr form))
+             (return-type (caddr form))
+             (after-rettype (cdddr form))
+             (docstring (when (stringp (car after-rettype)) (car after-rettype)))
+             (params (if docstring (cdr after-rettype) after-rettype))
+             (seen (make-hash-table :test 'eq))
+             (new-params
+               (mapcar
+                (lambda (p)
+                  (if (and (consp p) (symbolp (car p)))
+                      (let ((name (car p)))
+                        (if (gethash name seen)
+                            (let ((fresh
+                                    (loop for n from 2
+                                          for cand = (intern
+                                                      (format nil "~A-~D"
+                                                              (symbol-name name) n)
+                                                      :%llama)
+                                          unless (gethash cand seen)
+                                          do (return cand))))
+                              (setf (gethash fresh seen) t)
+                              (cons fresh (cdr p)))
+                            (progn (setf (gethash name seen) t) p)))
+                      p))
+                params)))
+        (if docstring
+            `(cffi:defcfun ,name-spec ,return-type ,docstring ,@new-params)
+            `(cffi:defcfun ,name-spec ,return-type ,@new-params)))
+      form))
+
 (defun fixup-expansion (forms)
   "Post-process the list of CLAW-generated forms to eliminate %CLAW.ANONYMOUS
 references and numeric-ID union/struct names."
@@ -128,9 +173,13 @@ references and numeric-ID union/struct names."
     ;; Process forms
     (dolist (form forms)
       (cond
-        ;; defcfun with SRET pattern -> strip fabricated result parameter
+        ;; defcfun with SRET pattern -> strip fabricated result parameter,
+        ;; then dedupe any case-only-duplicate parameter names
         ((sret-result-p form)
-         (push (strip-sret-result form) result))
+         (push (dedupe-defcfun-params (strip-sret-result form)) result))
+        ;; plain defcfun -> dedupe case-only-duplicate parameter names
+        ((and (listp form) (eq (car form) 'cffi:defcfun))
+         (push (dedupe-defcfun-params form) result))
         ;; defcunion/defcstruct with numeric ID -> rename based on parent
         ((and (listp form)
               (member (car form) '(cffi:defcunion cffi:defcstruct))
