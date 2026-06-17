@@ -4,6 +4,114 @@
 (in-package #:%llama)
 
 
+(common-lisp:defparameter +ggml-api+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-backend-api+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-backend-meta-max-devices+ 16)
+
+
+(common-lisp:defparameter +ggml-default-graph-size+ 2048)
+
+
+(common-lisp:defparameter +ggml-default-n-threads+ 4)
+
+
+(common-lisp:defparameter +ggml-exit-aborted+ 1)
+
+
+(common-lisp:defparameter +ggml-exit-success+ 0)
+
+
+(common-lisp:defparameter +ggml-file-magic+ 1734831468)
+
+
+(common-lisp:defparameter +ggml-file-version+ 2)
+
+
+(common-lisp:defparameter +ggml-max-dims+ 4)
+
+
+(common-lisp:defparameter +ggml-max-name+ 64)
+
+
+(common-lisp:defparameter +ggml-max-n-threads+ 512)
+
+
+(common-lisp:defparameter +ggml-max-op-params+ 64)
+
+
+(common-lisp:defparameter +ggml-max-params+ 2048)
+
+
+(common-lisp:defparameter +ggml-max-src+ 10)
+
+
+(common-lisp:defparameter +ggml-mem-align+ 16)
+
+
+(common-lisp:defparameter +ggml-mrope-sections+ 4)
+
+
+(common-lisp:defparameter +ggml-noreturn+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-n-tasks-max+ -1)
+
+
+(common-lisp:defparameter +ggml-qnt-version+ 2)
+
+
+(common-lisp:defparameter +ggml-qnt-version-factor+ 1000)
+
+
+(common-lisp:defparameter +ggml-restrict+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-rope-type-imrope+ 40)
+
+
+(common-lisp:defparameter +ggml-rope-type-mrope+ 8)
+
+
+(common-lisp:defparameter +ggml-rope-type-neox+ 2)
+
+
+(common-lisp:defparameter +ggml-rope-type-normal+ 0)
+
+
+(common-lisp:defparameter +ggml-rope-type-vision+ 24)
+
+
+(common-lisp:defparameter +ggml-tensor-binary-op-locals+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-tensor-binary-op-locals01+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-tensor-size+ 336)
+
+
+(common-lisp:defparameter +ggml-tensor-ternary-op-locals+ common-lisp:nil)
+
+
+(common-lisp:defparameter +ggml-tensor-unary-op-locals+ common-lisp:nil)
+
+
+(common-lisp:defparameter +gguf-default-alignment+ 32)
+
+
+(common-lisp:defparameter +gguf-key-general-alignment+ common-lisp:nil)
+
+
+(common-lisp:defparameter +gguf-magic+ common-lisp:nil)
+
+
+(common-lisp:defparameter +gguf-version+ 3)
+
+
 (common-lisp:defparameter +default-seed+ 4294967295)
 
 
@@ -52,6 +160,12 @@
 (cffi:defctype %%uint8-t :unsigned-char)
 
 
+(cffi:defctype %%int16-t :short)
+
+
+(cffi:defctype %%uint16-t :unsigned-short)
+
+
 (cffi:defctype %%int32-t :int)
 
 
@@ -67,6 +181,9 @@
 (cffi:defctype int8-t :char)
 
 
+(cffi:defctype int16-t :short)
+
+
 (cffi:defctype int32-t :int)
 
 
@@ -74,6 +191,9 @@
 
 
 (cffi:defctype uint8-t :unsigned-char)
+
+
+(cffi:defctype uint16-t :unsigned-short)
 
 
 (cffi:defctype uint32-t :unsigned-int)
@@ -86,6 +206,112 @@
 
 
 (cffi:defctype file (:struct %io-file))
+
+
+(cffi:defctype ggml-abort-callback-t (:pointer :void))
+
+
+(cffi:defcfun ("ggml_set_abort_callback" ggml-set-abort-callback)
+    ggml-abort-callback-t
+  "ggml_abort_callback_t ggml_set_abort_callback(ggml_abort_callback_t callback);"
+  (callback ggml-abort-callback-t))
+
+
+(cffi:defcfun ("ggml_abort" ggml-abort)
+    :void
+  "void ggml_abort(char* file, int line, char* fmt, ...);"
+  (file :string)
+  (line :int)
+  (fmt :string)
+  common-lisp:&rest)
+
+
+(cffi:defcenum ggml-status
+  (:alloc-failed 4294967294)
+  (:failed 4294967295)
+  (:success 0)
+  (:aborted 1))
+
+
+(cffi:defcfun ("ggml_status_to_string" ggml-status-to-string)
+    :string
+  "char* ggml_status_to_string(enum ggml_status status);"
+  (status ggml-status))
+
+
+(cffi:defctype ggml-fp16-t :unsigned-short)
+
+
+(cffi:defcfun ("ggml_fp16_to_fp32" ggml-fp16-to-fp32)
+    :float
+  "float ggml_fp16_to_fp32(ggml_fp16_t arg0);"
+  (arg0 ggml-fp16-t))
+
+
+(cffi:defcfun ("ggml_fp32_to_fp16" ggml-fp32-to-fp16)
+    ggml-fp16-t
+  "ggml_fp16_t ggml_fp32_to_fp16(float arg0);"
+  (arg0 :float))
+
+
+(cffi:defcfun ("ggml_fp16_to_fp32_row" ggml-fp16-to-fp32-row)
+    :void
+  "void ggml_fp16_to_fp32_row(ggml_fp16_t* arg0, float* arg1, int64_t arg2);"
+  (arg0 (:pointer ggml-fp16-t))
+  (arg1 (:pointer :float))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_fp32_to_fp16_row" ggml-fp32-to-fp16-row)
+    :void
+  "void ggml_fp32_to_fp16_row(float* arg0, ggml_fp16_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer ggml-fp16-t))
+  (arg2 int64-t))
+
+
+(cffi:defcstruct (anonymous-value :size 2)
+  (bits uint16-t :offset 0))
+
+
+(cffi:defctype ggml-bf16-t (:struct anonymous-value))
+
+
+(cffi:defcfun ("ggml_fp32_to_bf16" ggml-fp32-to-bf16)
+    ggml-bf16-t
+  "ggml_bf16_t ggml_fp32_to_bf16(float arg0);"
+  (result ggml-bf16-t)
+  (arg0 :float))
+
+
+(cffi:defcfun ("ggml_bf16_to_fp32" ggml-bf16-to-fp32)
+    :float
+  "float ggml_bf16_to_fp32(ggml_bf16_t arg0);"
+  (arg0 ggml-bf16-t))
+
+
+(cffi:defcfun ("ggml_bf16_to_fp32_row" ggml-bf16-to-fp32-row)
+    :void
+  "void ggml_bf16_to_fp32_row(ggml_bf16_t* arg0, float* arg1, int64_t arg2);"
+  (arg0 (:pointer ggml-bf16-t))
+  (arg1 (:pointer :float))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_fp32_to_bf16_row_ref" ggml-fp32-to-bf16-row-ref)
+    :void
+  "void ggml_fp32_to_bf16_row_ref(float* arg0, ggml_bf16_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer ggml-bf16-t))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_fp32_to_bf16_row" ggml-fp32-to-bf16-row)
+    :void
+  "void ggml_fp32_to_bf16_row(float* arg0, ggml_bf16_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer ggml-bf16-t))
+  (arg2 int64-t))
 
 
 (cffi:defcenum ggml-type
@@ -126,13 +352,4051 @@
   (:count 42))
 
 
+(cffi:defcenum ggml-prec
+  (:default 0)
+  (:f32 10))
+
+
+(cffi:defcenum ggml-op-hint
+  (:none 0)
+  (:src0-is-hadamard 1))
+
+
+(cffi:defcenum ggml-ftype
+  (:unknown 4294967295)
+  (:all-f32 0)
+  (:mostly-f16 1)
+  (:mostly-q4-0 2)
+  (:mostly-q4-1 3)
+  (:mostly-q4-1-some-f16 4)
+  (:mostly-q8-0 7)
+  (:mostly-q5-0 8)
+  (:mostly-q5-1 9)
+  (:mostly-q2-k 10)
+  (:mostly-q3-k 11)
+  (:mostly-q4-k 12)
+  (:mostly-q5-k 13)
+  (:mostly-q6-k 14)
+  (:mostly-iq2-xxs 15)
+  (:mostly-iq2-xs 16)
+  (:mostly-iq3-xxs 17)
+  (:mostly-iq1-s 18)
+  (:mostly-iq4-nl 19)
+  (:mostly-iq3-s 20)
+  (:mostly-iq2-s 21)
+  (:mostly-iq4-xs 22)
+  (:mostly-iq1-m 23)
+  (:mostly-bf16 24)
+  (:mostly-mxfp4 25)
+  (:mostly-nvfp4 26)
+  (:mostly-q1-0 27))
+
+
+(cffi:defcenum ggml-op
+  (:none 0)
+  (:dup 1)
+  (:add 2)
+  (:add-id 3)
+  (:add1 4)
+  (:acc 5)
+  (:sub 6)
+  (:mul 7)
+  (:div 8)
+  (:sqr 9)
+  (:sqrt 10)
+  (:log 11)
+  (:sin 12)
+  (:cos 13)
+  (:sum 14)
+  (:sum-rows 15)
+  (:cumsum 16)
+  (:mean 17)
+  (:argmax 18)
+  (:count-equal 19)
+  (:repeat 20)
+  (:repeat-back 21)
+  (:concat 22)
+  (:silu-back 23)
+  (:norm 24)
+  (:rms-norm 25)
+  (:rms-norm-back 26)
+  (:group-norm 27)
+  (:l2-norm 28)
+  (:mul-mat 29)
+  (:mul-mat-id 30)
+  (:out-prod 31)
+  (:scale 32)
+  (:set 33)
+  (:cpy 34)
+  (:cont 35)
+  (:reshape 36)
+  (:view 37)
+  (:permute 38)
+  (:transpose 39)
+  (:get-rows 40)
+  (:get-rows-back 41)
+  (:set-rows 42)
+  (:diag 43)
+  (:diag-mask-inf 44)
+  (:diag-mask-zero 45)
+  (:soft-max 46)
+  (:soft-max-back 47)
+  (:rope 48)
+  (:rope-back 49)
+  (:clamp 50)
+  (:conv-transpose-1d 51)
+  (:im2col 52)
+  (:im2col-back 53)
+  (:im2col-3d 54)
+  (:col2im-1d 55)
+  (:conv-2d 56)
+  (:conv-3d 57)
+  (:conv-2d-dw 58)
+  (:conv-transpose-2d 59)
+  (:pool-1d 60)
+  (:pool-2d 61)
+  (:pool-2d-back 62)
+  (:upscale 63)
+  (:pad 64)
+  (:pad-reflect-1d 65)
+  (:roll 66)
+  (:arange 67)
+  (:timestep-embedding 68)
+  (:argsort 69)
+  (:top-k 70)
+  (:leaky-relu 71)
+  (:tri 72)
+  (:fill 73)
+  (:flash-attn-ext 74)
+  (:flash-attn-back 75)
+  (:ssm-conv 76)
+  (:ssm-scan 77)
+  (:win-part 78)
+  (:win-unpart 79)
+  (:get-rel-pos 80)
+  (:add-rel-pos 81)
+  (:rwkv-wkv6 82)
+  (:gated-linear-attn 83)
+  (:rwkv-wkv7 84)
+  (:solve-tri 85)
+  (:gated-delta-net 86)
+  (:unary 87)
+  (:map-custom1 88)
+  (:map-custom2 89)
+  (:map-custom3 90)
+  (:custom 91)
+  (:cross-entropy-loss 92)
+  (:cross-entropy-loss-back 93)
+  (:opt-step-adamw 94)
+  (:opt-step-sgd 95)
+  (:glu 96)
+  (:count 97))
+
+
+(cffi:defcenum ggml-unary-op
+  (:abs 0)
+  (:sgn 1)
+  (:neg 2)
+  (:step 3)
+  (:tanh 4)
+  (:elu 5)
+  (:relu 6)
+  (:sigmoid 7)
+  (:gelu 8)
+  (:gelu-quick 9)
+  (:silu 10)
+  (:hardswish 11)
+  (:hardsigmoid 12)
+  (:exp 13)
+  (:expm1 14)
+  (:softplus 15)
+  (:gelu-erf 16)
+  (:xielu 17)
+  (:floor 18)
+  (:ceil 19)
+  (:round 20)
+  (:trunc 21)
+  (:count 22))
+
+
+(cffi:defcenum ggml-glu-op
+  (:reglu 0)
+  (:geglu 1)
+  (:swiglu 2)
+  (:swiglu-oai 3)
+  (:geglu-erf 4)
+  (:geglu-quick 5)
+  (:count 6))
+
+
+(cffi:defcenum ggml-object-type
+  (:tensor 0)
+  (:graph 1)
+  (:work-buffer 2))
+
+
+(cffi:defcenum ggml-log-level
+  (:none 0)
+  (:debug 1)
+  (:info 2)
+  (:warn 3)
+  (:error 4)
+  (:cont 5))
+
+
+(cffi:defbitfield ggml-tensor-flag
+  (:input 1)
+  (:output 2)
+  (:param 4)
+  (:loss 8)
+  (:compute 16))
+
+
+(cffi:defcenum ggml-tri-type
+  (:upper-diag 0)
+  (:upper 1)
+  (:lower-diag 2)
+  (:lower 3))
+
+
+(cffi:defcstruct (ggml-init-params :size 24)
+  (mem-size size-t :offset 0)
+  (mem-buffer (:pointer :void) :offset 8)
+  (no-alloc :char :offset 16))
+
+
+(cffi:defcstruct ggml-backend-buffer)
+
+
 (cffi:defcstruct (ggml-tensor :size 336))
+
+
+(cffi:defcstruct (ggml-tensor :size 336)
+  (type ggml-type :offset 0)
+  (buffer (:pointer (:struct ggml-backend-buffer)) :offset 8)
+  (ne int64-t :count 4 :offset 16)
+  (nb size-t :count 4 :offset 48)
+  (op ggml-op :offset 80)
+  (op-params int32-t :count 16 :offset 84)
+  (flags int32-t :offset 148)
+  (src (:pointer (:struct ggml-tensor)) :count 10 :offset 152)
+  (view-src (:pointer (:struct ggml-tensor)) :offset 232)
+  (view-offs size-t :offset 240)
+  (data (:pointer :void) :offset 248)
+  (name :char :count 64 :offset 256)
+  (extra (:pointer :void) :offset 320)
+  (padding :char :count 8 :offset 328))
 
 
 (cffi:defctype ggml-abort-callback (:pointer :void))
 
 
+(cffi:defctype ggml-guid (:array uint8-t 16))
+
+
+(cffi:defctype ggml-guid-t (:pointer ggml-guid))
+
+
+(cffi:defcfun ("ggml_guid_matches" ggml-guid-matches)
+    :char
+  "char ggml_guid_matches(ggml_guid_t guid_a, ggml_guid_t guid_b);"
+  (guid-a ggml-guid-t)
+  (guid-b ggml-guid-t))
+
+
+(cffi:defcfun ("ggml_version" ggml-version)
+    :string
+  "char* ggml_version();")
+
+
+(cffi:defcfun ("ggml_commit" ggml-commit)
+    :string
+  "char* ggml_commit();")
+
+
+(cffi:defcfun ("ggml_time_init" ggml-time-init)
+    :void
+  "void ggml_time_init();")
+
+
+(cffi:defcfun ("ggml_time_ms" ggml-time-ms)
+    int64-t
+  "int64_t ggml_time_ms();")
+
+
+(cffi:defcfun ("ggml_time_us" ggml-time-us)
+    int64-t
+  "int64_t ggml_time_us();")
+
+
+(cffi:defcfun ("ggml_cycles" ggml-cycles)
+    int64-t
+  "int64_t ggml_cycles();")
+
+
+(cffi:defcfun ("ggml_cycles_per_ms" ggml-cycles-per-ms)
+    int64-t
+  "int64_t ggml_cycles_per_ms();")
+
+
+(cffi:defcfun ("ggml_fopen" ggml-fopen)
+    (:pointer file)
+  "FILE* ggml_fopen(char* fname, char* mode);"
+  (fname :string)
+  (mode :string))
+
+
+(cffi:defcstruct ggml-object)
+
+
+(cffi:defcfun ("ggml_print_object" ggml-print-object)
+    :void
+  "void ggml_print_object(struct ggml_object* obj);"
+  (obj (:pointer (:struct ggml-object))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_print_objects" ggml-print-objects)
+    :void
+  "void ggml_print_objects(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcfun ("ggml_nelements" ggml-nelements)
+    int64-t
+  "int64_t ggml_nelements(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_nrows" ggml-nrows)
+    int64-t
+  "int64_t ggml_nrows(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_nbytes" ggml-nbytes)
+    size-t
+  "size_t ggml_nbytes(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_nbytes_pad" ggml-nbytes-pad)
+    size-t
+  "size_t ggml_nbytes_pad(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_blck_size" ggml-blck-size)
+    int64-t
+  "int64_t ggml_blck_size(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_type_size" ggml-type-size)
+    size-t
+  "size_t ggml_type_size(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_row_size" ggml-row-size)
+    size-t
+  "size_t ggml_row_size(enum ggml_type type, int64_t ne);"
+  (type ggml-type)
+  (ne int64-t))
+
+
+(cffi:defcfun ("ggml_type_sizef" ggml-type-sizef)
+    :double
+  "double ggml_type_sizef(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_type_name" ggml-type-name)
+    :string
+  "char* ggml_type_name(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_op_name" ggml-op-name)
+    :string
+  "char* ggml_op_name(enum ggml_op op);"
+  (op ggml-op))
+
+
+(cffi:defcfun ("ggml_op_symbol" ggml-op-symbol)
+    :string
+  "char* ggml_op_symbol(enum ggml_op op);"
+  (op ggml-op))
+
+
+(cffi:defcfun ("ggml_unary_op_name" ggml-unary-op-name)
+    :string
+  "char* ggml_unary_op_name(enum ggml_unary_op op);"
+  (op ggml-unary-op))
+
+
+(cffi:defcfun ("ggml_glu_op_name" ggml-glu-op-name)
+    :string
+  "char* ggml_glu_op_name(enum ggml_glu_op op);"
+  (op ggml-glu-op))
+
+
+(cffi:defcfun ("ggml_op_desc" ggml-op-desc)
+    :string
+  "char* ggml_op_desc(struct ggml_tensor* t);"
+  (t (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_element_size" ggml-element-size)
+    size-t
+  "size_t ggml_element_size(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_quantized" ggml-is-quantized)
+    :char
+  "char ggml_is_quantized(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_ftype_to_ggml_type" ggml-ftype-to-ggml-type)
+    ggml-type
+  "enum ggml_type ggml_ftype_to_ggml_type(enum ggml_ftype ftype);"
+  (ftype ggml-ftype))
+
+
+(cffi:defcfun ("ggml_is_transposed" ggml-is-transposed)
+    :char
+  "char ggml_is_transposed(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_permuted" ggml-is-permuted)
+    :char
+  "char ggml_is_permuted(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_empty" ggml-is-empty)
+    :char
+  "char ggml_is_empty(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_view" ggml-is-view)
+    :char
+  "char ggml_is_view(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_scalar" ggml-is-scalar)
+    :char
+  "char ggml_is_scalar(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_vector" ggml-is-vector)
+    :char
+  "char ggml_is_vector(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_matrix" ggml-is-matrix)
+    :char
+  "char ggml_is_matrix(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_3d" ggml-is-3d)
+    :char
+  "char ggml_is_3d(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_n_dims" ggml-n-dims)
+    :int
+  "int ggml_n_dims(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous" ggml-is-contiguous)
+    :char
+  "char ggml_is_contiguous(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous_0" ggml-is-contiguous-0)
+    :char
+  "char ggml_is_contiguous_0(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous_1" ggml-is-contiguous-1)
+    :char
+  "char ggml_is_contiguous_1(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous_2" ggml-is-contiguous-2)
+    :char
+  "char ggml_is_contiguous_2(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguously_allocated" ggml-is-contiguously-allocated)
+    :char
+  "char ggml_is_contiguously_allocated(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous_channels" ggml-is-contiguous-channels)
+    :char
+  "char ggml_is_contiguous_channels(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_is_contiguous_rows" ggml-is-contiguous-rows)
+    :char
+  "char ggml_is_contiguous_rows(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_are_same_shape" ggml-are-same-shape)
+    :char
+  "char ggml_are_same_shape(struct ggml_tensor* t0, struct ggml_tensor* t1);"
+  (t0 (:pointer (:struct ggml-tensor)))
+  (t1 (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_are_same_stride" ggml-are-same-stride)
+    :char
+  "char ggml_are_same_stride(struct ggml_tensor* t0, struct ggml_tensor* t1);"
+  (t0 (:pointer (:struct ggml-tensor)))
+  (t1 (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_can_repeat" ggml-can-repeat)
+    :char
+  "char ggml_can_repeat(struct ggml_tensor* t0, struct ggml_tensor* t1);"
+  (t0 (:pointer (:struct ggml-tensor)))
+  (t1 (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_tensor_overhead" ggml-tensor-overhead)
+    size-t
+  "size_t ggml_tensor_overhead();")
+
+
+(cffi:defcfun ("ggml_validate_row_data" ggml-validate-row-data)
+    :char
+  "char ggml_validate_row_data(enum ggml_type type, void* data, size_t nbytes);"
+  (type ggml-type)
+  (data (:pointer :void))
+  (nbytes size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_init" ggml-init)
+    (:pointer (:struct ggml-context))
+  "struct ggml_context* ggml_init(struct ggml_init_params params);"
+  (params (:struct ggml-init-params)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reset" ggml-reset)
+    :void
+  "void ggml_reset(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_free" ggml-free)
+    :void
+  "void ggml_free(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_used_mem" ggml-used-mem)
+    size-t
+  "size_t ggml_used_mem(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_no_alloc" ggml-get-no-alloc)
+    :char
+  "char ggml_get_no_alloc(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_no_alloc" ggml-set-no-alloc)
+    :void
+  "void ggml_set_no_alloc(struct ggml_context* ctx, char no_alloc);"
+  (ctx (:pointer (:struct ggml-context)))
+  (no-alloc :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_mem_buffer" ggml-get-mem-buffer)
+    (:pointer :void)
+  "void* ggml_get_mem_buffer(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_mem_size" ggml-get-mem-size)
+    size-t
+  "size_t ggml_get_mem_size(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_max_tensor_size" ggml-get-max-tensor-size)
+    size-t
+  "size_t ggml_get_max_tensor_size(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_tensor" ggml-new-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_tensor(struct ggml_context* ctx, enum ggml_type type, int n_dims, int64_t* ne);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (n-dims :int)
+  (ne (:pointer int64-t)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_tensor_1d" ggml-new-tensor-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_tensor_1d(struct ggml_context* ctx, enum ggml_type type, int64_t ne0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (ne0 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_tensor_2d" ggml-new-tensor-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_tensor_2d(struct ggml_context* ctx, enum ggml_type type, int64_t ne0, int64_t ne1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (ne0 int64-t)
+  (ne1 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_tensor_3d" ggml-new-tensor-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_tensor_3d(struct ggml_context* ctx, enum ggml_type type, int64_t ne0, int64_t ne1, int64_t ne2);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_tensor_4d" ggml-new-tensor-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_tensor_4d(struct ggml_context* ctx, enum ggml_type type, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_buffer" ggml-new-buffer)
+    (:pointer :void)
+  "void* ggml_new_buffer(struct ggml_context* ctx, size_t nbytes);"
+  (ctx (:pointer (:struct ggml-context)))
+  (nbytes size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_dup_tensor" ggml-dup-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_dup_tensor(struct ggml_context* ctx, struct ggml_tensor* src);"
+  (ctx (:pointer (:struct ggml-context)))
+  (src (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_view_tensor" ggml-view-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_view_tensor(struct ggml_context* ctx, struct ggml_tensor* src);"
+  (ctx (:pointer (:struct ggml-context)))
+  (src (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_first_tensor" ggml-get-first-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_first_tensor(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_next_tensor" ggml-get-next-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_next_tensor(struct ggml_context* ctx, struct ggml_tensor* tensor);"
+  (ctx (:pointer (:struct ggml-context)))
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_tensor" ggml-get-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_tensor(struct ggml_context* ctx, char* name);"
+  (ctx (:pointer (:struct ggml-context)))
+  (name :string))
+
+
+(cffi:defcfun ("ggml_unravel_index" ggml-unravel-index)
+    :void
+  "void ggml_unravel_index(struct ggml_tensor* tensor, int64_t i, int64_t* i0, int64_t* i1, int64_t* i2, int64_t* i3);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i int64-t)
+  (i0 (:pointer int64-t))
+  (i1 (:pointer int64-t))
+  (i2 (:pointer int64-t))
+  (i3 (:pointer int64-t)))
+
+
+(cffi:defcfun ("ggml_get_unary_op" ggml-get-unary-op)
+    ggml-unary-op
+  "enum ggml_unary_op ggml_get_unary_op(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_get_glu_op" ggml-get-glu-op)
+    ggml-glu-op
+  "enum ggml_glu_op ggml_get_glu_op(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_get_data" ggml-get-data)
+    (:pointer :void)
+  "void* ggml_get_data(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_get_data_f32" ggml-get-data-f32)
+    (:pointer :float)
+  "float* ggml_get_data_f32(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_get_name" ggml-get-name)
+    :string
+  "char* ggml_get_name(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_set_name" ggml-set-name)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_name(struct ggml_tensor* tensor, char* name);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (name :string))
+
+
+(cffi:defcfun ("ggml_format_name" ggml-format-name)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_format_name(struct ggml_tensor* tensor, char* fmt, ...);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (fmt :string)
+  common-lisp:&rest)
+
+
+(cffi:defcfun ("ggml_set_input" ggml-set-input)
+    :void
+  "void ggml_set_input(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_set_output" ggml-set-output)
+    :void
+  "void ggml_set_output(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_set_param" ggml-set-param)
+    :void
+  "void ggml_set_param(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_set_loss" ggml-set-loss)
+    :void
+  "void ggml_set_loss(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_dup" ggml-dup)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_dup(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_dup_inplace" ggml-dup-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_dup_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add" ggml-add)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add_inplace" ggml-add-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add_cast" ggml-add-cast)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add_cast(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, enum ggml_type type);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (type ggml-type))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add_id" ggml-add-id)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add_id(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* ids);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (ids (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add1" ggml-add1)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add1(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add1_inplace" ggml-add1-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add1_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_acc" ggml-acc)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_acc(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t nb2, size_t nb3, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (nb2 size-t)
+  (nb3 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_acc_inplace" ggml-acc-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_acc_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t nb2, size_t nb3, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (nb2 size-t)
+  (nb3 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sub" ggml-sub)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sub(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sub_inplace" ggml-sub-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sub_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_mul" ggml-mul)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_mul(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_mul_inplace" ggml-mul-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_mul_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_div" ggml-div)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_div(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_div_inplace" ggml-div-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_div_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sqr" ggml-sqr)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sqr(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sqr_inplace" ggml-sqr-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sqr_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sqrt" ggml-sqrt)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sqrt(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sqrt_inplace" ggml-sqrt-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sqrt_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_log" ggml-log)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_log(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_log_inplace" ggml-log-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_log_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_expm1" ggml-expm1)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_expm1(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_expm1_inplace" ggml-expm1-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_expm1_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_softplus" ggml-softplus)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_softplus(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_softplus_inplace" ggml-softplus-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_softplus_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sin" ggml-sin)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sin(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sin_inplace" ggml-sin-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sin_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cos" ggml-cos)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cos(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cos_inplace" ggml-cos-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cos_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sum" ggml-sum)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sum(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sum_rows" ggml-sum-rows)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sum_rows(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cumsum" ggml-cumsum)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cumsum(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_mean" ggml-mean)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_mean(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_argmax" ggml-argmax)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_argmax(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_count_equal" ggml-count-equal)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_count_equal(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_repeat" ggml-repeat)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_repeat(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_repeat_4d" ggml-repeat-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_repeat_4d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_repeat_back" ggml-repeat-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_repeat_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_concat" ggml-concat)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_concat(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int dim);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (dim :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_abs" ggml-abs)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_abs(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_abs_inplace" ggml-abs-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_abs_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sgn" ggml-sgn)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sgn(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sgn_inplace" ggml-sgn-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sgn_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_neg" ggml-neg)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_neg(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_neg_inplace" ggml-neg-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_neg_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_step" ggml-step)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_step(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_step_inplace" ggml-step-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_step_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_tanh" ggml-tanh)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_tanh(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_tanh_inplace" ggml-tanh-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_tanh_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_elu" ggml-elu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_elu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_elu_inplace" ggml-elu-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_elu_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_relu" ggml-relu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_relu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_leaky_relu" ggml-leaky-relu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_leaky_relu(struct ggml_context* ctx, struct ggml_tensor* a, float negative_slope, char inplace);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (negative-slope :float)
+  (inplace :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_relu_inplace" ggml-relu-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_relu_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sigmoid" ggml-sigmoid)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sigmoid(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_sigmoid_inplace" ggml-sigmoid-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_sigmoid_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu" ggml-gelu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu_inplace" ggml-gelu-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu_erf" ggml-gelu-erf)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu_erf(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu_erf_inplace" ggml-gelu-erf-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu_erf_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu_quick" ggml-gelu-quick)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu_quick(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gelu_quick_inplace" ggml-gelu-quick-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gelu_quick_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_silu" ggml-silu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_silu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_silu_inplace" ggml-silu-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_silu_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_silu_back" ggml-silu-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_silu_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_hardswish" ggml-hardswish)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_hardswish(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_hardsigmoid" ggml-hardsigmoid)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_hardsigmoid(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_exp" ggml-exp)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_exp(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_exp_inplace" ggml-exp-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_exp_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_floor" ggml-floor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_floor(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_floor_inplace" ggml-floor-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_floor_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_ceil" ggml-ceil)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_ceil(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_ceil_inplace" ggml-ceil-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_ceil_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_round" ggml-round)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_round(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_round_inplace" ggml-round-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_round_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_trunc" ggml-trunc)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_trunc(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_trunc_inplace" ggml-trunc-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_trunc_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_xielu" ggml-xielu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_xielu(struct ggml_context* ctx, struct ggml_tensor* a, float alpha_n, float alpha_p, float beta, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (alpha-n :float)
+  (alpha-p :float)
+  (beta :float)
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_glu" ggml-glu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_glu(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_glu_op op, char swapped);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (op ggml-glu-op)
+  (swapped :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reglu" ggml-reglu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reglu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reglu_swapped" ggml-reglu-swapped)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reglu_swapped(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu" ggml-geglu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_swapped" ggml-geglu-swapped)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_swapped(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_swiglu" ggml-swiglu)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_swiglu(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_swiglu_swapped" ggml-swiglu-swapped)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_swiglu_swapped(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_erf" ggml-geglu-erf)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_erf(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_erf_swapped" ggml-geglu-erf-swapped)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_erf_swapped(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_quick" ggml-geglu-quick)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_quick(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_quick_swapped" ggml-geglu-quick-swapped)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_quick_swapped(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_glu_split" ggml-glu-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_glu_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, enum ggml_glu_op op);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (op ggml-glu-op))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reglu_split" ggml-reglu-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reglu_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_split" ggml-geglu-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_swiglu_split" ggml-swiglu-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_swiglu_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_erf_split" ggml-geglu-erf-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_erf_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_geglu_quick_split" ggml-geglu-quick-split)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_geglu_quick_split(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_swiglu_oai" ggml-swiglu-oai)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_swiglu_oai(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, float alpha, float limit);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (alpha :float)
+  (limit :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_norm" ggml-norm)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_norm(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_norm_inplace" ggml-norm-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_norm_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rms_norm" ggml-rms-norm)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rms_norm(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rms_norm_inplace" ggml-rms-norm-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rms_norm_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_group_norm" ggml-group-norm)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_group_norm(struct ggml_context* ctx, struct ggml_tensor* a, int n_groups, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-groups :int)
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_group_norm_inplace" ggml-group-norm-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_group_norm_inplace(struct ggml_context* ctx, struct ggml_tensor* a, int n_groups, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-groups :int)
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_l2_norm" ggml-l2-norm)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_l2_norm(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_l2_norm_inplace" ggml-l2-norm-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_l2_norm_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rms_norm_back" ggml-rms-norm-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rms_norm_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, float eps);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (eps :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_mul_mat" ggml-mul-mat)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_mul_mat(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_mul_mat_set_prec" ggml-mul-mat-set-prec)
+    :void
+  "void ggml_mul_mat_set_prec(struct ggml_tensor* a, enum ggml_prec prec);"
+  (a (:pointer (:struct ggml-tensor)))
+  (prec ggml-prec))
+
+
+(cffi:defcfun ("ggml_mul_mat_set_hint" ggml-mul-mat-set-hint)
+    :void
+  "void ggml_mul_mat_set_hint(struct ggml_tensor* a, enum ggml_op_hint hint);"
+  (a (:pointer (:struct ggml-tensor)))
+  (hint ggml-op-hint))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_mul_mat_id" ggml-mul-mat-id)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_mul_mat_id(struct ggml_context* ctx, struct ggml_tensor* as, struct ggml_tensor* b, struct ggml_tensor* ids);"
+  (ctx (:pointer (:struct ggml-context)))
+  (as (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (ids (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_out_prod" ggml-out-prod)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_out_prod(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_scale" ggml-scale)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_scale(struct ggml_context* ctx, struct ggml_tensor* a, float s);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (s :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_scale_inplace" ggml-scale-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_scale_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float s);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (s :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_scale_bias" ggml-scale-bias)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_scale_bias(struct ggml_context* ctx, struct ggml_tensor* a, float s, float b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (s :float)
+  (b :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_scale_bias_inplace" ggml-scale-bias-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_scale_bias_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float s, float b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (s :float)
+  (b :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set" ggml-set)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t nb2, size_t nb3, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (nb2 size-t)
+  (nb3 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_inplace" ggml-set-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t nb2, size_t nb3, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (nb2 size-t)
+  (nb3 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_1d" ggml-set-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_1d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_1d_inplace" ggml-set-1d-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_1d_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_2d" ggml-set-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_2d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_2d_inplace" ggml-set-2d-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_2d_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, size_t nb1, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (nb1 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cpy" ggml-cpy)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cpy(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cast" ggml-cast)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cast(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_type type);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (type ggml-type))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cont" ggml-cont)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cont(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cont_1d" ggml-cont-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cont_1d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cont_2d" ggml-cont-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cont_2d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cont_3d" ggml-cont-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cont_3d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cont_4d" ggml-cont-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cont_4d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reshape" ggml-reshape)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reshape(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reshape_1d" ggml-reshape-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reshape_1d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reshape_2d" ggml-reshape-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reshape_2d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reshape_3d" ggml-reshape-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reshape_3d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_reshape_4d" ggml-reshape-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_reshape_4d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_view_1d" ggml-view-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_view_1d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_view_2d" ggml-view-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_view_2d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, size_t nb1, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (nb1 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_view_3d" ggml-view-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_view_3d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, size_t nb1, size_t nb2, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (nb1 size-t)
+  (nb2 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_view_4d" ggml-view-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_view_4d(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3, size_t nb1, size_t nb2, size_t nb3, size_t offset);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t)
+  (nb1 size-t)
+  (nb2 size-t)
+  (nb3 size-t)
+  (offset size-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_permute" ggml-permute)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_permute(struct ggml_context* ctx, struct ggml_tensor* a, int axis0, int axis1, int axis2, int axis3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (axis0 :int)
+  (axis1 :int)
+  (axis2 :int)
+  (axis3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_transpose" ggml-transpose)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_transpose(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_rows" ggml-get-rows)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_rows(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_rows_back" ggml-get-rows-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_rows_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_set_rows" ggml-set-rows)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_rows(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_diag" ggml-diag)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_diag(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_diag_mask_inf" ggml-diag-mask-inf)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_diag_mask_inf(struct ggml_context* ctx, struct ggml_tensor* a, int n_past);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-past :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_diag_mask_inf_inplace" ggml-diag-mask-inf-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_diag_mask_inf_inplace(struct ggml_context* ctx, struct ggml_tensor* a, int n_past);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-past :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_diag_mask_zero" ggml-diag-mask-zero)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_diag_mask_zero(struct ggml_context* ctx, struct ggml_tensor* a, int n_past);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-past :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_diag_mask_zero_inplace" ggml-diag-mask-zero-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_diag_mask_zero_inplace(struct ggml_context* ctx, struct ggml_tensor* a, int n_past);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (n-past :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max" ggml-soft-max)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max_inplace" ggml-soft-max-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max_inplace(struct ggml_context* ctx, struct ggml_tensor* a);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max_ext" ggml-soft-max-ext)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max_ext(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* mask, float scale, float max_bias);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (mask (:pointer (:struct ggml-tensor)))
+  (scale :float)
+  (max-bias :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max_ext_inplace" ggml-soft-max-ext-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max_ext_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* mask, float scale, float max_bias);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (mask (:pointer (:struct ggml-tensor)))
+  (scale :float)
+  (max-bias :float))
+
+
+(cffi:defcfun ("ggml_soft_max_add_sinks" ggml-soft-max-add-sinks)
+    :void
+  "void ggml_soft_max_add_sinks(struct ggml_tensor* a, struct ggml_tensor* sinks);"
+  (a (:pointer (:struct ggml-tensor)))
+  (sinks (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max_ext_back" ggml-soft-max-ext-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max_ext_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, float scale, float max_bias);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (scale :float)
+  (max-bias :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_soft_max_ext_back_inplace" ggml-soft-max-ext-back-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_soft_max_ext_back_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, float scale, float max_bias);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (scale :float)
+  (max-bias :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope" ggml-rope)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int n_dims, int mode);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_inplace" ggml-rope-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int n_dims, int mode);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_ext" ggml-rope-ext)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_ext(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_multi" ggml-rope-multi)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_multi(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int[4] sections, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (sections (:array :int 4))
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_ext_inplace" ggml-rope-ext-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_ext_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_multi_inplace" ggml-rope-multi-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_multi_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int[4] sections, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (sections (:array :int 4))
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_custom" ggml-rope-custom)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_custom(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int n_dims, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_custom_inplace" ggml-rope-custom-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_custom_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int n_dims, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcfun ("ggml_rope_yarn_corr_dims" ggml-rope-yarn-corr-dims)
+    :void
+  "void ggml_rope_yarn_corr_dims(int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow, float[2] dims);"
+  (n-dims :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (beta-fast :float)
+  (beta-slow :float)
+  (dims (:array :float 2)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_ext_back" ggml-rope-ext-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_ext_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rope_multi_back" ggml-rope-multi-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rope_multi_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, int n_dims, int[4] sections, int mode, int n_ctx_orig, float freq_base, float freq_scale, float ext_factor, float attn_factor, float beta_fast, float beta_slow);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (n-dims :int)
+  (sections (:array :int 4))
+  (mode :int)
+  (n-ctx-orig :int)
+  (freq-base :float)
+  (freq-scale :float)
+  (ext-factor :float)
+  (attn-factor :float)
+  (beta-fast :float)
+  (beta-slow :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_clamp" ggml-clamp)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_clamp(struct ggml_context* ctx, struct ggml_tensor* a, float min, float max);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (min :float)
+  (max :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_im2col" ggml-im2col)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_im2col(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int s1, int p0, int p1, int d0, int d1, char is_2D, enum ggml_type dst_type);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (s1 :int)
+  (p0 :int)
+  (p1 :int)
+  (d0 :int)
+  (d1 :int)
+  (is-2d :char)
+  (dst-type ggml-type))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_im2col_back" ggml-im2col-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_im2col_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int64_t* ne, int s0, int s1, int p0, int p1, int d0, int d1, char is_2D);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (ne (:pointer int64-t))
+  (s0 :int)
+  (s1 :int)
+  (p0 :int)
+  (p1 :int)
+  (d0 :int)
+  (d1 :int)
+  (is-2d :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_col2im_1d" ggml-col2im-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_col2im_1d(struct ggml_context* ctx, struct ggml_tensor* a, int s0, int oc, int p0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (oc :int)
+  (p0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_1d" ggml-conv-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_1d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int p0, int d0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (p0 :int)
+  (d0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_1d_ph" ggml-conv-1d-ph)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_1d_ph(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s, int d);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s :int)
+  (d :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_1d_dw" ggml-conv-1d-dw)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_1d_dw(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int p0, int d0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (p0 :int)
+  (d0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_1d_dw_ph" ggml-conv-1d-dw-ph)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_1d_dw_ph(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int d0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (d0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_transpose_1d" ggml-conv-transpose-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_transpose_1d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int p0, int d0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (p0 :int)
+  (d0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d" ggml-conv-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int s1, int p0, int p1, int d0, int d1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (s1 :int)
+  (p0 :int)
+  (p1 :int)
+  (d0 :int)
+  (d1 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_im2col_3d" ggml-im2col-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_im2col_3d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int64_t IC, int s0, int s1, int s2, int p0, int p1, int p2, int d0, int d1, int d2, enum ggml_type dst_type);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (ic int64-t)
+  (s0 :int)
+  (s1 :int)
+  (s2 :int)
+  (p0 :int)
+  (p1 :int)
+  (p2 :int)
+  (d0 :int)
+  (d1 :int)
+  (d2 :int)
+  (dst-type ggml-type))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_3d" ggml-conv-3d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_3d(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int64_t IC, int s0, int s1, int s2, int p0, int p1, int p2, int d0, int d1, int d2);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (ic int64-t)
+  (s0 :int)
+  (s1 :int)
+  (s2 :int)
+  (p0 :int)
+  (p1 :int)
+  (p2 :int)
+  (d0 :int)
+  (d1 :int)
+  (d2 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d_sk_p0" ggml-conv-2d-sk-p0)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d_sk_p0(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d_s1_ph" ggml-conv-2d-s1-ph)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d_s1_ph(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d_dw" ggml-conv-2d-dw)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d_dw(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int s1, int p0, int p1, int d0, int d1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (s1 :int)
+  (p0 :int)
+  (p1 :int)
+  (d0 :int)
+  (d1 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d_dw_direct" ggml-conv-2d-dw-direct)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d_dw_direct(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int stride0, int stride1, int pad0, int pad1, int dilation0, int dilation1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (stride0 :int)
+  (stride1 :int)
+  (pad0 :int)
+  (pad1 :int)
+  (dilation0 :int)
+  (dilation1 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_transpose_2d_p0" ggml-conv-transpose-2d-p0)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_transpose_2d_p0(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int stride);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (stride :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_2d_direct" ggml-conv-2d-direct)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_2d_direct(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int s1, int p0, int p1, int d0, int d1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (s1 :int)
+  (p0 :int)
+  (p1 :int)
+  (d0 :int)
+  (d1 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_conv_3d_direct" ggml-conv-3d-direct)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_conv_3d_direct(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, int s0, int s1, int s2, int p0, int p1, int p2, int d0, int d1, int d2, int n_channels, int n_batch, int n_channels_out);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (s0 :int)
+  (s1 :int)
+  (s2 :int)
+  (p0 :int)
+  (p1 :int)
+  (p2 :int)
+  (d0 :int)
+  (d1 :int)
+  (d2 :int)
+  (n-channels :int)
+  (n-batch :int)
+  (n-channels-out :int))
+
+
+(cffi:defcenum ggml-op-pool
+  (:max 0)
+  (:avg 1)
+  (:count 2))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pool_1d" ggml-pool-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pool_1d(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_op_pool op, int k0, int s0, int p0);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (op ggml-op-pool)
+  (k0 :int)
+  (s0 :int)
+  (p0 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pool_2d" ggml-pool-2d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pool_2d(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_op_pool op, int k0, int k1, int s0, int s1, float p0, float p1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (op ggml-op-pool)
+  (k0 :int)
+  (k1 :int)
+  (s0 :int)
+  (s1 :int)
+  (p0 :float)
+  (p1 :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pool_2d_back" ggml-pool-2d-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pool_2d_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* af, enum ggml_op_pool op, int k0, int k1, int s0, int s1, float p0, float p1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (af (:pointer (:struct ggml-tensor)))
+  (op ggml-op-pool)
+  (k0 :int)
+  (k1 :int)
+  (s0 :int)
+  (s1 :int)
+  (p0 :float)
+  (p1 :float))
+
+
+(cffi:defcenum ggml-scale-mode
+  (:nearest 0)
+  (:bilinear 1)
+  (:bicubic 2)
+  (:count 3))
+
+
+(cffi:defbitfield ggml-scale-flag
+  (:align-corners 256)
+  (:antialias 512))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_upscale" ggml-upscale)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_upscale(struct ggml_context* ctx, struct ggml_tensor* a, int scale_factor, enum ggml_scale_mode mode);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (scale-factor :int)
+  (mode ggml-scale-mode))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_upscale_ext" ggml-upscale-ext)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_upscale_ext(struct ggml_context* ctx, struct ggml_tensor* a, int ne0, int ne1, int ne2, int ne3, enum ggml_scale_mode mode);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 :int)
+  (ne1 :int)
+  (ne2 :int)
+  (ne3 :int)
+  (mode ggml-scale-mode))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_interpolate" ggml-interpolate)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_interpolate(struct ggml_context* ctx, struct ggml_tensor* a, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3, uint32_t mode);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t)
+  (mode uint32-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pad" ggml-pad)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pad(struct ggml_context* ctx, struct ggml_tensor* a, int p0, int p1, int p2, int p3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (p0 :int)
+  (p1 :int)
+  (p2 :int)
+  (p3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pad_circular" ggml-pad-circular)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pad_circular(struct ggml_context* ctx, struct ggml_tensor* a, int p0, int p1, int p2, int p3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (p0 :int)
+  (p1 :int)
+  (p2 :int)
+  (p3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pad_ext" ggml-pad-ext)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pad_ext(struct ggml_context* ctx, struct ggml_tensor* a, int lp0, int rp0, int lp1, int rp1, int lp2, int rp2, int lp3, int rp3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (lp0 :int)
+  (rp0 :int)
+  (lp1 :int)
+  (rp1 :int)
+  (lp2 :int)
+  (rp2 :int)
+  (lp3 :int)
+  (rp3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pad_ext_circular" ggml-pad-ext-circular)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pad_ext_circular(struct ggml_context* ctx, struct ggml_tensor* a, int lp0, int rp0, int lp1, int rp1, int lp2, int rp2, int lp3, int rp3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (lp0 :int)
+  (rp0 :int)
+  (lp1 :int)
+  (rp1 :int)
+  (lp2 :int)
+  (rp2 :int)
+  (lp3 :int)
+  (rp3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_pad_reflect_1d" ggml-pad-reflect-1d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_pad_reflect_1d(struct ggml_context* ctx, struct ggml_tensor* a, int p0, int p1);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (p0 :int)
+  (p1 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_roll" ggml-roll)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_roll(struct ggml_context* ctx, struct ggml_tensor* a, int shift0, int shift1, int shift2, int shift3);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (shift0 :int)
+  (shift1 :int)
+  (shift2 :int)
+  (shift3 :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_tri" ggml-tri)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_tri(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_tri_type type);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (type ggml-tri-type))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_fill" ggml-fill)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_fill(struct ggml_context* ctx, struct ggml_tensor* a, float c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (c :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_fill_inplace" ggml-fill-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_fill_inplace(struct ggml_context* ctx, struct ggml_tensor* a, float c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (c :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_timestep_embedding" ggml-timestep-embedding)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_timestep_embedding(struct ggml_context* ctx, struct ggml_tensor* timesteps, int dim, int max_period);"
+  (ctx (:pointer (:struct ggml-context)))
+  (timesteps (:pointer (:struct ggml-tensor)))
+  (dim :int)
+  (max-period :int))
+
+
+(cffi:defcenum ggml-sort-order
+  (:asc 0)
+  (:desc 1))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_argsort" ggml-argsort)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_argsort(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_sort_order order);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (order ggml-sort-order))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_argsort_top_k" ggml-argsort-top-k)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_argsort_top_k(struct ggml_context* ctx, struct ggml_tensor* a, int k);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (k :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_top_k" ggml-top-k)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_top_k(struct ggml_context* ctx, struct ggml_tensor* a, int k);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (k :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_arange" ggml-arange)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_arange(struct ggml_context* ctx, float start, float stop, float step);"
+  (ctx (:pointer (:struct ggml-context)))
+  (start :float)
+  (stop :float)
+  (step :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_flash_attn_ext" ggml-flash-attn-ext)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_flash_attn_ext(struct ggml_context* ctx, struct ggml_tensor* q, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* mask, float scale, float max_bias, float logit_softcap);"
+  (ctx (:pointer (:struct ggml-context)))
+  (q (:pointer (:struct ggml-tensor)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (mask (:pointer (:struct ggml-tensor)))
+  (scale :float)
+  (max-bias :float)
+  (logit-softcap :float))
+
+
+(cffi:defcfun ("ggml_flash_attn_ext_set_prec" ggml-flash-attn-ext-set-prec)
+    :void
+  "void ggml_flash_attn_ext_set_prec(struct ggml_tensor* a, enum ggml_prec prec);"
+  (a (:pointer (:struct ggml-tensor)))
+  (prec ggml-prec))
+
+
+(cffi:defcfun ("ggml_flash_attn_ext_get_prec" ggml-flash-attn-ext-get-prec)
+    ggml-prec
+  "enum ggml_prec ggml_flash_attn_ext_get_prec(struct ggml_tensor* a);"
+  (a (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_flash_attn_ext_add_sinks" ggml-flash-attn-ext-add-sinks)
+    :void
+  "void ggml_flash_attn_ext_add_sinks(struct ggml_tensor* a, struct ggml_tensor* sinks);"
+  (a (:pointer (:struct ggml-tensor)))
+  (sinks (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_flash_attn_back" ggml-flash-attn-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_flash_attn_back(struct ggml_context* ctx, struct ggml_tensor* q, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* d, char masked);"
+  (ctx (:pointer (:struct ggml-context)))
+  (q (:pointer (:struct ggml-tensor)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (d (:pointer (:struct ggml-tensor)))
+  (masked :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_ssm_conv" ggml-ssm-conv)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_ssm_conv(struct ggml_context* ctx, struct ggml_tensor* sx, struct ggml_tensor* c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (sx (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_ssm_scan" ggml-ssm-scan)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_ssm_scan(struct ggml_context* ctx, struct ggml_tensor* s, struct ggml_tensor* x, struct ggml_tensor* dt, struct ggml_tensor* A, struct ggml_tensor* B, struct ggml_tensor* C, struct ggml_tensor* ids);"
+  (ctx (:pointer (:struct ggml-context)))
+  (s (:pointer (:struct ggml-tensor)))
+  (x (:pointer (:struct ggml-tensor)))
+  (dt (:pointer (:struct ggml-tensor)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (ids (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_win_part" ggml-win-part)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_win_part(struct ggml_context* ctx, struct ggml_tensor* a, int w);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (w :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_win_unpart" ggml-win-unpart)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_win_unpart(struct ggml_context* ctx, struct ggml_tensor* a, int w0, int h0, int w);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (w0 :int)
+  (h0 :int)
+  (w :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_unary" ggml-unary)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_unary(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_unary_op op);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (op ggml-unary-op))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_unary_inplace" ggml-unary-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_unary_inplace(struct ggml_context* ctx, struct ggml_tensor* a, enum ggml_unary_op op);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (op ggml-unary-op))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_get_rel_pos" ggml-get-rel-pos)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_get_rel_pos(struct ggml_context* ctx, struct ggml_tensor* a, int qh, int kh);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (qh :int)
+  (kh :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add_rel_pos" ggml-add-rel-pos)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add_rel_pos(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* pw, struct ggml_tensor* ph);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (pw (:pointer (:struct ggml-tensor)))
+  (ph (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_add_rel_pos_inplace" ggml-add-rel-pos-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_add_rel_pos_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* pw, struct ggml_tensor* ph);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (pw (:pointer (:struct ggml-tensor)))
+  (ph (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rwkv_wkv6" ggml-rwkv-wkv6)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rwkv_wkv6(struct ggml_context* ctx, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* r, struct ggml_tensor* tf, struct ggml_tensor* td, struct ggml_tensor* state);"
+  (ctx (:pointer (:struct ggml-context)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (r (:pointer (:struct ggml-tensor)))
+  (tf (:pointer (:struct ggml-tensor)))
+  (td (:pointer (:struct ggml-tensor)))
+  (state (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gated_linear_attn" ggml-gated-linear-attn)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gated_linear_attn(struct ggml_context* ctx, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* q, struct ggml_tensor* g, struct ggml_tensor* state, float scale);"
+  (ctx (:pointer (:struct ggml-context)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (q (:pointer (:struct ggml-tensor)))
+  (g (:pointer (:struct ggml-tensor)))
+  (state (:pointer (:struct ggml-tensor)))
+  (scale :float))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_rwkv_wkv7" ggml-rwkv-wkv7)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_rwkv_wkv7(struct ggml_context* ctx, struct ggml_tensor* r, struct ggml_tensor* w, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* state);"
+  (ctx (:pointer (:struct ggml-context)))
+  (r (:pointer (:struct ggml-tensor)))
+  (w (:pointer (:struct ggml-tensor)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (state (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_solve_tri" ggml-solve-tri)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_solve_tri(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, char left, char lower, char uni);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (left :char)
+  (lower :char)
+  (uni :char))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_gated_delta_net" ggml-gated-delta-net)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_gated_delta_net(struct ggml_context* ctx, struct ggml_tensor* q, struct ggml_tensor* k, struct ggml_tensor* v, struct ggml_tensor* g, struct ggml_tensor* beta, struct ggml_tensor* state, int64_t K);"
+  (ctx (:pointer (:struct ggml-context)))
+  (q (:pointer (:struct ggml-tensor)))
+  (k (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (g (:pointer (:struct ggml-tensor)))
+  (beta (:pointer (:struct ggml-tensor)))
+  (state (:pointer (:struct ggml-tensor)))
+  (k-2 int64-t))
+
+
+(cffi:defctype ggml-custom1-op-t (:pointer :void))
+
+
+(cffi:defctype ggml-custom2-op-t (:pointer :void))
+
+
+(cffi:defctype ggml-custom3-op-t (:pointer :void))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom1" ggml-map-custom1)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom1(struct ggml_context* ctx, struct ggml_tensor* a, ggml_custom1_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom1-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom1_inplace" ggml-map-custom1-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom1_inplace(struct ggml_context* ctx, struct ggml_tensor* a, ggml_custom1_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom1-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom2" ggml-map-custom2)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom2(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, ggml_custom2_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom2-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom2_inplace" ggml-map-custom2-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom2_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, ggml_custom2_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom2-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom3" ggml-map-custom3)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom3(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, ggml_custom3_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom3-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_map_custom3_inplace" ggml-map-custom3-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_map_custom3_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c, ggml_custom3_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor)))
+  (fun ggml-custom3-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defctype ggml-custom-op-t (:pointer :void))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_custom_4d" ggml-custom-4d)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_custom_4d(struct ggml_context* ctx, enum ggml_type type, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3, struct ggml_tensor** args, int n_args, ggml_custom_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (type ggml-type)
+  (ne0 int64-t)
+  (ne1 int64-t)
+  (ne2 int64-t)
+  (ne3 int64-t)
+  (args (:pointer (:pointer (:struct ggml-tensor))))
+  (n-args :int)
+  (fun ggml-custom-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_custom_inplace" ggml-custom-inplace)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_custom_inplace(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor** args, int n_args, ggml_custom_op_t fun, int n_tasks, void* userdata);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (args (:pointer (:pointer (:struct ggml-tensor))))
+  (n-args :int)
+  (fun ggml-custom-op-t)
+  (n-tasks :int)
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cross_entropy_loss" ggml-cross-entropy-loss)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cross_entropy_loss(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_cross_entropy_loss_back" ggml-cross-entropy-loss-back)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_cross_entropy_loss_back(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* b, struct ggml_tensor* c);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (b (:pointer (:struct ggml-tensor)))
+  (c (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_opt_step_adamw" ggml-opt-step-adamw)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_step_adamw(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* grad, struct ggml_tensor* m, struct ggml_tensor* v, struct ggml_tensor* adamw_params);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (grad (:pointer (:struct ggml-tensor)))
+  (m (:pointer (:struct ggml-tensor)))
+  (v (:pointer (:struct ggml-tensor)))
+  (adamw-params (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_opt_step_sgd" ggml-opt-step-sgd)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_step_sgd(struct ggml_context* ctx, struct ggml_tensor* a, struct ggml_tensor* grad, struct ggml_tensor* sgd_params);"
+  (ctx (:pointer (:struct ggml-context)))
+  (a (:pointer (:struct ggml-tensor)))
+  (grad (:pointer (:struct ggml-tensor)))
+  (sgd-params (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_build_forward_select" ggml-build-forward-select)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_build_forward_select(struct ggml_cgraph* cgraph, struct ggml_tensor** tensors, int n_tensors, int idx);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (tensors (:pointer (:pointer (:struct ggml-tensor))))
+  (n-tensors :int)
+  (idx :int))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_build_forward_expand" ggml-build-forward-expand)
+    :void
+  "void ggml_build_forward_expand(struct ggml_cgraph* cgraph, struct ggml_tensor* tensor);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_build_backward_expand" ggml-build-backward-expand)
+    :void
+  "void ggml_build_backward_expand(struct ggml_context* ctx, struct ggml_cgraph* cgraph, struct ggml_tensor** grad_accs);"
+  (ctx (:pointer (:struct ggml-context)))
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (grad-accs (:pointer (:pointer (:struct ggml-tensor)))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_graph" ggml-new-graph)
+    (:pointer (:struct ggml-cgraph))
+  "struct ggml_cgraph* ggml_new_graph(struct ggml_context* ctx);"
+  (ctx (:pointer (:struct ggml-context))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_graph_custom" ggml-new-graph-custom)
+    (:pointer (:struct ggml-cgraph))
+  "struct ggml_cgraph* ggml_new_graph_custom(struct ggml_context* ctx, size_t size, char grads);"
+  (ctx (:pointer (:struct ggml-context)))
+  (size size-t)
+  (grads :char))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_dup" ggml-graph-dup)
+    (:pointer (:struct ggml-cgraph))
+  "struct ggml_cgraph* ggml_graph_dup(struct ggml_context* ctx, struct ggml_cgraph* cgraph, char force_grads);"
+  (ctx (:pointer (:struct ggml-context)))
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (force-grads :char))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_cpy" ggml-graph-cpy)
+    :void
+  "void ggml_graph_cpy(struct ggml_cgraph* src, struct ggml_cgraph* dst);"
+  (src (:pointer (:struct ggml-cgraph)))
+  (dst (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_reset" ggml-graph-reset)
+    :void
+  "void ggml_graph_reset(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_clear" ggml-graph-clear)
+    :void
+  "void ggml_graph_clear(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_size" ggml-graph-size)
+    :int
+  "int ggml_graph_size(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_node" ggml-graph-node)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_graph_node(struct ggml_cgraph* cgraph, int i);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (i :int))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_nodes" ggml-graph-nodes)
+    (:pointer (:pointer (:struct ggml-tensor)))
+  "struct ggml_tensor** ggml_graph_nodes(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_n_nodes" ggml-graph-n-nodes)
+    :int
+  "int ggml_graph_n_nodes(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_add_node" ggml-graph-add-node)
+    :void
+  "void ggml_graph_add_node(struct ggml_cgraph* cgraph, struct ggml_tensor* tensor);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_graph_overhead" ggml-graph-overhead)
+    size-t
+  "size_t ggml_graph_overhead();")
+
+
+(cffi:defcfun ("ggml_graph_overhead_custom" ggml-graph-overhead-custom)
+    size-t
+  "size_t ggml_graph_overhead_custom(size_t size, char grads);"
+  (size size-t)
+  (grads :char))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_get_tensor" ggml-graph-get-tensor)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_graph_get_tensor(struct ggml_cgraph* cgraph, char* name);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (name :string))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_get_grad" ggml-graph-get-grad)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_graph_get_grad(struct ggml_cgraph* cgraph, struct ggml_tensor* node);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (node (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_get_grad_acc" ggml-graph-get-grad-acc)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_graph_get_grad_acc(struct ggml_cgraph* cgraph, struct ggml_tensor* node);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (node (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_print" ggml-graph-print)
+    :void
+  "void ggml_graph_print(struct ggml_cgraph* cgraph);"
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_dump_dot" ggml-graph-dump-dot)
+    :void
+  "void ggml_graph_dump_dot(struct ggml_cgraph* gb, struct ggml_cgraph* cgraph, char* filename);"
+  (gb (:pointer (:struct ggml-cgraph)))
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (filename :string))
+
+
 (cffi:defctype ggml-log-callback (:pointer :void))
+
+
+(cffi:defcfun ("ggml_log_get" ggml-log-get)
+    :void
+  "void ggml_log_get(ggml_log_callback* log_callback, void** user_data);"
+  (log-callback (:pointer ggml-log-callback))
+  (user-data (:pointer (:pointer :void))))
+
+
+(cffi:defcfun ("ggml_log_set" ggml-log-set)
+    :void
+  "void ggml_log_set(ggml_log_callback log_callback, void* user_data);"
+  (log-callback ggml-log-callback)
+  (user-data (:pointer :void)))
+
+
+(cffi:defcfun ("ggml_set_zero" ggml-set-zero)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_zero(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_quantize_init" ggml-quantize-init)
+    :void
+  "void ggml_quantize_init(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_quantize_free" ggml-quantize-free)
+    :void
+  "void ggml_quantize_free();")
+
+
+(cffi:defcfun ("ggml_quantize_requires_imatrix" ggml-quantize-requires-imatrix)
+    :char
+  "char ggml_quantize_requires_imatrix(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_quantize_chunk" ggml-quantize-chunk)
+    size-t
+  "size_t ggml_quantize_chunk(enum ggml_type type, float* src, void* dst, int64_t start, int64_t nrows, int64_t n_per_row, float* imatrix);"
+  (type ggml-type)
+  (src (:pointer :float))
+  (dst (:pointer :void))
+  (start int64-t)
+  (nrows int64-t)
+  (n-per-row int64-t)
+  (imatrix (:pointer :float)))
+
+
+(cffi:defctype ggml-to-float-t (:pointer :void))
+
+
+(cffi:defctype ggml-from-float-t (:pointer :void))
+
+
+(cffi:defcstruct (ggml-type-traits :size 56)
+  (type-name :string :offset 0)
+  (blck-size int64-t :offset 8)
+  (blck-size-interleave int64-t :offset 16)
+  (type-size size-t :offset 24)
+  (is-quantized :char :offset 32)
+  (to-float ggml-to-float-t :offset 40)
+  (from-float-ref ggml-from-float-t :offset 48))
+
+
+(cffi:defcfun ("ggml_get_type_traits" ggml-get-type-traits)
+    (:pointer (:struct ggml-type-traits))
+  "struct ggml_type_traits* ggml_get_type_traits(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcenum ggml-sched-priority
+  (:low 4294967295)
+  (:normal 0)
+  (:medium 1)
+  (:high 2)
+  (:realtime 3))
+
+
+(cffi:defcstruct (ggml-threadpool-params :size 528)
+  (cpumask :char :count 512 :offset 0)
+  (n-threads :int :offset 512)
+  (prio ggml-sched-priority :offset 516)
+  (poll uint32-t :offset 520)
+  (strict-cpu :char :offset 524)
+  (paused :char :offset 525))
 
 
 (cffi:defcstruct ggml-threadpool)
@@ -141,10 +4405,191 @@
 (cffi:defctype ggml-threadpool-t (:pointer (:struct ggml-threadpool)))
 
 
+(cffi:defcfun ("ggml_threadpool_params_default" ggml-threadpool-params-default)
+    (:struct ggml-threadpool-params)
+  "struct ggml_threadpool_params ggml_threadpool_params_default(int n_threads);"
+  (n-threads :int))
+
+
+(cffi:defcfun ("ggml_threadpool_params_init" ggml-threadpool-params-init)
+    :void
+  "void ggml_threadpool_params_init(struct ggml_threadpool_params* p, int n_threads);"
+  (p (:pointer (:struct ggml-threadpool-params)))
+  (n-threads :int))
+
+
+(cffi:defcfun ("ggml_threadpool_params_match" ggml-threadpool-params-match)
+    :char
+  "char ggml_threadpool_params_match(struct ggml_threadpool_params* p0, struct ggml_threadpool_params* p1);"
+  (p0 (:pointer (:struct ggml-threadpool-params)))
+  (p1 (:pointer (:struct ggml-threadpool-params))))
+
+
 (cffi:defcstruct ggml-backend-buffer-type)
 
 
 (cffi:defctype ggml-backend-buffer-type-t (:pointer (:struct ggml-backend-buffer-type)))
+
+
+(cffi:defcstruct ggml-backend-buffer)
+
+
+(cffi:defctype ggml-backend-buffer-t (:pointer (:struct ggml-backend-buffer)))
+
+
+(cffi:defcstruct ggml-backend)
+
+
+(cffi:defctype ggml-backend-t (:pointer (:struct ggml-backend)))
+
+
+(cffi:defcstruct (ggml-tallocr :size 32)
+  (buffer ggml-backend-buffer-t :offset 0)
+  (base (:pointer :void) :offset 8)
+  (alignment size-t :offset 16)
+  (offset size-t :offset 24))
+
+
+(cffi:defcfun ("ggml_tallocr_new" ggml-tallocr-new)
+    (:struct ggml-tallocr)
+  "struct ggml_tallocr ggml_tallocr_new(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_tallocr_alloc" ggml-tallocr-alloc)
+    ggml-status
+  "enum ggml_status ggml_tallocr_alloc(struct ggml_tallocr* talloc, struct ggml_tensor* tensor);"
+  (talloc (:pointer (:struct ggml-tallocr)))
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-gallocr)
+
+
+(cffi:defctype ggml-gallocr-t (:pointer (:struct ggml-gallocr)))
+
+
+(cffi:defcfun ("ggml_gallocr_new" ggml-gallocr-new)
+    ggml-gallocr-t
+  "ggml_gallocr_t ggml_gallocr_new(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_gallocr_new_n" ggml-gallocr-new-n)
+    ggml-gallocr-t
+  "ggml_gallocr_t ggml_gallocr_new_n(ggml_backend_buffer_type_t* bufts, int n_bufs);"
+  (bufts (:pointer ggml-backend-buffer-type-t))
+  (n-bufs :int))
+
+
+(cffi:defcfun ("ggml_gallocr_free" ggml-gallocr-free)
+    :void
+  "void ggml_gallocr_free(ggml_gallocr_t galloc);"
+  (galloc ggml-gallocr-t))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_gallocr_reserve" ggml-gallocr-reserve)
+    :char
+  "char ggml_gallocr_reserve(ggml_gallocr_t galloc, struct ggml_cgraph* graph);"
+  (galloc ggml-gallocr-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_gallocr_reserve_n_size" ggml-gallocr-reserve-n-size)
+    :void
+  "void ggml_gallocr_reserve_n_size(ggml_gallocr_t galloc, struct ggml_cgraph* graph, int* node_buffer_ids, int* leaf_buffer_ids, size_t* sizes);"
+  (galloc ggml-gallocr-t)
+  (graph (:pointer (:struct ggml-cgraph)))
+  (node-buffer-ids (:pointer :int))
+  (leaf-buffer-ids (:pointer :int))
+  (sizes (:pointer size-t)))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_gallocr_reserve_n" ggml-gallocr-reserve-n)
+    :char
+  "char ggml_gallocr_reserve_n(ggml_gallocr_t galloc, struct ggml_cgraph* graph, int* node_buffer_ids, int* leaf_buffer_ids);"
+  (galloc ggml-gallocr-t)
+  (graph (:pointer (:struct ggml-cgraph)))
+  (node-buffer-ids (:pointer :int))
+  (leaf-buffer-ids (:pointer :int)))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_gallocr_alloc_graph" ggml-gallocr-alloc-graph)
+    :char
+  "char ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph* graph);"
+  (galloc ggml-gallocr-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_gallocr_get_buffer_size" ggml-gallocr-get-buffer-size)
+    size-t
+  "size_t ggml_gallocr_get_buffer_size(ggml_gallocr_t galloc, int buffer_id);"
+  (galloc ggml-gallocr-t)
+  (buffer-id :int))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_backend_alloc_ctx_tensors_from_buft_size"
+               ggml-backend-alloc-ctx-tensors-from-buft-size)
+    size-t
+  "size_t ggml_backend_alloc_ctx_tensors_from_buft_size(struct ggml_context* ctx, ggml_backend_buffer_type_t buft);"
+  (ctx (:pointer (:struct ggml-context)))
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcstruct ggml-backend-buffer)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_backend_alloc_ctx_tensors_from_buft" ggml-backend-alloc-ctx-tensors-from-buft)
+    (:pointer (:struct ggml-backend-buffer))
+  "struct ggml_backend_buffer* ggml_backend_alloc_ctx_tensors_from_buft(struct ggml_context* ctx, ggml_backend_buffer_type_t buft);"
+  (ctx (:pointer (:struct ggml-context)))
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcstruct ggml-backend-buffer)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_backend_alloc_ctx_tensors" ggml-backend-alloc-ctx-tensors)
+    (:pointer (:struct ggml-backend-buffer))
+  "struct ggml_backend_buffer* ggml_backend_alloc_ctx_tensors(struct ggml_context* ctx, ggml_backend_t backend);"
+  (ctx (:pointer (:struct ggml-context)))
+  (backend ggml-backend-t))
+
+
+(cffi:defcstruct ggml-backend-event)
+
+
+(cffi:defctype ggml-backend-event-t (:pointer (:struct ggml-backend-event)))
+
+
+(cffi:defctype ggml-backend-graph-plan-t (:pointer :void))
+
+
+(cffi:defcstruct ggml-backend-reg)
+
+
+(cffi:defctype ggml-backend-reg-t (:pointer (:struct ggml-backend-reg)))
 
 
 (cffi:defcstruct ggml-backend-device)
@@ -153,7 +4598,955 @@
 (cffi:defctype ggml-backend-dev-t (:pointer (:struct ggml-backend-device)))
 
 
+(cffi:defcfun ("ggml_backend_buft_name" ggml-backend-buft-name)
+    :string
+  "char* ggml_backend_buft_name(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_buft_alloc_buffer" ggml-backend-buft-alloc-buffer)
+    ggml-backend-buffer-t
+  "ggml_backend_buffer_t ggml_backend_buft_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size);"
+  (buft ggml-backend-buffer-type-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_buft_get_alignment" ggml-backend-buft-get-alignment)
+    size-t
+  "size_t ggml_backend_buft_get_alignment(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_buft_get_max_size" ggml-backend-buft-get-max-size)
+    size-t
+  "size_t ggml_backend_buft_get_max_size(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_buft_get_alloc_size" ggml-backend-buft-get-alloc-size)
+    size-t
+  "size_t ggml_backend_buft_get_alloc_size(ggml_backend_buffer_type_t buft, struct ggml_tensor* tensor);"
+  (buft ggml-backend-buffer-type-t)
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_buft_is_host" ggml-backend-buft-is-host)
+    :char
+  "char ggml_backend_buft_is_host(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_buft_get_device" ggml-backend-buft-get-device)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_buft_get_device(ggml_backend_buffer_type_t buft);"
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcenum ggml-backend-buffer-usage
+  (:any 0)
+  (:weights 1)
+  (:compute 2))
+
+
+(cffi:defcfun ("ggml_backend_buffer_name" ggml-backend-buffer-name)
+    :string
+  "char* ggml_backend_buffer_name(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_free" ggml-backend-buffer-free)
+    :void
+  "void ggml_backend_buffer_free(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_base" ggml-backend-buffer-get-base)
+    (:pointer :void)
+  "void* ggml_backend_buffer_get_base(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_size" ggml-backend-buffer-get-size)
+    size-t
+  "size_t ggml_backend_buffer_get_size(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_init_tensor" ggml-backend-buffer-init-tensor)
+    ggml-status
+  "enum ggml_status ggml_backend_buffer_init_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor* tensor);"
+  (buffer ggml-backend-buffer-t)
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_alignment" ggml-backend-buffer-get-alignment)
+    size-t
+  "size_t ggml_backend_buffer_get_alignment(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_max_size" ggml-backend-buffer-get-max-size)
+    size-t
+  "size_t ggml_backend_buffer_get_max_size(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_alloc_size" ggml-backend-buffer-get-alloc-size)
+    size-t
+  "size_t ggml_backend_buffer_get_alloc_size(ggml_backend_buffer_t buffer, struct ggml_tensor* tensor);"
+  (buffer ggml-backend-buffer-t)
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_buffer_clear" ggml-backend-buffer-clear)
+    :void
+  "void ggml_backend_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value);"
+  (buffer ggml-backend-buffer-t)
+  (value uint8-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_is_host" ggml-backend-buffer-is-host)
+    :char
+  "char ggml_backend_buffer_is_host(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_set_usage" ggml-backend-buffer-set-usage)
+    :void
+  "void ggml_backend_buffer_set_usage(ggml_backend_buffer_t buffer, enum ggml_backend_buffer_usage usage);"
+  (buffer ggml-backend-buffer-t)
+  (usage ggml-backend-buffer-usage))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_usage" ggml-backend-buffer-get-usage)
+    ggml-backend-buffer-usage
+  "enum ggml_backend_buffer_usage ggml_backend_buffer_get_usage(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_get_type" ggml-backend-buffer-get-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_buffer_get_type(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_buffer_reset" ggml-backend-buffer-reset)
+    :void
+  "void ggml_backend_buffer_reset(ggml_backend_buffer_t buffer);"
+  (buffer ggml-backend-buffer-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_copy" ggml-backend-tensor-copy)
+    :void
+  "void ggml_backend_tensor_copy(struct ggml_tensor* src, struct ggml_tensor* dst);"
+  (src (:pointer (:struct ggml-tensor)))
+  (dst (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_guid" ggml-backend-guid)
+    ggml-guid-t
+  "ggml_guid_t ggml_backend_guid(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_name" ggml-backend-name)
+    :string
+  "char* ggml_backend_name(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_free" ggml-backend-free)
+    :void
+  "void ggml_backend_free(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_get_default_buffer_type" ggml-backend-get-default-buffer-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_get_default_buffer_type(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_alloc_buffer" ggml-backend-alloc-buffer)
+    ggml-backend-buffer-t
+  "ggml_backend_buffer_t ggml_backend_alloc_buffer(ggml_backend_t backend, size_t size);"
+  (backend ggml-backend-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_get_alignment" ggml-backend-get-alignment)
+    size-t
+  "size_t ggml_backend_get_alignment(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_get_max_size" ggml-backend-get-max-size)
+    size-t
+  "size_t ggml_backend_get_max_size(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_set_async" ggml-backend-tensor-set-async)
+    :void
+  "void ggml_backend_tensor_set_async(ggml_backend_t backend, struct ggml_tensor* tensor, void* data, size_t offset, size_t size);"
+  (backend ggml-backend-t)
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_get_async" ggml-backend-tensor-get-async)
+    :void
+  "void ggml_backend_tensor_get_async(ggml_backend_t backend, struct ggml_tensor* tensor, void* data, size_t offset, size_t size);"
+  (backend ggml-backend-t)
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_set_2d_async" ggml-backend-tensor-set-2d-async)
+    :void
+  "void ggml_backend_tensor_set_2d_async(ggml_backend_t backend, struct ggml_tensor* tensor, void* data, size_t offset, size_t size, size_t n_copies, size_t stride_tensor, size_t stride_data);"
+  (backend ggml-backend-t)
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t)
+  (n-copies size-t)
+  (stride-tensor size-t)
+  (stride-data size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_get_2d_async" ggml-backend-tensor-get-2d-async)
+    :void
+  "void ggml_backend_tensor_get_2d_async(ggml_backend_t backend, struct ggml_tensor* tensor, void* data, size_t offset, size_t size, size_t n_copies, size_t stride_tensor, size_t stride_data);"
+  (backend ggml-backend-t)
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t)
+  (n-copies size-t)
+  (stride-tensor size-t)
+  (stride-data size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_set" ggml-backend-tensor-set)
+    :void
+  "void ggml_backend_tensor_set(struct ggml_tensor* tensor, void* data, size_t offset, size_t size);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_get" ggml-backend-tensor-get)
+    :void
+  "void ggml_backend_tensor_get(struct ggml_tensor* tensor, void* data, size_t offset, size_t size);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_set_2d" ggml-backend-tensor-set-2d)
+    :void
+  "void ggml_backend_tensor_set_2d(struct ggml_tensor* tensor, void* data, size_t offset, size_t size, size_t n_copies, size_t stride_tensor, size_t stride_data);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t)
+  (n-copies size-t)
+  (stride-tensor size-t)
+  (stride-data size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_get_2d" ggml-backend-tensor-get-2d)
+    :void
+  "void ggml_backend_tensor_get_2d(struct ggml_tensor* tensor, void* data, size_t offset, size_t size, size_t n_copies, size_t stride_tensor, size_t stride_data);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (data (:pointer :void))
+  (offset size-t)
+  (size size-t)
+  (n-copies size-t)
+  (stride-tensor size-t)
+  (stride-data size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_memset" ggml-backend-tensor-memset)
+    :void
+  "void ggml_backend_tensor_memset(struct ggml_tensor* tensor, uint8_t value, size_t offset, size_t size);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (value uint8-t)
+  (offset size-t)
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_synchronize" ggml-backend-synchronize)
+    :void
+  "void ggml_backend_synchronize(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_graph_plan_create" ggml-backend-graph-plan-create)
+    ggml-backend-graph-plan-t
+  "ggml_backend_graph_plan_t ggml_backend_graph_plan_create(ggml_backend_t backend, struct ggml_cgraph* cgraph);"
+  (backend ggml-backend-t)
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_backend_graph_plan_free" ggml-backend-graph-plan-free)
+    :void
+  "void ggml_backend_graph_plan_free(ggml_backend_t backend, ggml_backend_graph_plan_t plan);"
+  (backend ggml-backend-t)
+  (plan ggml-backend-graph-plan-t))
+
+
+(cffi:defcfun ("ggml_backend_graph_plan_compute" ggml-backend-graph-plan-compute)
+    ggml-status
+  "enum ggml_status ggml_backend_graph_plan_compute(ggml_backend_t backend, ggml_backend_graph_plan_t plan);"
+  (backend ggml-backend-t)
+  (plan ggml-backend-graph-plan-t))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_graph_compute" ggml-backend-graph-compute)
+    ggml-status
+  "enum ggml_status ggml_backend_graph_compute(ggml_backend_t backend, struct ggml_cgraph* cgraph);"
+  (backend ggml-backend-t)
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_graph_compute_async" ggml-backend-graph-compute-async)
+    ggml-status
+  "enum ggml_status ggml_backend_graph_compute_async(ggml_backend_t backend, struct ggml_cgraph* cgraph);"
+  (backend ggml-backend-t)
+  (cgraph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_backend_supports_op" ggml-backend-supports-op)
+    :char
+  "char ggml_backend_supports_op(ggml_backend_t backend, struct ggml_tensor* op);"
+  (backend ggml-backend-t)
+  (op (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_supports_buft" ggml-backend-supports-buft)
+    :char
+  "char ggml_backend_supports_buft(ggml_backend_t backend, ggml_backend_buffer_type_t buft);"
+  (backend ggml-backend-t)
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_offload_op" ggml-backend-offload-op)
+    :char
+  "char ggml_backend_offload_op(ggml_backend_t backend, struct ggml_tensor* op);"
+  (backend ggml-backend-t)
+  (op (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_tensor_copy_async" ggml-backend-tensor-copy-async)
+    :void
+  "void ggml_backend_tensor_copy_async(ggml_backend_t backend_src, ggml_backend_t backend_dst, struct ggml_tensor* src, struct ggml_tensor* dst);"
+  (backend-src ggml-backend-t)
+  (backend-dst ggml-backend-t)
+  (src (:pointer (:struct ggml-tensor)))
+  (dst (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_get_device" ggml-backend-get-device)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_get_device(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_event_new" ggml-backend-event-new)
+    ggml-backend-event-t
+  "ggml_backend_event_t ggml_backend_event_new(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_event_free" ggml-backend-event-free)
+    :void
+  "void ggml_backend_event_free(ggml_backend_event_t event);"
+  (event ggml-backend-event-t))
+
+
+(cffi:defcfun ("ggml_backend_event_record" ggml-backend-event-record)
+    :void
+  "void ggml_backend_event_record(ggml_backend_event_t event, ggml_backend_t backend);"
+  (event ggml-backend-event-t)
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_event_synchronize" ggml-backend-event-synchronize)
+    :void
+  "void ggml_backend_event_synchronize(ggml_backend_event_t event);"
+  (event ggml-backend-event-t))
+
+
+(cffi:defcfun ("ggml_backend_event_wait" ggml-backend-event-wait)
+    :void
+  "void ggml_backend_event_wait(ggml_backend_t backend, ggml_backend_event_t event);"
+  (backend ggml-backend-t)
+  (event ggml-backend-event-t))
+
+
+(cffi:defcenum ggml-backend-dev-type
+  (:cpu 0)
+  (:gpu 1)
+  (:igpu 2)
+  (:accel 3)
+  (:meta 4))
+
+
+(cffi:defcstruct (ggml-backend-dev-caps :size 4)
+  (async :char :offset 0)
+  (host-buffer :char :offset 1)
+  (buffer-from-host-ptr :char :offset 2)
+  (events :char :offset 3))
+
+
+(cffi:defcstruct (ggml-backend-dev-props :size 56)
+  (name :string :offset 0)
+  (description :string :offset 8)
+  (memory-free size-t :offset 16)
+  (memory-total size-t :offset 24)
+  (type ggml-backend-dev-type :offset 32)
+  (device-id :string :offset 40)
+  (caps (:struct ggml-backend-dev-caps) :offset 48))
+
+
+(cffi:defcfun ("ggml_backend_dev_name" ggml-backend-dev-name)
+    :string
+  "char* ggml_backend_dev_name(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_description" ggml-backend-dev-description)
+    :string
+  "char* ggml_backend_dev_description(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_memory" ggml-backend-dev-memory)
+    :void
+  "void ggml_backend_dev_memory(ggml_backend_dev_t device, size_t* free, size_t* total);"
+  (device ggml-backend-dev-t)
+  (free (:pointer size-t))
+  (total (:pointer size-t)))
+
+
+(cffi:defcfun ("ggml_backend_dev_type" ggml-backend-dev-type)
+    ggml-backend-dev-type
+  "enum ggml_backend_dev_type ggml_backend_dev_type(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_get_props" ggml-backend-dev-get-props)
+    :void
+  "void ggml_backend_dev_get_props(ggml_backend_dev_t device, struct ggml_backend_dev_props* props);"
+  (device ggml-backend-dev-t)
+  (props (:pointer (:struct ggml-backend-dev-props))))
+
+
+(cffi:defcfun ("ggml_backend_dev_backend_reg" ggml-backend-dev-backend-reg)
+    ggml-backend-reg-t
+  "ggml_backend_reg_t ggml_backend_dev_backend_reg(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_init" ggml-backend-dev-init)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_dev_init(ggml_backend_dev_t device, char* params);"
+  (device ggml-backend-dev-t)
+  (params :string))
+
+
+(cffi:defcfun ("ggml_backend_dev_buffer_type" ggml-backend-dev-buffer-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_dev_buffer_type(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_host_buffer_type" ggml-backend-dev-host-buffer-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_dev_host_buffer_type(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_buffer_from_host_ptr" ggml-backend-dev-buffer-from-host-ptr)
+    ggml-backend-buffer-t
+  "ggml_backend_buffer_t ggml_backend_dev_buffer_from_host_ptr(ggml_backend_dev_t device, void* ptr, size_t size, size_t max_tensor_size);"
+  (device ggml-backend-dev-t)
+  (ptr (:pointer :void))
+  (size size-t)
+  (max-tensor-size size-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_supports_op" ggml-backend-dev-supports-op)
+    :char
+  "char ggml_backend_dev_supports_op(ggml_backend_dev_t device, struct ggml_tensor* op);"
+  (device ggml-backend-dev-t)
+  (op (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_dev_supports_buft" ggml-backend-dev-supports-buft)
+    :char
+  "char ggml_backend_dev_supports_buft(ggml_backend_dev_t device, ggml_backend_buffer_type_t buft);"
+  (device ggml-backend-dev-t)
+  (buft ggml-backend-buffer-type-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_offload_op" ggml-backend-dev-offload-op)
+    :char
+  "char ggml_backend_dev_offload_op(ggml_backend_dev_t device, struct ggml_tensor* op);"
+  (device ggml-backend-dev-t)
+  (op (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_reg_name" ggml-backend-reg-name)
+    :string
+  "char* ggml_backend_reg_name(ggml_backend_reg_t reg);"
+  (reg ggml-backend-reg-t))
+
+
+(cffi:defcfun ("ggml_backend_reg_dev_count" ggml-backend-reg-dev-count)
+    size-t
+  "size_t ggml_backend_reg_dev_count(ggml_backend_reg_t reg);"
+  (reg ggml-backend-reg-t))
+
+
+(cffi:defcfun ("ggml_backend_reg_dev_get" ggml-backend-reg-dev-get)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_reg_dev_get(ggml_backend_reg_t reg, size_t index);"
+  (reg ggml-backend-reg-t)
+  (index size-t))
+
+
+(cffi:defcfun ("ggml_backend_reg_get_proc_address" ggml-backend-reg-get-proc-address)
+    (:pointer :void)
+  "void* ggml_backend_reg_get_proc_address(ggml_backend_reg_t reg, char* name);"
+  (reg ggml-backend-reg-t)
+  (name :string))
+
+
+(cffi:defctype ggml-backend-comm-init-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-comm-free-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-comm-allreduce-tensor-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-split-buffer-type-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-set-n-threads-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-dev-get-extra-bufts-t (:pointer :void))
+
+
+(cffi:defctype ggml-backend-set-abort-callback-t (:pointer :void))
+
+
+(cffi:defcstruct (ggml-backend-feature :size 16)
+  (name :string :offset 0)
+  (value :string :offset 8))
+
+
+(cffi:defctype ggml-backend-get-features-t (:pointer :void))
+
+
+(cffi:defcfun ("ggml_backend_register" ggml-backend-register)
+    :void
+  "void ggml_backend_register(ggml_backend_reg_t reg);"
+  (reg ggml-backend-reg-t))
+
+
+(cffi:defcfun ("ggml_backend_device_register" ggml-backend-device-register)
+    :void
+  "void ggml_backend_device_register(ggml_backend_dev_t device);"
+  (device ggml-backend-dev-t))
+
+
+(cffi:defcfun ("ggml_backend_reg_count" ggml-backend-reg-count)
+    size-t
+  "size_t ggml_backend_reg_count();")
+
+
+(cffi:defcfun ("ggml_backend_reg_get" ggml-backend-reg-get)
+    ggml-backend-reg-t
+  "ggml_backend_reg_t ggml_backend_reg_get(size_t index);"
+  (index size-t))
+
+
+(cffi:defcfun ("ggml_backend_reg_by_name" ggml-backend-reg-by-name)
+    ggml-backend-reg-t
+  "ggml_backend_reg_t ggml_backend_reg_by_name(char* name);"
+  (name :string))
+
+
+(cffi:defcfun ("ggml_backend_dev_count" ggml-backend-dev-count)
+    size-t
+  "size_t ggml_backend_dev_count();")
+
+
+(cffi:defcfun ("ggml_backend_dev_get" ggml-backend-dev-get)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_dev_get(size_t index);"
+  (index size-t))
+
+
+(cffi:defcfun ("ggml_backend_dev_by_name" ggml-backend-dev-by-name)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_dev_by_name(char* name);"
+  (name :string))
+
+
+(cffi:defcfun ("ggml_backend_dev_by_type" ggml-backend-dev-by-type)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_dev_by_type(enum ggml_backend_dev_type type);"
+  (type ggml-backend-dev-type))
+
+
+(cffi:defcfun ("ggml_backend_init_by_name" ggml-backend-init-by-name)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_init_by_name(char* name, char* params);"
+  (name :string)
+  (params :string))
+
+
+(cffi:defcfun ("ggml_backend_init_by_type" ggml-backend-init-by-type)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_init_by_type(enum ggml_backend_dev_type type, char* params);"
+  (type ggml-backend-dev-type)
+  (params :string))
+
+
+(cffi:defcfun ("ggml_backend_init_best" ggml-backend-init-best)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_init_best();")
+
+
+(cffi:defcfun ("ggml_backend_load" ggml-backend-load)
+    ggml-backend-reg-t
+  "ggml_backend_reg_t ggml_backend_load(char* path);"
+  (path :string))
+
+
+(cffi:defcfun ("ggml_backend_unload" ggml-backend-unload)
+    :void
+  "void ggml_backend_unload(ggml_backend_reg_t reg);"
+  (reg ggml-backend-reg-t))
+
+
+(cffi:defcfun ("ggml_backend_load_all" ggml-backend-load-all)
+    :void
+  "void ggml_backend_load_all();")
+
+
+(cffi:defcfun ("ggml_backend_load_all_from_path" ggml-backend-load-all-from-path)
+    :void
+  "void ggml_backend_load_all_from_path(char* dir_path);"
+  (dir-path :string))
+
+
+(cffi:defcstruct ggml-backend-sched)
+
+
+(cffi:defctype ggml-backend-sched-t (:pointer (:struct ggml-backend-sched)))
+
+
 (cffi:defctype ggml-backend-sched-eval-callback (:pointer :void))
+
+
+(cffi:defcfun ("ggml_backend_sched_new" ggml-backend-sched-new)
+    ggml-backend-sched-t
+  "ggml_backend_sched_t ggml_backend_sched_new(ggml_backend_t* backends, ggml_backend_buffer_type_t* bufts, int n_backends, size_t graph_size, char parallel, char op_offload);"
+  (backends (:pointer ggml-backend-t))
+  (bufts (:pointer ggml-backend-buffer-type-t))
+  (n-backends :int)
+  (graph-size size-t)
+  (parallel :char)
+  (op-offload :char))
+
+
+(cffi:defcfun ("ggml_backend_sched_free" ggml-backend-sched-free)
+    :void
+  "void ggml_backend_sched_free(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_reserve_size" ggml-backend-sched-reserve-size)
+    :void
+  "void ggml_backend_sched_reserve_size(ggml_backend_sched_t sched, struct ggml_cgraph* measure_graph, size_t* sizes);"
+  (sched ggml-backend-sched-t)
+  (measure-graph (:pointer (:struct ggml-cgraph)))
+  (sizes (:pointer size-t)))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_reserve" ggml-backend-sched-reserve)
+    :char
+  "char ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph* measure_graph);"
+  (sched ggml-backend-sched-t)
+  (measure-graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_n_backends" ggml-backend-sched-get-n-backends)
+    :int
+  "int ggml_backend_sched_get_n_backends(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_backend" ggml-backend-sched-get-backend)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_sched_get_backend(ggml_backend_sched_t sched, int i);"
+  (sched ggml-backend-sched-t)
+  (i :int))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_n_splits" ggml-backend-sched-get-n-splits)
+    :int
+  "int ggml_backend_sched_get_n_splits(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_n_copies" ggml-backend-sched-get-n-copies)
+    :int
+  "int ggml_backend_sched_get_n_copies(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_buffer_type" ggml-backend-sched-get-buffer-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_sched_get_buffer_type(ggml_backend_sched_t sched, ggml_backend_t backend);"
+  (sched ggml-backend-sched-t)
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_buffer_size" ggml-backend-sched-get-buffer-size)
+    size-t
+  "size_t ggml_backend_sched_get_buffer_size(ggml_backend_sched_t sched, ggml_backend_t backend);"
+  (sched ggml-backend-sched-t)
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_set_tensor_backend" ggml-backend-sched-set-tensor-backend)
+    :void
+  "void ggml_backend_sched_set_tensor_backend(ggml_backend_sched_t sched, struct ggml_tensor* node, ggml_backend_t backend);"
+  (sched ggml-backend-sched-t)
+  (node (:pointer (:struct ggml-tensor)))
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_get_tensor_backend" ggml-backend-sched-get-tensor-backend)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_sched_get_tensor_backend(ggml_backend_sched_t sched, struct ggml_tensor* node);"
+  (sched ggml-backend-sched-t)
+  (node (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_split_graph" ggml-backend-sched-split-graph)
+    :void
+  "void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph* graph);"
+  (sched ggml-backend-sched-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_alloc_graph" ggml-backend-sched-alloc-graph)
+    :char
+  "char ggml_backend_sched_alloc_graph(ggml_backend_sched_t sched, struct ggml_cgraph* graph);"
+  (sched ggml-backend-sched-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_graph_compute" ggml-backend-sched-graph-compute)
+    ggml-status
+  "enum ggml_status ggml_backend_sched_graph_compute(ggml_backend_sched_t sched, struct ggml_cgraph* graph);"
+  (sched ggml-backend-sched-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_sched_graph_compute_async" ggml-backend-sched-graph-compute-async)
+    ggml-status
+  "enum ggml_status ggml_backend_sched_graph_compute_async(ggml_backend_sched_t sched, struct ggml_cgraph* graph);"
+  (sched ggml-backend-sched-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_backend_sched_synchronize" ggml-backend-sched-synchronize)
+    :void
+  "void ggml_backend_sched_synchronize(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_reset" ggml-backend-sched-reset)
+    :void
+  "void ggml_backend_sched_reset(ggml_backend_sched_t sched);"
+  (sched ggml-backend-sched-t))
+
+
+(cffi:defcfun ("ggml_backend_sched_set_eval_callback" ggml-backend-sched-set-eval-callback)
+    :void
+  "void ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void* user_data);"
+  (sched ggml-backend-sched-t)
+  (callback ggml-backend-sched-eval-callback)
+  (user-data (:pointer :void)))
+
+
+(cffi:defcenum ggml-backend-meta-split-axis
+  (:|0| 0)
+  (:|1| 1)
+  (:|2| 2)
+  (:|3| 3)
+  (:mirrored 10)
+  (:partial 11)
+  (:none 98)
+  (:unknown 99))
+
+
+(cffi:defcfun ("ggml_backend_meta_split_axis_name" ggml-backend-meta-split-axis-name)
+    :string
+  "char* ggml_backend_meta_split_axis_name(enum ggml_backend_meta_split_axis split_axis);"
+  (split-axis ggml-backend-meta-split-axis))
+
+
+(cffi:defcstruct (ggml-backend-meta-split-state :size 2128)
+  (axis ggml-backend-meta-split-axis :offset 0)
+  (ne int64-t :count 256 :offset 8)
+  (nr uint32-t :count 16 :offset 2056)
+  (n-segments uint32-t :offset 2120))
+
+
+(cffi:defctype ggml-backend-meta-get-split-state-t (:pointer :void))
+
+
+(cffi:defcfun ("ggml_backend_meta_device" ggml-backend-meta-device)
+    ggml-backend-dev-t
+  "ggml_backend_dev_t ggml_backend_meta_device(ggml_backend_dev_t* devs, size_t n_devs, ggml_backend_meta_get_split_state_t get_split_state, void* get_split_state_ud);"
+  (devs (:pointer ggml-backend-dev-t))
+  (n-devs size-t)
+  (get-split-state ggml-backend-meta-get-split-state-t)
+  (get-split-state-ud (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct (ggml-backend-graph-copy :size 32)
+  (buffer ggml-backend-buffer-t :offset 0)
+  (ctx-allocated (:pointer (:struct ggml-context)) :offset 8)
+  (ctx-unallocated (:pointer (:struct ggml-context)) :offset 16)
+  (graph (:pointer (:struct ggml-cgraph)) :offset 24))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_graph_copy" ggml-backend-graph-copy)
+    (:struct ggml-backend-graph-copy)
+  "struct ggml_backend_graph_copy ggml_backend_graph_copy(ggml_backend_t backend, struct ggml_cgraph* graph);"
+  (backend ggml-backend-t)
+  (graph (:pointer (:struct ggml-cgraph))))
+
+
+(cffi:defcfun ("ggml_backend_graph_copy_free" ggml-backend-graph-copy-free)
+    :void
+  "void ggml_backend_graph_copy_free(struct ggml_backend_graph_copy copy);"
+  (copy (:struct ggml-backend-graph-copy)))
+
+
+(cffi:defctype ggml-backend-eval-callback (:pointer :void))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_backend_compare_graph_backend" ggml-backend-compare-graph-backend)
+    :char
+  "char ggml_backend_compare_graph_backend(ggml_backend_t backend1, ggml_backend_t backend2, struct ggml_cgraph* graph, ggml_backend_eval_callback callback, void* user_data, struct ggml_tensor** test_nodes, size_t num_test_nodes);"
+  (backend1 ggml-backend-t)
+  (backend2 ggml-backend-t)
+  (graph (:pointer (:struct ggml-cgraph)))
+  (callback ggml-backend-eval-callback)
+  (user-data (:pointer :void))
+  (test-nodes (:pointer (:pointer (:struct ggml-tensor))))
+  (num-test-nodes size-t))
+
+
+(cffi:defcfun ("ggml_backend_tensor_alloc" ggml-backend-tensor-alloc)
+    ggml-status
+  "enum ggml_status ggml_backend_tensor_alloc(ggml_backend_buffer_t buffer, struct ggml_tensor* tensor, void* addr);"
+  (buffer ggml-backend-buffer-t)
+  (tensor (:pointer (:struct ggml-tensor)))
+  (addr (:pointer :void)))
+
+
+(cffi:defcfun ("ggml_backend_view_init" ggml-backend-view-init)
+    ggml-status
+  "enum ggml_status ggml_backend_view_init(struct ggml_tensor* tensor);"
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_backend_cpu_buffer_from_ptr" ggml-backend-cpu-buffer-from-ptr)
+    ggml-backend-buffer-t
+  "ggml_backend_buffer_t ggml_backend_cpu_buffer_from_ptr(void* ptr, size_t size);"
+  (ptr (:pointer :void))
+  (size size-t))
+
+
+(cffi:defcfun ("ggml_backend_cpu_buffer_type" ggml-backend-cpu-buffer-type)
+    ggml-backend-buffer-type-t
+  "ggml_backend_buffer_type_t ggml_backend_cpu_buffer_type();")
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcstruct (ggml-cplan :size 56)
+  (work-size size-t :offset 0)
+  (work-data (:pointer uint8-t) :offset 8)
+  (n-threads :int :offset 16)
+  (threadpool (:pointer (:struct ggml-threadpool)) :offset 24)
+  (abort-callback ggml-abort-callback :offset 32)
+  (abort-callback-data (:pointer :void) :offset 40)
+  (use-ref :char :offset 48))
 
 
 (cffi:defcenum ggml-numa-strategy
@@ -165,10 +5558,465 @@
   (:count 5))
 
 
+(cffi:defcfun ("ggml_numa_init" ggml-numa-init)
+    :void
+  "void ggml_numa_init(enum ggml_numa_strategy numa);"
+  (numa ggml-numa-strategy))
+
+
+(cffi:defcfun ("ggml_is_numa" ggml-is-numa)
+    :char
+  "char ggml_is_numa();")
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_i32" ggml-new-i32)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_i32(struct ggml_context* ctx, int32_t value);"
+  (ctx (:pointer (:struct ggml-context)))
+  (value int32-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_new_f32" ggml-new-f32)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_new_f32(struct ggml_context* ctx, float value);"
+  (ctx (:pointer (:struct ggml-context)))
+  (value :float))
+
+
+(cffi:defcfun ("ggml_set_i32" ggml-set-i32)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_i32(struct ggml_tensor* tensor, int32_t value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (value int32-t))
+
+
+(cffi:defcfun ("ggml_set_f32" ggml-set-f32)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_set_f32(struct ggml_tensor* tensor, float value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (value :float))
+
+
+(cffi:defcfun ("ggml_get_i32_1d" ggml-get-i32-1d)
+    int32-t
+  "int32_t ggml_get_i32_1d(struct ggml_tensor* tensor, int i);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i :int))
+
+
+(cffi:defcfun ("ggml_set_i32_1d" ggml-set-i32-1d)
+    :void
+  "void ggml_set_i32_1d(struct ggml_tensor* tensor, int i, int32_t value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i :int)
+  (value int32-t))
+
+
+(cffi:defcfun ("ggml_get_i32_nd" ggml-get-i32-nd)
+    int32-t
+  "int32_t ggml_get_i32_nd(struct ggml_tensor* tensor, int i0, int i1, int i2, int i3);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i0 :int)
+  (i1 :int)
+  (i2 :int)
+  (i3 :int))
+
+
+(cffi:defcfun ("ggml_set_i32_nd" ggml-set-i32-nd)
+    :void
+  "void ggml_set_i32_nd(struct ggml_tensor* tensor, int i0, int i1, int i2, int i3, int32_t value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i0 :int)
+  (i1 :int)
+  (i2 :int)
+  (i3 :int)
+  (value int32-t))
+
+
+(cffi:defcfun ("ggml_get_f32_1d" ggml-get-f32-1d)
+    :float
+  "float ggml_get_f32_1d(struct ggml_tensor* tensor, int i);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i :int))
+
+
+(cffi:defcfun ("ggml_set_f32_1d" ggml-set-f32-1d)
+    :void
+  "void ggml_set_f32_1d(struct ggml_tensor* tensor, int i, float value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i :int)
+  (value :float))
+
+
+(cffi:defcfun ("ggml_get_f32_nd" ggml-get-f32-nd)
+    :float
+  "float ggml_get_f32_nd(struct ggml_tensor* tensor, int i0, int i1, int i2, int i3);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i0 :int)
+  (i1 :int)
+  (i2 :int)
+  (i3 :int))
+
+
+(cffi:defcfun ("ggml_set_f32_nd" ggml-set-f32-nd)
+    :void
+  "void ggml_set_f32_nd(struct ggml_tensor* tensor, int i0, int i1, int i2, int i3, float value);"
+  (tensor (:pointer (:struct ggml-tensor)))
+  (i0 :int)
+  (i1 :int)
+  (i2 :int)
+  (i3 :int)
+  (value :float))
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_threadpool_new" ggml-threadpool-new)
+    (:pointer (:struct ggml-threadpool))
+  "struct ggml_threadpool* ggml_threadpool_new(struct ggml_threadpool_params* params);"
+  (params (:pointer (:struct ggml-threadpool-params))))
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_threadpool_free" ggml-threadpool-free)
+    :void
+  "void ggml_threadpool_free(struct ggml_threadpool* threadpool);"
+  (threadpool (:pointer (:struct ggml-threadpool))))
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_threadpool_get_n_threads" ggml-threadpool-get-n-threads)
+    :int
+  "int ggml_threadpool_get_n_threads(struct ggml_threadpool* threadpool);"
+  (threadpool (:pointer (:struct ggml-threadpool))))
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_threadpool_pause" ggml-threadpool-pause)
+    :void
+  "void ggml_threadpool_pause(struct ggml_threadpool* threadpool);"
+  (threadpool (:pointer (:struct ggml-threadpool))))
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_threadpool_resume" ggml-threadpool-resume)
+    :void
+  "void ggml_threadpool_resume(struct ggml_threadpool* threadpool);"
+  (threadpool (:pointer (:struct ggml-threadpool))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcstruct ggml-threadpool)
+
+
+(cffi:defcfun ("ggml_graph_plan" ggml-graph-plan)
+    (:struct ggml-cplan)
+  "struct ggml_cplan ggml_graph_plan(struct ggml_cgraph* cgraph, int n_threads, struct ggml_threadpool* threadpool);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (n-threads :int)
+  (threadpool (:pointer (:struct ggml-threadpool))))
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_compute" ggml-graph-compute)
+    ggml-status
+  "enum ggml_status ggml_graph_compute(struct ggml_cgraph* cgraph, struct ggml_cplan* cplan);"
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (cplan (:pointer (:struct ggml-cplan))))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_graph_compute_with_ctx" ggml-graph-compute-with-ctx)
+    ggml-status
+  "enum ggml_status ggml_graph_compute_with_ctx(struct ggml_context* ctx, struct ggml_cgraph* cgraph, int n_threads);"
+  (ctx (:pointer (:struct ggml-context)))
+  (cgraph (:pointer (:struct ggml-cgraph)))
+  (n-threads :int))
+
+
+(cffi:defcfun ("ggml_cpu_has_sse3" ggml-cpu-has-sse3)
+    :int
+  "int ggml_cpu_has_sse3();")
+
+
+(cffi:defcfun ("ggml_cpu_has_ssse3" ggml-cpu-has-ssse3)
+    :int
+  "int ggml_cpu_has_ssse3();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx" ggml-cpu-has-avx)
+    :int
+  "int ggml_cpu_has_avx();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx_vnni" ggml-cpu-has-avx-vnni)
+    :int
+  "int ggml_cpu_has_avx_vnni();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx2" ggml-cpu-has-avx2)
+    :int
+  "int ggml_cpu_has_avx2();")
+
+
+(cffi:defcfun ("ggml_cpu_has_bmi2" ggml-cpu-has-bmi2)
+    :int
+  "int ggml_cpu_has_bmi2();")
+
+
+(cffi:defcfun ("ggml_cpu_has_f16c" ggml-cpu-has-f16c)
+    :int
+  "int ggml_cpu_has_f16c();")
+
+
+(cffi:defcfun ("ggml_cpu_has_fma" ggml-cpu-has-fma)
+    :int
+  "int ggml_cpu_has_fma();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx512" ggml-cpu-has-avx512)
+    :int
+  "int ggml_cpu_has_avx512();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx512_vbmi" ggml-cpu-has-avx512-vbmi)
+    :int
+  "int ggml_cpu_has_avx512_vbmi();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx512_vnni" ggml-cpu-has-avx512-vnni)
+    :int
+  "int ggml_cpu_has_avx512_vnni();")
+
+
+(cffi:defcfun ("ggml_cpu_has_avx512_bf16" ggml-cpu-has-avx512-bf16)
+    :int
+  "int ggml_cpu_has_avx512_bf16();")
+
+
+(cffi:defcfun ("ggml_cpu_has_amx_int8" ggml-cpu-has-amx-int8)
+    :int
+  "int ggml_cpu_has_amx_int8();")
+
+
+(cffi:defcfun ("ggml_cpu_has_neon" ggml-cpu-has-neon)
+    :int
+  "int ggml_cpu_has_neon();")
+
+
+(cffi:defcfun ("ggml_cpu_has_arm_fma" ggml-cpu-has-arm-fma)
+    :int
+  "int ggml_cpu_has_arm_fma();")
+
+
+(cffi:defcfun ("ggml_cpu_has_fp16_va" ggml-cpu-has-fp16-va)
+    :int
+  "int ggml_cpu_has_fp16_va();")
+
+
+(cffi:defcfun ("ggml_cpu_has_dotprod" ggml-cpu-has-dotprod)
+    :int
+  "int ggml_cpu_has_dotprod();")
+
+
+(cffi:defcfun ("ggml_cpu_has_matmul_int8" ggml-cpu-has-matmul-int8)
+    :int
+  "int ggml_cpu_has_matmul_int8();")
+
+
+(cffi:defcfun ("ggml_cpu_has_sve" ggml-cpu-has-sve)
+    :int
+  "int ggml_cpu_has_sve();")
+
+
+(cffi:defcfun ("ggml_cpu_get_sve_cnt" ggml-cpu-get-sve-cnt)
+    :int
+  "int ggml_cpu_get_sve_cnt();")
+
+
+(cffi:defcfun ("ggml_cpu_has_sme" ggml-cpu-has-sme)
+    :int
+  "int ggml_cpu_has_sme();")
+
+
+(cffi:defcfun ("ggml_cpu_has_riscv_v" ggml-cpu-has-riscv-v)
+    :int
+  "int ggml_cpu_has_riscv_v();")
+
+
+(cffi:defcfun ("ggml_cpu_get_rvv_vlen" ggml-cpu-get-rvv-vlen)
+    :int
+  "int ggml_cpu_get_rvv_vlen();")
+
+
+(cffi:defcfun ("ggml_cpu_has_vsx" ggml-cpu-has-vsx)
+    :int
+  "int ggml_cpu_has_vsx();")
+
+
+(cffi:defcfun ("ggml_cpu_has_vxe" ggml-cpu-has-vxe)
+    :int
+  "int ggml_cpu_has_vxe();")
+
+
+(cffi:defcfun ("ggml_cpu_has_wasm_simd" ggml-cpu-has-wasm-simd)
+    :int
+  "int ggml_cpu_has_wasm_simd();")
+
+
+(cffi:defcfun ("ggml_cpu_has_llamafile" ggml-cpu-has-llamafile)
+    :int
+  "int ggml_cpu_has_llamafile();")
+
+
+(cffi:defctype ggml-vec-dot-t (:pointer :void))
+
+
+(cffi:defcstruct (ggml-type-traits-cpu :size 32)
+  (from-float ggml-from-float-t :offset 0)
+  (vec-dot ggml-vec-dot-t :offset 8)
+  (vec-dot-type ggml-type :offset 16)
+  (nrows int64-t :offset 24))
+
+
+(cffi:defcfun ("ggml_get_type_traits_cpu" ggml-get-type-traits-cpu)
+    (:pointer (:struct ggml-type-traits-cpu))
+  "struct ggml_type_traits_cpu* ggml_get_type_traits_cpu(enum ggml_type type);"
+  (type ggml-type))
+
+
+(cffi:defcfun ("ggml_cpu_init" ggml-cpu-init)
+    :void
+  "void ggml_cpu_init();")
+
+
+(cffi:defcfun ("ggml_backend_cpu_init" ggml-backend-cpu-init)
+    ggml-backend-t
+  "ggml_backend_t ggml_backend_cpu_init();")
+
+
+(cffi:defcfun ("ggml_backend_is_cpu" ggml-backend-is-cpu)
+    :char
+  "char ggml_backend_is_cpu(ggml_backend_t backend);"
+  (backend ggml-backend-t))
+
+
+(cffi:defcfun ("ggml_backend_cpu_set_n_threads" ggml-backend-cpu-set-n-threads)
+    :void
+  "void ggml_backend_cpu_set_n_threads(ggml_backend_t backend_cpu, int n_threads);"
+  (backend-cpu ggml-backend-t)
+  (n-threads :int))
+
+
+(cffi:defcfun ("ggml_backend_cpu_set_threadpool" ggml-backend-cpu-set-threadpool)
+    :void
+  "void ggml_backend_cpu_set_threadpool(ggml_backend_t backend_cpu, ggml_threadpool_t threadpool);"
+  (backend-cpu ggml-backend-t)
+  (threadpool ggml-threadpool-t))
+
+
+(cffi:defcfun ("ggml_backend_cpu_set_abort_callback" ggml-backend-cpu-set-abort-callback)
+    :void
+  "void ggml_backend_cpu_set_abort_callback(ggml_backend_t backend_cpu, ggml_abort_callback abort_callback, void* abort_callback_data);"
+  (backend-cpu ggml-backend-t)
+  (abort-callback ggml-abort-callback)
+  (abort-callback-data (:pointer :void)))
+
+
+(cffi:defcfun ("ggml_backend_cpu_set_use_ref" ggml-backend-cpu-set-use-ref)
+    :void
+  "void ggml_backend_cpu_set_use_ref(ggml_backend_t backend_cpu, char use_ref);"
+  (backend-cpu ggml-backend-t)
+  (use-ref :char))
+
+
+(cffi:defcfun ("ggml_backend_cpu_reg" ggml-backend-cpu-reg)
+    ggml-backend-reg-t
+  "ggml_backend_reg_t ggml_backend_cpu_reg();")
+
+
+(cffi:defcfun ("ggml_cpu_fp32_to_fp32" ggml-cpu-fp32-to-fp32)
+    :void
+  "void ggml_cpu_fp32_to_fp32(float* arg0, float* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer :float))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_cpu_fp32_to_i32" ggml-cpu-fp32-to-i32)
+    :void
+  "void ggml_cpu_fp32_to_i32(float* arg0, int32_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer int32-t))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_cpu_fp32_to_fp16" ggml-cpu-fp32-to-fp16)
+    :void
+  "void ggml_cpu_fp32_to_fp16(float* arg0, ggml_fp16_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer ggml-fp16-t))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_cpu_fp16_to_fp32" ggml-cpu-fp16-to-fp32)
+    :void
+  "void ggml_cpu_fp16_to_fp32(ggml_fp16_t* arg0, float* arg1, int64_t arg2);"
+  (arg0 (:pointer ggml-fp16-t))
+  (arg1 (:pointer :float))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_cpu_fp32_to_bf16" ggml-cpu-fp32-to-bf16)
+    :void
+  "void ggml_cpu_fp32_to_bf16(float* arg0, ggml_bf16_t* arg1, int64_t arg2);"
+  (arg0 (:pointer :float))
+  (arg1 (:pointer ggml-bf16-t))
+  (arg2 int64-t))
+
+
+(cffi:defcfun ("ggml_cpu_bf16_to_fp32" ggml-cpu-bf16-to-fp32)
+    :void
+  "void ggml_cpu_bf16_to_fp32(ggml_bf16_t* arg0, float* arg1, int64_t arg2);"
+  (arg0 (:pointer ggml-bf16-t))
+  (arg1 (:pointer :float))
+  (arg2 int64-t))
+
+
 (cffi:defcstruct ggml-opt-dataset)
 
 
 (cffi:defctype ggml-opt-dataset-t (:pointer (:struct ggml-opt-dataset)))
+
+
+(cffi:defcstruct ggml-opt-context)
+
+
+(cffi:defctype ggml-opt-context-t (:pointer (:struct ggml-opt-context)))
 
 
 (cffi:defcstruct ggml-opt-result)
@@ -177,16 +6025,989 @@
 (cffi:defctype ggml-opt-result-t (:pointer (:struct ggml-opt-result)))
 
 
+(cffi:defcenum ggml-opt-loss-type
+  (:mean 0)
+  (:sum 1)
+  (:cross-entropy 2)
+  (:mean-squared-error 3))
+
+
+(cffi:defcfun ("ggml_opt_dataset_init" ggml-opt-dataset-init)
+    ggml-opt-dataset-t
+  "ggml_opt_dataset_t ggml_opt_dataset_init(enum ggml_type type_data, enum ggml_type type_label, int64_t ne_datapoint, int64_t ne_label, int64_t ndata, int64_t ndata_shard);"
+  (type-data ggml-type)
+  (type-label ggml-type)
+  (ne-datapoint int64-t)
+  (ne-label int64-t)
+  (ndata int64-t)
+  (ndata-shard int64-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_free" ggml-opt-dataset-free)
+    :void
+  "void ggml_opt_dataset_free(ggml_opt_dataset_t dataset);"
+  (dataset ggml-opt-dataset-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_ndata" ggml-opt-dataset-ndata)
+    int64-t
+  "int64_t ggml_opt_dataset_ndata(ggml_opt_dataset_t dataset);"
+  (dataset ggml-opt-dataset-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_data" ggml-opt-dataset-data)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_dataset_data(ggml_opt_dataset_t dataset);"
+  (dataset ggml-opt-dataset-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_labels" ggml-opt-dataset-labels)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_dataset_labels(ggml_opt_dataset_t dataset);"
+  (dataset ggml-opt-dataset-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_shuffle" ggml-opt-dataset-shuffle)
+    :void
+  "void ggml_opt_dataset_shuffle(ggml_opt_context_t opt_ctx, ggml_opt_dataset_t dataset, int64_t idata);"
+  (opt-ctx ggml-opt-context-t)
+  (dataset ggml-opt-dataset-t)
+  (idata int64-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_get_batch" ggml-opt-dataset-get-batch)
+    :void
+  "void ggml_opt_dataset_get_batch(ggml_opt_dataset_t dataset, struct ggml_tensor* data_batch, struct ggml_tensor* labels_batch, int64_t ibatch);"
+  (dataset ggml-opt-dataset-t)
+  (data-batch (:pointer (:struct ggml-tensor)))
+  (labels-batch (:pointer (:struct ggml-tensor)))
+  (ibatch int64-t))
+
+
+(cffi:defcfun ("ggml_opt_dataset_get_batch_host" ggml-opt-dataset-get-batch-host)
+    :void
+  "void ggml_opt_dataset_get_batch_host(ggml_opt_dataset_t dataset, void* data_batch, size_t nb_data_batch, void* labels_batch, int64_t ibatch);"
+  (dataset ggml-opt-dataset-t)
+  (data-batch (:pointer :void))
+  (nb-data-batch size-t)
+  (labels-batch (:pointer :void))
+  (ibatch int64-t))
+
+
+(cffi:defcenum ggml-opt-build-type
+  (:forward 10)
+  (:grad 20)
+  (:opt 30))
+
+
 (cffi:defcenum ggml-opt-optimizer-type
   (:adamw 0)
   (:sgd 1)
   (:count 2))
 
 
+(cffi:defcstruct (ggml-opt-optimizer-params-value :size 20)
+  (alpha :float :offset 0)
+  (beta1 :float :offset 4)
+  (beta2 :float :offset 8)
+  (eps :float :offset 12)
+  (wd :float :offset 16))
+
+
+(cffi:defcstruct (ggml-opt-optimizer-params-value :size 8)
+  (alpha :float :offset 0)
+  (wd :float :offset 4))
+
+
+(cffi:defcstruct (ggml-opt-optimizer-params :size 28)
+  (adamw (:struct ggml-opt-optimizer-params-value) :offset 0)
+  (sgd (:struct ggml-opt-optimizer-params-value) :offset 20))
+
+
 (cffi:defctype ggml-opt-get-optimizer-params (:pointer :void))
 
 
+(cffi:defcfun ("ggml_opt_get_default_optimizer_params" ggml-opt-get-default-optimizer-params)
+    (:struct ggml-opt-optimizer-params)
+  "struct ggml_opt_optimizer_params ggml_opt_get_default_optimizer_params(void* userdata);"
+  (userdata (:pointer :void)))
+
+
+(cffi:defcfun ("ggml_opt_get_constant_optimizer_params" ggml-opt-get-constant-optimizer-params)
+    (:struct ggml-opt-optimizer-params)
+  "struct ggml_opt_optimizer_params ggml_opt_get_constant_optimizer_params(void* userdata);"
+  (userdata (:pointer :void)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct (ggml-opt-params :size 72)
+  (backend-sched ggml-backend-sched-t :offset 0)
+  (ctx-compute (:pointer (:struct ggml-context)) :offset 8)
+  (inputs (:pointer (:struct ggml-tensor)) :offset 16)
+  (outputs (:pointer (:struct ggml-tensor)) :offset 24)
+  (loss-type ggml-opt-loss-type :offset 32)
+  (build-type ggml-opt-build-type :offset 36)
+  (opt-period int32-t :offset 40)
+  (get-opt-pars ggml-opt-get-optimizer-params :offset 48)
+  (get-opt-pars-ud (:pointer :void) :offset 56)
+  (optimizer ggml-opt-optimizer-type :offset 64))
+
+
+(cffi:defcfun ("ggml_opt_default_params" ggml-opt-default-params)
+    (:struct ggml-opt-params)
+  "struct ggml_opt_params ggml_opt_default_params(ggml_backend_sched_t backend_sched, enum ggml_opt_loss_type loss_type);"
+  (backend-sched ggml-backend-sched-t)
+  (loss-type ggml-opt-loss-type))
+
+
+(cffi:defcfun ("ggml_opt_init" ggml-opt-init)
+    ggml-opt-context-t
+  "ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params);"
+  (params (:struct ggml-opt-params)))
+
+
+(cffi:defcfun ("ggml_opt_free" ggml-opt-free)
+    :void
+  "void ggml_opt_free(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_reset" ggml-opt-reset)
+    :void
+  "void ggml_opt_reset(ggml_opt_context_t opt_ctx, char optimizer);"
+  (opt-ctx ggml-opt-context-t)
+  (optimizer :char))
+
+
+(cffi:defcfun ("ggml_opt_static_graphs" ggml-opt-static-graphs)
+    :char
+  "char ggml_opt_static_graphs(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_inputs" ggml-opt-inputs)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_inputs(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_outputs" ggml-opt-outputs)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_outputs(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_labels" ggml-opt-labels)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_labels(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_loss" ggml-opt-loss)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_loss(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_pred" ggml-opt-pred)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_pred(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_ncorrect" ggml-opt-ncorrect)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_ncorrect(ggml_opt_context_t opt_ctx);"
+  (opt-ctx ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_grad_acc" ggml-opt-grad-acc)
+    (:pointer (:struct ggml-tensor))
+  "struct ggml_tensor* ggml_opt_grad_acc(ggml_opt_context_t opt_ctx, struct ggml_tensor* node);"
+  (opt-ctx ggml-opt-context-t)
+  (node (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_opt_context_optimizer_type" ggml-opt-context-optimizer-type)
+    ggml-opt-optimizer-type
+  "enum ggml_opt_optimizer_type ggml_opt_context_optimizer_type(ggml_opt_context_t arg0);"
+  (arg0 ggml-opt-context-t))
+
+
+(cffi:defcfun ("ggml_opt_optimizer_name" ggml-opt-optimizer-name)
+    :string
+  "char* ggml_opt_optimizer_name(enum ggml_opt_optimizer_type arg0);"
+  (arg0 ggml-opt-optimizer-type))
+
+
+(cffi:defcfun ("ggml_opt_result_init" ggml-opt-result-init)
+    ggml-opt-result-t
+  "ggml_opt_result_t ggml_opt_result_init();")
+
+
+(cffi:defcfun ("ggml_opt_result_free" ggml-opt-result-free)
+    :void
+  "void ggml_opt_result_free(ggml_opt_result_t result);"
+  (result ggml-opt-result-t))
+
+
+(cffi:defcfun ("ggml_opt_result_reset" ggml-opt-result-reset)
+    :void
+  "void ggml_opt_result_reset(ggml_opt_result_t result);"
+  (result ggml-opt-result-t))
+
+
+(cffi:defcfun ("ggml_opt_result_ndata" ggml-opt-result-ndata)
+    :void
+  "void ggml_opt_result_ndata(ggml_opt_result_t result, int64_t* ndata);"
+  (result ggml-opt-result-t)
+  (ndata (:pointer int64-t)))
+
+
+(cffi:defcfun ("ggml_opt_result_loss" ggml-opt-result-loss)
+    :void
+  "void ggml_opt_result_loss(ggml_opt_result_t result, double* loss, double* unc);"
+  (result ggml-opt-result-t)
+  (loss (:pointer :double))
+  (unc (:pointer :double)))
+
+
+(cffi:defcfun ("ggml_opt_result_pred" ggml-opt-result-pred)
+    :void
+  "void ggml_opt_result_pred(ggml_opt_result_t result, int32_t* pred);"
+  (result ggml-opt-result-t)
+  (pred (:pointer int32-t)))
+
+
+(cffi:defcfun ("ggml_opt_result_accuracy" ggml-opt-result-accuracy)
+    :void
+  "void ggml_opt_result_accuracy(ggml_opt_result_t result, double* accuracy, double* unc);"
+  (result ggml-opt-result-t)
+  (accuracy (:pointer :double))
+  (unc (:pointer :double)))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct ggml-cgraph)
+
+
+(cffi:defcfun ("ggml_opt_prepare_alloc" ggml-opt-prepare-alloc)
+    :void
+  "void ggml_opt_prepare_alloc(ggml_opt_context_t opt_ctx, struct ggml_context* ctx_compute, struct ggml_cgraph* gf, struct ggml_tensor* inputs, struct ggml_tensor* outputs);"
+  (opt-ctx ggml-opt-context-t)
+  (ctx-compute (:pointer (:struct ggml-context)))
+  (gf (:pointer (:struct ggml-cgraph)))
+  (inputs (:pointer (:struct ggml-tensor)))
+  (outputs (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcfun ("ggml_opt_alloc" ggml-opt-alloc)
+    :void
+  "void ggml_opt_alloc(ggml_opt_context_t opt_ctx, char backward);"
+  (opt-ctx ggml-opt-context-t)
+  (backward :char))
+
+
+(cffi:defcfun ("ggml_opt_eval" ggml-opt-eval)
+    :void
+  "void ggml_opt_eval(ggml_opt_context_t opt_ctx, ggml_opt_result_t result);"
+  (opt-ctx ggml-opt-context-t)
+  (result ggml-opt-result-t))
+
+
 (cffi:defctype ggml-opt-epoch-callback (:pointer :void))
+
+
+(cffi:defcfun ("ggml_opt_epoch" ggml-opt-epoch)
+    :void
+  "void ggml_opt_epoch(ggml_opt_context_t opt_ctx, ggml_opt_dataset_t dataset, ggml_opt_result_t result_train, ggml_opt_result_t result_eval, int64_t idata_split, ggml_opt_epoch_callback callback_train, ggml_opt_epoch_callback callback_eval);"
+  (opt-ctx ggml-opt-context-t)
+  (dataset ggml-opt-dataset-t)
+  (result-train ggml-opt-result-t)
+  (result-eval ggml-opt-result-t)
+  (idata-split int64-t)
+  (callback-train ggml-opt-epoch-callback)
+  (callback-eval ggml-opt-epoch-callback))
+
+
+(cffi:defcfun ("ggml_opt_epoch_callback_progress_bar" ggml-opt-epoch-callback-progress-bar)
+    :void
+  "void ggml_opt_epoch_callback_progress_bar(char train, ggml_opt_context_t opt_ctx, ggml_opt_dataset_t dataset, ggml_opt_result_t result, int64_t ibatch, int64_t ibatch_max, int64_t t_start_us);"
+  (train :char)
+  (opt-ctx ggml-opt-context-t)
+  (dataset ggml-opt-dataset-t)
+  (result ggml-opt-result-t)
+  (ibatch int64-t)
+  (ibatch-max int64-t)
+  (t-start-us int64-t))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcfun ("ggml_opt_fit" ggml-opt-fit)
+    :void
+  "void ggml_opt_fit(ggml_backend_sched_t backend_sched, struct ggml_context* ctx_compute, struct ggml_tensor* inputs, struct ggml_tensor* outputs, ggml_opt_dataset_t dataset, enum ggml_opt_loss_type loss_type, enum ggml_opt_optimizer_type optimizer, ggml_opt_get_optimizer_params get_opt_pars, int64_t nepoch, int64_t nbatch_logical, float val_split, char silent);"
+  (backend-sched ggml-backend-sched-t)
+  (ctx-compute (:pointer (:struct ggml-context)))
+  (inputs (:pointer (:struct ggml-tensor)))
+  (outputs (:pointer (:struct ggml-tensor)))
+  (dataset ggml-opt-dataset-t)
+  (loss-type ggml-opt-loss-type)
+  (optimizer ggml-opt-optimizer-type)
+  (get-opt-pars ggml-opt-get-optimizer-params)
+  (nepoch int64-t)
+  (nbatch-logical int64-t)
+  (val-split :float)
+  (silent :char))
+
+
+(cffi:defcenum gguf-type
+  (:uint8 0)
+  (:int8 1)
+  (:uint16 2)
+  (:int16 3)
+  (:uint32 4)
+  (:int32 5)
+  (:float32 6)
+  (:bool 7)
+  (:string 8)
+  (:array 9)
+  (:uint64 10)
+  (:int64 11)
+  (:float64 12)
+  (:count 13))
+
+
+(cffi:defcstruct ggml-context)
+
+
+(cffi:defcstruct (gguf-init-params :size 16)
+  (no-alloc :char :offset 0)
+  (ctx (:pointer (:pointer (:struct ggml-context))) :offset 8))
+
+
+(cffi:defctype gguf-reader-callback-t (:pointer :void))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_init_empty" gguf-init-empty)
+    (:pointer (:struct gguf-context))
+  "struct gguf_context* gguf_init_empty();")
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_init_from_file_ptr" gguf-init-from-file-ptr)
+    (:pointer (:struct gguf-context))
+  "struct gguf_context* gguf_init_from_file_ptr(FILE* file, struct gguf_init_params params);"
+  (file (:pointer file))
+  (params (:struct gguf-init-params)))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_init_from_file" gguf-init-from-file)
+    (:pointer (:struct gguf-context))
+  "struct gguf_context* gguf_init_from_file(char* fname, struct gguf_init_params params);"
+  (fname :string)
+  (params (:struct gguf-init-params)))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_init_from_buffer" gguf-init-from-buffer)
+    (:pointer (:struct gguf-context))
+  "struct gguf_context* gguf_init_from_buffer(void* data, size_t size, struct gguf_init_params params);"
+  (data (:pointer :void))
+  (size size-t)
+  (params (:struct gguf-init-params)))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_init_from_callback" gguf-init-from-callback)
+    (:pointer (:struct gguf-context))
+  "struct gguf_context* gguf_init_from_callback(gguf_reader_callback_t callback, void* userdata, size_t max_chunk_read, uint64_t max_expected_size, struct gguf_init_params params);"
+  (callback gguf-reader-callback-t)
+  (userdata (:pointer :void))
+  (max-chunk-read size-t)
+  (max-expected-size uint64-t)
+  (params (:struct gguf-init-params)))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_free" gguf-free)
+    :void
+  "void gguf_free(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcfun ("gguf_type_name" gguf-type-name)
+    :string
+  "char* gguf_type_name(enum gguf_type type);"
+  (type gguf-type))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_version" gguf-get-version)
+    uint32-t
+  "uint32_t gguf_get_version(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_alignment" gguf-get-alignment)
+    size-t
+  "size_t gguf_get_alignment(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_data_offset" gguf-get-data-offset)
+    size-t
+  "size_t gguf_get_data_offset(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_n_kv" gguf-get-n-kv)
+    int64-t
+  "int64_t gguf_get_n_kv(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_find_key" gguf-find-key)
+    int64-t
+  "int64_t gguf_find_key(struct gguf_context* ctx, char* key);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_key" gguf-get-key)
+    :string
+  "char* gguf_get_key(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_kv_type" gguf-get-kv-type)
+    gguf-type
+  "enum gguf_type gguf_get_kv_type(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_arr_type" gguf-get-arr-type)
+    gguf-type
+  "enum gguf_type gguf_get_arr_type(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_u8" gguf-get-val-u8)
+    uint8-t
+  "uint8_t gguf_get_val_u8(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_i8" gguf-get-val-i8)
+    int8-t
+  "int8_t gguf_get_val_i8(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_u16" gguf-get-val-u16)
+    uint16-t
+  "uint16_t gguf_get_val_u16(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_i16" gguf-get-val-i16)
+    int16-t
+  "int16_t gguf_get_val_i16(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_u32" gguf-get-val-u32)
+    uint32-t
+  "uint32_t gguf_get_val_u32(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_i32" gguf-get-val-i32)
+    int32-t
+  "int32_t gguf_get_val_i32(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_f32" gguf-get-val-f32)
+    :float
+  "float gguf_get_val_f32(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_u64" gguf-get-val-u64)
+    uint64-t
+  "uint64_t gguf_get_val_u64(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_i64" gguf-get-val-i64)
+    int64-t
+  "int64_t gguf_get_val_i64(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_f64" gguf-get-val-f64)
+    :double
+  "double gguf_get_val_f64(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_bool" gguf-get-val-bool)
+    :char
+  "char gguf_get_val_bool(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_str" gguf-get-val-str)
+    :string
+  "char* gguf_get_val_str(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_val_data" gguf-get-val-data)
+    (:pointer :void)
+  "void* gguf_get_val_data(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_arr_n" gguf-get-arr-n)
+    size-t
+  "size_t gguf_get_arr_n(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_arr_data" gguf-get-arr-data)
+    (:pointer :void)
+  "void* gguf_get_arr_data(struct gguf_context* ctx, int64_t key_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_arr_str" gguf-get-arr-str)
+    :string
+  "char* gguf_get_arr_str(struct gguf_context* ctx, int64_t key_id, size_t i);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key-id int64-t)
+  (i size-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_n_tensors" gguf-get-n-tensors)
+    int64-t
+  "int64_t gguf_get_n_tensors(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_find_tensor" gguf-find-tensor)
+    int64-t
+  "int64_t gguf_find_tensor(struct gguf_context* ctx, char* name);"
+  (ctx (:pointer (:struct gguf-context)))
+  (name :string))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_tensor_offset" gguf-get-tensor-offset)
+    size-t
+  "size_t gguf_get_tensor_offset(struct gguf_context* ctx, int64_t tensor_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (tensor-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_tensor_name" gguf-get-tensor-name)
+    :string
+  "char* gguf_get_tensor_name(struct gguf_context* ctx, int64_t tensor_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (tensor-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_tensor_type" gguf-get-tensor-type)
+    ggml-type
+  "enum ggml_type gguf_get_tensor_type(struct gguf_context* ctx, int64_t tensor_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (tensor-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_tensor_size" gguf-get-tensor-size)
+    size-t
+  "size_t gguf_get_tensor_size(struct gguf_context* ctx, int64_t tensor_id);"
+  (ctx (:pointer (:struct gguf-context)))
+  (tensor-id int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_remove_key" gguf-remove-key)
+    int64-t
+  "int64_t gguf_remove_key(struct gguf_context* ctx, char* key);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_u8" gguf-set-val-u8)
+    :void
+  "void gguf_set_val_u8(struct gguf_context* ctx, char* key, uint8_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val uint8-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_i8" gguf-set-val-i8)
+    :void
+  "void gguf_set_val_i8(struct gguf_context* ctx, char* key, int8_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val int8-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_u16" gguf-set-val-u16)
+    :void
+  "void gguf_set_val_u16(struct gguf_context* ctx, char* key, uint16_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val uint16-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_i16" gguf-set-val-i16)
+    :void
+  "void gguf_set_val_i16(struct gguf_context* ctx, char* key, int16_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val int16-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_u32" gguf-set-val-u32)
+    :void
+  "void gguf_set_val_u32(struct gguf_context* ctx, char* key, uint32_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val uint32-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_i32" gguf-set-val-i32)
+    :void
+  "void gguf_set_val_i32(struct gguf_context* ctx, char* key, int32_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val int32-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_f32" gguf-set-val-f32)
+    :void
+  "void gguf_set_val_f32(struct gguf_context* ctx, char* key, float val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val :float))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_u64" gguf-set-val-u64)
+    :void
+  "void gguf_set_val_u64(struct gguf_context* ctx, char* key, uint64_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val uint64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_i64" gguf-set-val-i64)
+    :void
+  "void gguf_set_val_i64(struct gguf_context* ctx, char* key, int64_t val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val int64-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_f64" gguf-set-val-f64)
+    :void
+  "void gguf_set_val_f64(struct gguf_context* ctx, char* key, double val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val :double))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_bool" gguf-set-val-bool)
+    :void
+  "void gguf_set_val_bool(struct gguf_context* ctx, char* key, char val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val :char))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_val_str" gguf-set-val-str)
+    :void
+  "void gguf_set_val_str(struct gguf_context* ctx, char* key, char* val);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (val :string))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_arr_data" gguf-set-arr-data)
+    :void
+  "void gguf_set_arr_data(struct gguf_context* ctx, char* key, enum gguf_type type, void* data, size_t n);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (type gguf-type)
+  (data (:pointer :void))
+  (n size-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_arr_str" gguf-set-arr-str)
+    :void
+  "void gguf_set_arr_str(struct gguf_context* ctx, char* key, char** data, size_t n);"
+  (ctx (:pointer (:struct gguf-context)))
+  (key :string)
+  (data (:pointer :string))
+  (n size-t))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_kv" gguf-set-kv)
+    :void
+  "void gguf_set_kv(struct gguf_context* ctx, struct gguf_context* src);"
+  (ctx (:pointer (:struct gguf-context)))
+  (src (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_add_tensor" gguf-add-tensor)
+    :void
+  "void gguf_add_tensor(struct gguf_context* ctx, struct ggml_tensor* tensor);"
+  (ctx (:pointer (:struct gguf-context)))
+  (tensor (:pointer (:struct ggml-tensor))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_tensor_type" gguf-set-tensor-type)
+    :void
+  "void gguf_set_tensor_type(struct gguf_context* ctx, char* name, enum ggml_type type);"
+  (ctx (:pointer (:struct gguf-context)))
+  (name :string)
+  (type ggml-type))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_set_tensor_data" gguf-set-tensor-data)
+    :void
+  "void gguf_set_tensor_data(struct gguf_context* ctx, char* name, void* data);"
+  (ctx (:pointer (:struct gguf-context)))
+  (name :string)
+  (data (:pointer :void)))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_write_to_file_ptr" gguf-write-to-file-ptr)
+    :char
+  "char gguf_write_to_file_ptr(struct gguf_context* ctx, FILE* file, char only_meta);"
+  (ctx (:pointer (:struct gguf-context)))
+  (file (:pointer file))
+  (only-meta :char))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_write_to_file" gguf-write-to-file)
+    :char
+  "char gguf_write_to_file(struct gguf_context* ctx, char* fname, char only_meta);"
+  (ctx (:pointer (:struct gguf-context)))
+  (fname :string)
+  (only-meta :char))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_meta_size" gguf-get-meta-size)
+    size-t
+  "size_t gguf_get_meta_size(struct gguf_context* ctx);"
+  (ctx (:pointer (:struct gguf-context))))
+
+
+(cffi:defcstruct gguf-context)
+
+
+(cffi:defcfun ("gguf_get_meta_data" gguf-get-meta-data)
+    :void
+  "void gguf_get_meta_data(struct gguf_context* ctx, void* data);"
+  (ctx (:pointer (:struct gguf-context)))
+  (data (:pointer :void)))
 
 
 (cffi:defcstruct memory-i)
@@ -2711,6 +9532,114 @@
   (callback-eval ggml-opt-epoch-callback))
 
 
+(common-lisp:export '+ggml-api+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-backend-api+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-backend-meta-max-devices+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-default-graph-size+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-default-n-threads+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-exit-aborted+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-exit-success+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-file-magic+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-file-version+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-dims+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-name+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-n-threads+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-op-params+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-params+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-max-src+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-mem-align+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-mrope-sections+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-noreturn+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-n-tasks-max+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-qnt-version+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-qnt-version-factor+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-restrict+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-rope-type-imrope+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-rope-type-mrope+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-rope-type-neox+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-rope-type-normal+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-rope-type-vision+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-tensor-binary-op-locals+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-tensor-binary-op-locals01+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-tensor-size+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-tensor-ternary-op-locals+ "%LLAMA")
+
+
+(common-lisp:export '+ggml-tensor-unary-op-locals+ "%LLAMA")
+
+
+(common-lisp:export '+gguf-default-alignment+ "%LLAMA")
+
+
+(common-lisp:export '+gguf-key-general-alignment+ "%LLAMA")
+
+
+(common-lisp:export '+gguf-magic+ "%LLAMA")
+
+
+(common-lisp:export '+gguf-version+ "%LLAMA")
+
+
 (common-lisp:export '+default-seed+ "%LLAMA")
 
 
@@ -2759,6 +9688,12 @@
 (common-lisp:export '%%uint8-t "%LLAMA")
 
 
+(common-lisp:export '%%int16-t "%LLAMA")
+
+
+(common-lisp:export '%%uint16-t "%LLAMA")
+
+
 (common-lisp:export '%%int32-t "%LLAMA")
 
 
@@ -2774,6 +9709,9 @@
 (common-lisp:export 'int8-t "%LLAMA")
 
 
+(common-lisp:export 'int16-t "%LLAMA")
+
+
 (common-lisp:export 'int32-t "%LLAMA")
 
 
@@ -2781,6 +9719,9 @@
 
 
 (common-lisp:export 'uint8-t "%LLAMA")
+
+
+(common-lisp:export 'uint16-t "%LLAMA")
 
 
 (common-lisp:export 'uint32-t "%LLAMA")
@@ -2795,46 +9736,2431 @@
 (common-lisp:export 'file "%LLAMA")
 
 
+(common-lisp:export 'ggml-abort-callback-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-abort-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-abort "%LLAMA")
+
+
+(common-lisp:export 'ggml-status "%LLAMA")
+
+
+(common-lisp:export 'ggml-status-to-string "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp16-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp16-to-fp32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp32-to-fp16 "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp16-to-fp32-row "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp32-to-fp16-row "%LLAMA")
+
+
+(common-lisp:export 'bits "%LLAMA")
+
+
+(common-lisp:export 'anonymous-value "%LLAMA")
+
+
+(common-lisp:export 'ggml-bf16-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp32-to-bf16 "%LLAMA")
+
+
+(common-lisp:export 'ggml-bf16-to-fp32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-bf16-to-fp32-row "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp32-to-bf16-row-ref "%LLAMA")
+
+
+(common-lisp:export 'ggml-fp32-to-bf16-row "%LLAMA")
+
+
 (common-lisp:export 'ggml-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-prec "%LLAMA")
+
+
+(common-lisp:export 'ggml-op-hint "%LLAMA")
+
+
+(common-lisp:export 'ggml-ftype "%LLAMA")
+
+
+(common-lisp:export 'ggml-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-unary-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-glu-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-object-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-log-level "%LLAMA")
+
+
+(common-lisp:export 'ggml-tensor-flag "%LLAMA")
+
+
+(common-lisp:export 'ggml-tri-type "%LLAMA")
+
+
+(common-lisp:export 'mem-size "%LLAMA")
+
+
+(common-lisp:export 'mem-buffer "%LLAMA")
+
+
+(common-lisp:export 'no-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-init-params "%LLAMA")
 
 
 (common-lisp:export 'ggml-tensor "%LLAMA")
 
 
+(common-lisp:export 'type "%LLAMA")
+
+
+(common-lisp:export 'buffer "%LLAMA")
+
+
+(common-lisp:export 'ne "%LLAMA")
+
+
+(common-lisp:export 'nb "%LLAMA")
+
+
+(common-lisp:export 'op "%LLAMA")
+
+
+(common-lisp:export 'op-params "%LLAMA")
+
+
+(common-lisp:export 'flags "%LLAMA")
+
+
+(common-lisp:export 'src "%LLAMA")
+
+
+(common-lisp:export 'view-src "%LLAMA")
+
+
+(common-lisp:export 'view-offs "%LLAMA")
+
+
+(common-lisp:export 'data "%LLAMA")
+
+
+(common-lisp:export 'name "%LLAMA")
+
+
+(common-lisp:export 'extra "%LLAMA")
+
+
+(common-lisp:export 'padding "%LLAMA")
+
+
 (common-lisp:export 'ggml-abort-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-guid "%LLAMA")
+
+
+(common-lisp:export 'ggml-guid-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-guid-matches "%LLAMA")
+
+
+(common-lisp:export 'ggml-version "%LLAMA")
+
+
+(common-lisp:export 'ggml-commit "%LLAMA")
+
+
+(common-lisp:export 'ggml-time-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-time-ms "%LLAMA")
+
+
+(common-lisp:export 'ggml-time-us "%LLAMA")
+
+
+(common-lisp:export 'ggml-cycles "%LLAMA")
+
+
+(common-lisp:export 'ggml-cycles-per-ms "%LLAMA")
+
+
+(common-lisp:export 'ggml-fopen "%LLAMA")
+
+
+(common-lisp:export 'ggml-print-object "%LLAMA")
+
+
+(common-lisp:export 'ggml-print-objects "%LLAMA")
+
+
+(common-lisp:export 'ggml-nelements "%LLAMA")
+
+
+(common-lisp:export 'ggml-nrows "%LLAMA")
+
+
+(common-lisp:export 'ggml-nbytes "%LLAMA")
+
+
+(common-lisp:export 'ggml-nbytes-pad "%LLAMA")
+
+
+(common-lisp:export 'ggml-blck-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-type-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-row-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-type-sizef "%LLAMA")
+
+
+(common-lisp:export 'ggml-type-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-op-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-op-symbol "%LLAMA")
+
+
+(common-lisp:export 'ggml-unary-op-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-glu-op-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-op-desc "%LLAMA")
+
+
+(common-lisp:export 'ggml-element-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-quantized "%LLAMA")
+
+
+(common-lisp:export 'ggml-ftype-to-ggml-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-transposed "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-permuted "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-empty "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-view "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-scalar "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-vector "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-matrix "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-n-dims "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous-0 "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous-1 "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous-2 "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguously-allocated "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous-channels "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-contiguous-rows "%LLAMA")
+
+
+(common-lisp:export 'ggml-are-same-shape "%LLAMA")
+
+
+(common-lisp:export 'ggml-are-same-stride "%LLAMA")
+
+
+(common-lisp:export 'ggml-can-repeat "%LLAMA")
+
+
+(common-lisp:export 'ggml-tensor-overhead "%LLAMA")
+
+
+(common-lisp:export 'ggml-validate-row-data "%LLAMA")
+
+
+(common-lisp:export 'ggml-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-used-mem "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-no-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-no-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-mem-buffer "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-mem-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-max-tensor-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-tensor-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-tensor-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-tensor-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-tensor-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-buffer "%LLAMA")
+
+
+(common-lisp:export 'ggml-dup-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-view-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-first-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-next-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-unravel-index "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-unary-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-glu-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-data "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-data-f32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-format-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-input "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-output "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-param "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-loss "%LLAMA")
+
+
+(common-lisp:export 'ggml-dup "%LLAMA")
+
+
+(common-lisp:export 'ggml-dup-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-add "%LLAMA")
+
+
+(common-lisp:export 'ggml-add-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-add-cast "%LLAMA")
+
+
+(common-lisp:export 'ggml-add-id "%LLAMA")
+
+
+(common-lisp:export 'ggml-add1 "%LLAMA")
+
+
+(common-lisp:export 'ggml-add1-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-acc "%LLAMA")
+
+
+(common-lisp:export 'ggml-acc-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sub "%LLAMA")
+
+
+(common-lisp:export 'ggml-sub-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-div "%LLAMA")
+
+
+(common-lisp:export 'ggml-div-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sqr "%LLAMA")
+
+
+(common-lisp:export 'ggml-sqr-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sqrt "%LLAMA")
+
+
+(common-lisp:export 'ggml-sqrt-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-log "%LLAMA")
+
+
+(common-lisp:export 'ggml-log-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-expm1 "%LLAMA")
+
+
+(common-lisp:export 'ggml-expm1-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-softplus "%LLAMA")
+
+
+(common-lisp:export 'ggml-softplus-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sin "%LLAMA")
+
+
+(common-lisp:export 'ggml-sin-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-cos "%LLAMA")
+
+
+(common-lisp:export 'ggml-cos-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sum "%LLAMA")
+
+
+(common-lisp:export 'ggml-sum-rows "%LLAMA")
+
+
+(common-lisp:export 'ggml-cumsum "%LLAMA")
+
+
+(common-lisp:export 'ggml-mean "%LLAMA")
+
+
+(common-lisp:export 'ggml-argmax "%LLAMA")
+
+
+(common-lisp:export 'ggml-count-equal "%LLAMA")
+
+
+(common-lisp:export 'ggml-repeat "%LLAMA")
+
+
+(common-lisp:export 'ggml-repeat-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-repeat-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-concat "%LLAMA")
+
+
+(common-lisp:export 'ggml-abs "%LLAMA")
+
+
+(common-lisp:export 'ggml-abs-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sgn "%LLAMA")
+
+
+(common-lisp:export 'ggml-sgn-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-neg "%LLAMA")
+
+
+(common-lisp:export 'ggml-neg-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-step "%LLAMA")
+
+
+(common-lisp:export 'ggml-step-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-tanh "%LLAMA")
+
+
+(common-lisp:export 'ggml-tanh-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-elu "%LLAMA")
+
+
+(common-lisp:export 'ggml-elu-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-relu "%LLAMA")
+
+
+(common-lisp:export 'ggml-leaky-relu "%LLAMA")
+
+
+(common-lisp:export 'ggml-relu-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-sigmoid "%LLAMA")
+
+
+(common-lisp:export 'ggml-sigmoid-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu-erf "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu-erf-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu-quick "%LLAMA")
+
+
+(common-lisp:export 'ggml-gelu-quick-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-silu "%LLAMA")
+
+
+(common-lisp:export 'ggml-silu-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-silu-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-hardswish "%LLAMA")
+
+
+(common-lisp:export 'ggml-hardsigmoid "%LLAMA")
+
+
+(common-lisp:export 'ggml-exp "%LLAMA")
+
+
+(common-lisp:export 'ggml-exp-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-floor "%LLAMA")
+
+
+(common-lisp:export 'ggml-floor-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-ceil "%LLAMA")
+
+
+(common-lisp:export 'ggml-ceil-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-round "%LLAMA")
+
+
+(common-lisp:export 'ggml-round-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-trunc "%LLAMA")
+
+
+(common-lisp:export 'ggml-trunc-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-xielu "%LLAMA")
+
+
+(common-lisp:export 'ggml-glu "%LLAMA")
+
+
+(common-lisp:export 'ggml-reglu "%LLAMA")
+
+
+(common-lisp:export 'ggml-reglu-swapped "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-swapped "%LLAMA")
+
+
+(common-lisp:export 'ggml-swiglu "%LLAMA")
+
+
+(common-lisp:export 'ggml-swiglu-swapped "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-erf "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-erf-swapped "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-quick "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-quick-swapped "%LLAMA")
+
+
+(common-lisp:export 'ggml-glu-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-reglu-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-swiglu-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-erf-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-geglu-quick-split "%LLAMA")
+
+
+(common-lisp:export 'ggml-swiglu-oai "%LLAMA")
+
+
+(common-lisp:export 'ggml-norm "%LLAMA")
+
+
+(common-lisp:export 'ggml-norm-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rms-norm "%LLAMA")
+
+
+(common-lisp:export 'ggml-rms-norm-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-group-norm "%LLAMA")
+
+
+(common-lisp:export 'ggml-group-norm-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-l2-norm "%LLAMA")
+
+
+(common-lisp:export 'ggml-l2-norm-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rms-norm-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul-mat "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul-mat-set-prec "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul-mat-set-hint "%LLAMA")
+
+
+(common-lisp:export 'ggml-mul-mat-id "%LLAMA")
+
+
+(common-lisp:export 'ggml-out-prod "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale-bias "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale-bias-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-set "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-1d-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-2d-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpy "%LLAMA")
+
+
+(common-lisp:export 'ggml-cast "%LLAMA")
+
+
+(common-lisp:export 'ggml-cont "%LLAMA")
+
+
+(common-lisp:export 'ggml-cont-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-cont-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-cont-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-cont-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-reshape "%LLAMA")
+
+
+(common-lisp:export 'ggml-reshape-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-reshape-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-reshape-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-reshape-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-view-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-view-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-view-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-view-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-permute "%LLAMA")
+
+
+(common-lisp:export 'ggml-transpose "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-rows "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-rows-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-rows "%LLAMA")
+
+
+(common-lisp:export 'ggml-diag "%LLAMA")
+
+
+(common-lisp:export 'ggml-diag-mask-inf "%LLAMA")
+
+
+(common-lisp:export 'ggml-diag-mask-inf-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-diag-mask-zero "%LLAMA")
+
+
+(common-lisp:export 'ggml-diag-mask-zero-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-ext "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-ext-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-add-sinks "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-ext-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-soft-max-ext-back-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-ext "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-multi "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-ext-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-multi-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-custom "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-custom-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-yarn-corr-dims "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-ext-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-rope-multi-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-clamp "%LLAMA")
+
+
+(common-lisp:export 'ggml-im2col "%LLAMA")
+
+
+(common-lisp:export 'ggml-im2col-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-col2im-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-1d-ph "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-1d-dw "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-1d-dw-ph "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-transpose-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-im2col-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-3d "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d-sk-p0 "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d-s1-ph "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d-dw "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d-dw-direct "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-transpose-2d-p0 "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-2d-direct "%LLAMA")
+
+
+(common-lisp:export 'ggml-conv-3d-direct "%LLAMA")
+
+
+(common-lisp:export 'ggml-op-pool "%LLAMA")
+
+
+(common-lisp:export 'ggml-pool-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-pool-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-pool-2d-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale-mode "%LLAMA")
+
+
+(common-lisp:export 'ggml-scale-flag "%LLAMA")
+
+
+(common-lisp:export 'ggml-upscale "%LLAMA")
+
+
+(common-lisp:export 'ggml-upscale-ext "%LLAMA")
+
+
+(common-lisp:export 'ggml-interpolate "%LLAMA")
+
+
+(common-lisp:export 'ggml-pad "%LLAMA")
+
+
+(common-lisp:export 'ggml-pad-circular "%LLAMA")
+
+
+(common-lisp:export 'ggml-pad-ext "%LLAMA")
+
+
+(common-lisp:export 'ggml-pad-ext-circular "%LLAMA")
+
+
+(common-lisp:export 'ggml-pad-reflect-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-roll "%LLAMA")
+
+
+(common-lisp:export 'ggml-tri "%LLAMA")
+
+
+(common-lisp:export 'ggml-fill "%LLAMA")
+
+
+(common-lisp:export 'ggml-fill-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-timestep-embedding "%LLAMA")
+
+
+(common-lisp:export 'ggml-sort-order "%LLAMA")
+
+
+(common-lisp:export 'ggml-argsort "%LLAMA")
+
+
+(common-lisp:export 'ggml-argsort-top-k "%LLAMA")
+
+
+(common-lisp:export 'ggml-top-k "%LLAMA")
+
+
+(common-lisp:export 'ggml-arange "%LLAMA")
+
+
+(common-lisp:export 'ggml-flash-attn-ext "%LLAMA")
+
+
+(common-lisp:export 'ggml-flash-attn-ext-set-prec "%LLAMA")
+
+
+(common-lisp:export 'ggml-flash-attn-ext-get-prec "%LLAMA")
+
+
+(common-lisp:export 'ggml-flash-attn-ext-add-sinks "%LLAMA")
+
+
+(common-lisp:export 'ggml-flash-attn-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-ssm-conv "%LLAMA")
+
+
+(common-lisp:export 'ggml-ssm-scan "%LLAMA")
+
+
+(common-lisp:export 'ggml-win-part "%LLAMA")
+
+
+(common-lisp:export 'ggml-win-unpart "%LLAMA")
+
+
+(common-lisp:export 'ggml-unary "%LLAMA")
+
+
+(common-lisp:export 'ggml-unary-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-rel-pos "%LLAMA")
+
+
+(common-lisp:export 'ggml-add-rel-pos "%LLAMA")
+
+
+(common-lisp:export 'ggml-add-rel-pos-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-rwkv-wkv6 "%LLAMA")
+
+
+(common-lisp:export 'ggml-gated-linear-attn "%LLAMA")
+
+
+(common-lisp:export 'ggml-rwkv-wkv7 "%LLAMA")
+
+
+(common-lisp:export 'ggml-solve-tri "%LLAMA")
+
+
+(common-lisp:export 'ggml-gated-delta-net "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom1-op-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom2-op-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom3-op-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom1 "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom1-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom2 "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom2-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom3 "%LLAMA")
+
+
+(common-lisp:export 'ggml-map-custom3-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom-op-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom-4d "%LLAMA")
+
+
+(common-lisp:export 'ggml-custom-inplace "%LLAMA")
+
+
+(common-lisp:export 'ggml-cross-entropy-loss "%LLAMA")
+
+
+(common-lisp:export 'ggml-cross-entropy-loss-back "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-step-adamw "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-step-sgd "%LLAMA")
+
+
+(common-lisp:export 'ggml-build-forward-select "%LLAMA")
+
+
+(common-lisp:export 'ggml-build-forward-expand "%LLAMA")
+
+
+(common-lisp:export 'ggml-build-backward-expand "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-graph "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-graph-custom "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-dup "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-cpy "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-clear "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-node "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-nodes "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-n-nodes "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-add-node "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-overhead "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-overhead-custom "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-get-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-get-grad "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-get-grad-acc "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-print "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-dump-dot "%LLAMA")
 
 
 (common-lisp:export 'ggml-log-callback "%LLAMA")
 
 
+(common-lisp:export 'ggml-log-get "%LLAMA")
+
+
+(common-lisp:export 'ggml-log-set "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-zero "%LLAMA")
+
+
+(common-lisp:export 'ggml-quantize-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-quantize-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-quantize-requires-imatrix "%LLAMA")
+
+
+(common-lisp:export 'ggml-quantize-chunk "%LLAMA")
+
+
+(common-lisp:export 'ggml-to-float-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-from-float-t "%LLAMA")
+
+
+(common-lisp:export 'type-name "%LLAMA")
+
+
+(common-lisp:export 'blck-size "%LLAMA")
+
+
+(common-lisp:export 'blck-size-interleave "%LLAMA")
+
+
+(common-lisp:export 'type-size "%LLAMA")
+
+
+(common-lisp:export 'is-quantized "%LLAMA")
+
+
+(common-lisp:export 'to-float "%LLAMA")
+
+
+(common-lisp:export 'from-float-ref "%LLAMA")
+
+
+(common-lisp:export 'ggml-type-traits "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-type-traits "%LLAMA")
+
+
+(common-lisp:export 'ggml-sched-priority "%LLAMA")
+
+
+(common-lisp:export 'cpumask "%LLAMA")
+
+
+(common-lisp:export 'n-threads "%LLAMA")
+
+
+(common-lisp:export 'prio "%LLAMA")
+
+
+(common-lisp:export 'poll "%LLAMA")
+
+
+(common-lisp:export 'strict-cpu "%LLAMA")
+
+
+(common-lisp:export 'paused "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-params "%LLAMA")
+
+
 (common-lisp:export 'ggml-threadpool-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-params-default "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-params-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-params-match "%LLAMA")
 
 
 (common-lisp:export 'ggml-backend-buffer-type-t "%LLAMA")
 
 
+(common-lisp:export 'ggml-backend-buffer-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-t "%LLAMA")
+
+
+(common-lisp:export 'base "%LLAMA")
+
+
+(common-lisp:export 'alignment "%LLAMA")
+
+
+(common-lisp:export 'offset "%LLAMA")
+
+
+(common-lisp:export 'ggml-tallocr "%LLAMA")
+
+
+(common-lisp:export 'ggml-tallocr-new "%LLAMA")
+
+
+(common-lisp:export 'ggml-tallocr-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-new "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-new-n "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-reserve "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-reserve-n-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-reserve-n "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-alloc-graph "%LLAMA")
+
+
+(common-lisp:export 'ggml-gallocr-get-buffer-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-alloc-ctx-tensors-from-buft-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-alloc-ctx-tensors-from-buft "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-alloc-ctx-tensors "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-plan-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-t "%LLAMA")
+
+
 (common-lisp:export 'ggml-backend-dev-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-alloc-buffer "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-get-alignment "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-get-max-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-get-alloc-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-is-host "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buft-get-device "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-usage "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-base "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-init-tensor "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-alignment "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-max-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-alloc-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-clear "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-is-host "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-set-usage "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-usage "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-get-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-buffer-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-copy "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-guid "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-get-default-buffer-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-alloc-buffer "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-get-alignment "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-get-max-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-set-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-get-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-set-2d-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-get-2d-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-set "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-get "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-set-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-get-2d "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-memset "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-synchronize "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-plan-create "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-plan-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-plan-compute "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-compute "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-compute-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-supports-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-supports-buft "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-offload-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-copy-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-get-device "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-new "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-record "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-synchronize "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-event-wait "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-type "%LLAMA")
+
+
+(common-lisp:export 'async "%LLAMA")
+
+
+(common-lisp:export 'host-buffer "%LLAMA")
+
+
+(common-lisp:export 'buffer-from-host-ptr "%LLAMA")
+
+
+(common-lisp:export 'events "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-caps "%LLAMA")
+
+
+(common-lisp:export 'description "%LLAMA")
+
+
+(common-lisp:export 'memory-free "%LLAMA")
+
+
+(common-lisp:export 'memory-total "%LLAMA")
+
+
+(common-lisp:export 'device-id "%LLAMA")
+
+
+(common-lisp:export 'caps "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-props "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-description "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-memory "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-get-props "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-backend-reg "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-buffer-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-host-buffer-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-buffer-from-host-ptr "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-supports-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-supports-buft "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-offload-op "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-dev-count "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-dev-get "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-get-proc-address "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-comm-init-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-comm-free-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-comm-allreduce-tensor-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-split-buffer-type-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-set-n-threads-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-get-extra-bufts-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-set-abort-callback-t "%LLAMA")
+
+
+(common-lisp:export 'value "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-feature "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-get-features-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-register "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-device-register "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-count "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-get "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-reg-by-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-count "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-get "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-by-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-dev-by-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-init-by-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-init-by-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-init-best "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-load "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-unload "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-load-all "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-load-all-from-path "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-t "%LLAMA")
 
 
 (common-lisp:export 'ggml-backend-sched-eval-callback "%LLAMA")
 
 
+(common-lisp:export 'ggml-backend-sched-new "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-reserve-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-reserve "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-n-backends "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-backend "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-n-splits "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-n-copies "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-buffer-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-buffer-size "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-set-tensor-backend "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-get-tensor-backend "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-split-graph "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-alloc-graph "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-graph-compute "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-graph-compute-async "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-synchronize "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-sched-set-eval-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-meta-split-axis "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-meta-split-axis-name "%LLAMA")
+
+
+(common-lisp:export 'axis "%LLAMA")
+
+
+(common-lisp:export 'nr "%LLAMA")
+
+
+(common-lisp:export 'n-segments "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-meta-split-state "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-meta-get-split-state-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-meta-device "%LLAMA")
+
+
+(common-lisp:export 'ctx-allocated "%LLAMA")
+
+
+(common-lisp:export 'ctx-unallocated "%LLAMA")
+
+
+(common-lisp:export 'graph "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-copy "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-graph-copy-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-eval-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-compare-graph-backend "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-tensor-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-view-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-buffer-from-ptr "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-buffer-type "%LLAMA")
+
+
+(common-lisp:export 'work-size "%LLAMA")
+
+
+(common-lisp:export 'work-data "%LLAMA")
+
+
+(common-lisp:export 'threadpool "%LLAMA")
+
+
+(common-lisp:export 'abort-callback "%LLAMA")
+
+
+(common-lisp:export 'abort-callback-data "%LLAMA")
+
+
+(common-lisp:export 'use-ref "%LLAMA")
+
+
+(common-lisp:export 'ggml-cplan "%LLAMA")
+
+
 (common-lisp:export 'ggml-numa-strategy "%LLAMA")
+
+
+(common-lisp:export 'ggml-numa-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-is-numa "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-i32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-new-f32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-i32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-f32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-i32-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-i32-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-i32-nd "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-i32-nd "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-f32-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-f32-1d "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-f32-nd "%LLAMA")
+
+
+(common-lisp:export 'ggml-set-f32-nd "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-new "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-get-n-threads "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-pause "%LLAMA")
+
+
+(common-lisp:export 'ggml-threadpool-resume "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-plan "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-compute "%LLAMA")
+
+
+(common-lisp:export 'ggml-graph-compute-with-ctx "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-sse3 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-ssse3 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx-vnni "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx2 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-bmi2 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-f16c "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-fma "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx512 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx512-vbmi "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx512-vnni "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-avx512-bf16 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-amx-int8 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-neon "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-arm-fma "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-fp16-va "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-dotprod "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-matmul-int8 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-sve "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-get-sve-cnt "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-sme "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-riscv-v "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-get-rvv-vlen "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-vsx "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-vxe "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-wasm-simd "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-has-llamafile "%LLAMA")
+
+
+(common-lisp:export 'ggml-vec-dot-t "%LLAMA")
+
+
+(common-lisp:export 'from-float "%LLAMA")
+
+
+(common-lisp:export 'vec-dot "%LLAMA")
+
+
+(common-lisp:export 'vec-dot-type "%LLAMA")
+
+
+(common-lisp:export 'nrows "%LLAMA")
+
+
+(common-lisp:export 'ggml-type-traits-cpu "%LLAMA")
+
+
+(common-lisp:export 'ggml-get-type-traits-cpu "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-is-cpu "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-set-n-threads "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-set-threadpool "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-set-abort-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-set-use-ref "%LLAMA")
+
+
+(common-lisp:export 'ggml-backend-cpu-reg "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-fp32-to-fp32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-fp32-to-i32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-fp32-to-fp16 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-fp16-to-fp32 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-fp32-to-bf16 "%LLAMA")
+
+
+(common-lisp:export 'ggml-cpu-bf16-to-fp32 "%LLAMA")
 
 
 (common-lisp:export 'ggml-opt-dataset-t "%LLAMA")
 
 
+(common-lisp:export 'ggml-opt-context-t "%LLAMA")
+
+
 (common-lisp:export 'ggml-opt-result-t "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-loss-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-ndata "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-data "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-labels "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-shuffle "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-get-batch "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-dataset-get-batch-host "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-build-type "%LLAMA")
 
 
 (common-lisp:export 'ggml-opt-optimizer-type "%LLAMA")
 
 
+(common-lisp:export 'alpha "%LLAMA")
+
+
+(common-lisp:export 'beta1 "%LLAMA")
+
+
+(common-lisp:export 'beta2 "%LLAMA")
+
+
+(common-lisp:export 'eps "%LLAMA")
+
+
+(common-lisp:export 'wd "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-optimizer-params-value "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-optimizer-params-value "%LLAMA")
+
+
+(common-lisp:export 'adamw "%LLAMA")
+
+
+(common-lisp:export 'sgd "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-optimizer-params "%LLAMA")
+
+
 (common-lisp:export 'ggml-opt-get-optimizer-params "%LLAMA")
 
 
+(common-lisp:export 'ggml-opt-get-default-optimizer-params "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-get-constant-optimizer-params "%LLAMA")
+
+
+(common-lisp:export 'backend-sched "%LLAMA")
+
+
+(common-lisp:export 'ctx-compute "%LLAMA")
+
+
+(common-lisp:export 'inputs "%LLAMA")
+
+
+(common-lisp:export 'outputs "%LLAMA")
+
+
+(common-lisp:export 'loss-type "%LLAMA")
+
+
+(common-lisp:export 'build-type "%LLAMA")
+
+
+(common-lisp:export 'opt-period "%LLAMA")
+
+
+(common-lisp:export 'get-opt-pars "%LLAMA")
+
+
+(common-lisp:export 'get-opt-pars-ud "%LLAMA")
+
+
+(common-lisp:export 'optimizer "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-params "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-default-params "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-static-graphs "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-inputs "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-outputs "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-labels "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-loss "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-pred "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-ncorrect "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-grad-acc "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-context-optimizer-type "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-optimizer-name "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-init "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-free "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-reset "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-ndata "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-loss "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-pred "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-result-accuracy "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-prepare-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-alloc "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-eval "%LLAMA")
+
+
 (common-lisp:export 'ggml-opt-epoch-callback "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-epoch "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-epoch-callback-progress-bar "%LLAMA")
+
+
+(common-lisp:export 'ggml-opt-fit "%LLAMA")
+
+
+(common-lisp:export 'gguf-type "%LLAMA")
+
+
+(common-lisp:export 'ctx "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-params "%LLAMA")
+
+
+(common-lisp:export 'gguf-reader-callback-t "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-empty "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-from-file-ptr "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-from-file "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-from-buffer "%LLAMA")
+
+
+(common-lisp:export 'gguf-init-from-callback "%LLAMA")
+
+
+(common-lisp:export 'gguf-free "%LLAMA")
+
+
+(common-lisp:export 'gguf-type-name "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-version "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-alignment "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-data-offset "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-n-kv "%LLAMA")
+
+
+(common-lisp:export 'gguf-find-key "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-key "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-kv-type "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-arr-type "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-u8 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-i8 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-u16 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-i16 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-u32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-i32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-f32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-u64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-i64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-f64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-bool "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-str "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-val-data "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-arr-n "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-arr-data "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-arr-str "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-n-tensors "%LLAMA")
+
+
+(common-lisp:export 'gguf-find-tensor "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-tensor-offset "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-tensor-name "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-tensor-type "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-tensor-size "%LLAMA")
+
+
+(common-lisp:export 'gguf-remove-key "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-u8 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-i8 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-u16 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-i16 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-u32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-i32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-f32 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-u64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-i64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-f64 "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-bool "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-val-str "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-arr-data "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-arr-str "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-kv "%LLAMA")
+
+
+(common-lisp:export 'gguf-add-tensor "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-tensor-type "%LLAMA")
+
+
+(common-lisp:export 'gguf-set-tensor-data "%LLAMA")
+
+
+(common-lisp:export 'gguf-write-to-file-ptr "%LLAMA")
+
+
+(common-lisp:export 'gguf-write-to-file "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-meta-size "%LLAMA")
+
+
+(common-lisp:export 'gguf-get-meta-data "%LLAMA")
 
 
 (common-lisp:export 'memory-t "%LLAMA")
@@ -2895,9 +12221,6 @@
 
 
 (common-lisp:export 'token-data "%LLAMA")
-
-
-(common-lisp:export 'data "%LLAMA")
 
 
 (common-lisp:export 'size "%LLAMA")
@@ -3011,13 +12334,7 @@
 (common-lisp:export 'no-host "%LLAMA")
 
 
-(common-lisp:export 'no-alloc "%LLAMA")
-
-
 (common-lisp:export 'model-params "%LLAMA")
-
-
-(common-lisp:export 'name "%LLAMA")
 
 
 (common-lisp:export 'accept "%LLAMA")
@@ -3056,9 +12373,6 @@
 (common-lisp:export 'iface "%LLAMA")
 
 
-(common-lisp:export 'ctx "%LLAMA")
-
-
 (common-lisp:export 'sampler "%LLAMA")
 
 
@@ -3081,9 +12395,6 @@
 
 
 (common-lisp:export 'n-outputs-max "%LLAMA")
-
-
-(common-lisp:export 'n-threads "%LLAMA")
 
 
 (common-lisp:export 'n-threads-batch "%LLAMA")
@@ -3128,12 +12439,6 @@
 (common-lisp:export 'type-v "%LLAMA")
 
 
-(common-lisp:export 'abort-callback "%LLAMA")
-
-
-(common-lisp:export 'abort-callback-data "%LLAMA")
-
-
 (common-lisp:export 'embeddings "%LLAMA")
 
 
@@ -3162,9 +12467,6 @@
 
 
 (common-lisp:export 'context-params "%LLAMA")
-
-
-(common-lisp:export 'type "%LLAMA")
 
 
 (common-lisp:export 'model-tensor-override "%LLAMA")
@@ -3942,12 +13244,6 @@
 
 
 (common-lisp:export 'param-filter-ud "%LLAMA")
-
-
-(common-lisp:export 'get-opt-pars "%LLAMA")
-
-
-(common-lisp:export 'get-opt-pars-ud "%LLAMA")
 
 
 (common-lisp:export 'optimizer-type "%LLAMA")
