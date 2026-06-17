@@ -74,7 +74,14 @@
     %llama:model-meta-val-str %llama:model-meta-val-str-by-index
     %llama:n-ctx %llama:n-batch %llama:n-ubatch %llama:n-seq-max
     %llama:n-threads %llama:n-threads-batch %llama:pooling-type
-    %llama:print-system-info))
+    %llama:print-system-info
+    ;; Backend lifecycle
+    %llama:backend-free %llama:numa-init
+    ;; Context runtime configuration
+    %llama:set-n-threads %llama:set-warmup %llama:set-causal-attn
+    %llama:set-embeddings %llama:synchronize %llama:set-abort-callback
+    ;; Threadpool management
+    %llama:attach-threadpool %llama:detach-threadpool))
 
 (defun check-binding-deps ()
   "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.
@@ -101,6 +108,27 @@ Returns T if all present, signals a warning per missing symbol."
     (with-fp-traps-masked
       (%llama:backend-init))
     (setf *backend-initialized* t)))
+
+(defmacro with-backend ((&key numa) &body body)
+  "Initialize the llama backend, execute BODY, then shut it down.
+On non-local exit the backend is always freed. Nesting is safe: only the
+outermost WITH-BACKEND shuts down the backend. When :NUMA is a
+ggml-numa-strategy keyword (:distribute :isolate :numactl :mirror),
+calls llama-numa-init before executing BODY."
+  (let ((outermost (gensym "OUTERMOST")))
+    `(let ((,outermost (not *backend-initialized*)))
+       (unless *backend-initialized*
+         (with-fp-traps-masked (%llama:backend-init))
+         (setf *backend-initialized* t))
+       ,(when numa
+          `(with-fp-traps-masked (%llama:numa-init ,numa)))
+       (unwind-protect
+            (progn ,@body)
+         (when ,outermost
+           (with-fp-traps-masked (%llama:backend-free))
+           (setf *backend-initialized* nil))))))
+
+(defun %bool->c (x) (if x 1 0))
 
 (defun override-params (defaults overrides)
   "Override struct plist DEFAULTS with keyword OVERRIDES.
@@ -1059,6 +1087,75 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
   "Return a string describing the llama.cpp build and system capabilities."
   (with-fp-traps-masked
     (%llama:print-system-info)))
+
+;;; Context runtime configuration
+
+(defun set-n-threads (ctx n-threads n-threads-batch)
+  "Set the number of threads on CTX for single-token decoding (N-THREADS)
+and batch decoding (N-THREADS-BATCH). Both values are required together."
+  (check-type n-threads (integer 0 *))
+  (check-type n-threads-batch (integer 0 *))
+  (with-fp-traps-masked
+    (%llama:set-n-threads ctx n-threads n-threads-batch))
+  nil)
+
+(defun set-warmup (ctx warmup-p)
+  "Enable or disable the warmup pass on CTX."
+  (with-fp-traps-masked
+    (%llama:set-warmup ctx (%bool->c warmup-p)))
+  nil)
+
+(defun set-causal-attn (ctx causal-attn-p)
+  "Enable or disable causal attention on CTX."
+  (with-fp-traps-masked
+    (%llama:set-causal-attn ctx (%bool->c causal-attn-p)))
+  nil)
+
+(defun set-embeddings (ctx embeddings-p)
+  "Set the embedding-output flag on CTX to EMBEDDINGS-P. Must match the mode
+the context was created with: enable only on contexts created with :embeddings
+non-nil, disable only on contexts created without it. Toggling on a mismatched
+context leaves internal C state inconsistent."
+  (with-fp-traps-masked
+    (%llama:set-embeddings ctx (%bool->c embeddings-p)))
+  nil)
+
+(defun synchronize (ctx)
+  "Block until all pending async operations on CTX have completed."
+  (with-fp-traps-masked
+    (%llama:synchronize ctx))
+  nil)
+
+(defun set-abort-callback (ctx callback &optional data)
+  "Register an abort callback on CTX. CALLBACK must be a foreign function
+pointer obtained via CFFI:CALLBACK, or NIL to clear the callback.
+DATA is an optional opaque data pointer passed to the callback."
+  (with-fp-traps-masked
+    (%llama:set-abort-callback
+     ctx
+     (or callback (cffi:null-pointer))
+     (or data (cffi:null-pointer))))
+  nil)
+
+;;; Threadpool management
+
+(defun attach-threadpool (ctx threadpool &optional threadpool-batch)
+  "Attach THREADPOOL to CTX. THREADPOOL-BATCH is an optional separate
+threadpool for batch operations; when omitted, THREADPOOL is used for both.
+The caller retains ownership of the threadpool — detach-threadpool does
+not free it."
+  (with-fp-traps-masked
+    (%llama:attach-threadpool
+     ctx
+     threadpool
+     (or threadpool-batch (cffi:null-pointer))))
+  nil)
+
+(defun detach-threadpool (ctx)
+  "Detach the threadpool from CTX. Does not free the threadpool."
+  (with-fp-traps-masked
+    (%llama:detach-threadpool ctx))
+  nil)
 
 ;;; Sampler utilities
 
