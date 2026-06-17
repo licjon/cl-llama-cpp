@@ -1153,3 +1153,153 @@ ws     ::= [ \\t\\n]*")
               (setf captured batch)
               (error "deliberate error")))
           (ok captured "batch handle was captured before error"))))))
+
+;;; Performance counter integration tests
+
+(deftest context-perf-returns-plist
+  (when-model-available
+    (testing "context-perf returns a plist with expected keys"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((perf (cl-llama-cpp:context-perf ctx)))
+            (ok (listp perf) "context-perf returned a list")
+            (ok (member :t-start-ms perf) ":t-start-ms key present")
+            (ok (member :t-load-ms perf) ":t-load-ms key present")
+            (ok (member :t-p-eval-ms perf) ":t-p-eval-ms key present")
+            (ok (member :t-eval-ms perf) ":t-eval-ms key present")
+            (ok (member :n-p-eval perf) ":n-p-eval key present")
+            (ok (member :n-eval perf) ":n-eval key present")
+            (ok (member :n-reused perf) ":n-reused key present")
+            (ok (numberp (getf perf :t-start-ms)) ":t-start-ms is a number")
+            (ok (integerp (getf perf :n-eval)) ":n-eval is an integer")))))))
+
+(deftest reset-context-perf-returns-nil
+  (when-model-available
+    (testing "reset-context-perf returns NIL"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (null (cl-llama-cpp:reset-context-perf ctx))
+              "reset-context-perf returned NIL"))))))
+
+(deftest reset-context-perf-clears-counters
+  (when-model-available
+    (testing "reset-context-perf zeroes timing counters"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Hello"))
+          (cl-llama-cpp:reset-context-perf ctx)
+          (let ((perf (cl-llama-cpp:context-perf ctx)))
+            (ok (zerop (getf perf :n-eval))
+                (format nil ":n-eval is 0 after reset: ~A" (getf perf :n-eval)))
+            (ok (zerop (getf perf :n-p-eval))
+                (format nil ":n-p-eval is 0 after reset: ~A" (getf perf :n-p-eval)))))))))
+
+(deftest print-context-perf-returns-nil
+  (when-model-available
+    (testing "print-context-perf returns NIL (side-effect: prints to stderr)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (null (cl-llama-cpp:print-context-perf ctx))
+              "print-context-perf returned NIL"))))))
+
+(deftest sampler-perf-returns-plist
+  (when-model-available
+    (testing "sampler-perf returns a plist with expected keys"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (let ((perf (cl-llama-cpp:sampler-perf chain)))
+            (ok (listp perf) "sampler-perf returned a list")
+            (ok (member :t-sample-ms perf) ":t-sample-ms key present")
+            (ok (member :n-sample perf) ":n-sample key present")
+            (ok (numberp (getf perf :t-sample-ms)) ":t-sample-ms is a number")
+            (ok (integerp (getf perf :n-sample)) ":n-sample is an integer")))))))
+
+(deftest reset-sampler-perf-returns-nil
+  (when-model-available
+    (testing "reset-sampler-perf returns NIL"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (ok (null (cl-llama-cpp:reset-sampler-perf chain))
+              "reset-sampler-perf returned NIL"))))))
+
+(deftest print-sampler-perf-returns-nil
+  (when-model-available
+    (testing "print-sampler-perf returns NIL (side-effect: prints to stderr)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (ok (null (cl-llama-cpp:print-sampler-perf chain))
+              "print-sampler-perf returned NIL"))))))
+
+(deftest with-perf-returns-body-value
+  (when-model-available
+    (testing "with-perf returns the value of its body"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:with-perf (ctx) 42)))
+            (ok (= 42 result) "with-perf returned body value 42")))))))
+
+(deftest with-perf-resets-before-and-prints-after
+  (when-model-available
+    (testing "with-perf resets perf then executes body"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (decode-tokens ctx (cl-llama-cpp:tokenize model "Prime the counters"))
+          (cl-llama-cpp:with-perf (ctx)
+            (decode-tokens ctx (cl-llama-cpp:tokenize model "Hello")))
+          (let ((perf (cl-llama-cpp:context-perf ctx)))
+            (ok (> (getf perf :n-p-eval) 0)
+                "n-p-eval > 0: perf was reset and body ran")))))))
+
+;;; Logging integration tests
+
+(deftest set-log-callback-captures-messages
+  (when-model-available
+    (testing "set-log-callback routes llama.cpp log output to a Lisp function"
+      (let ((messages '())
+            (prev (cl-llama-cpp:get-log-callback)))
+        (unwind-protect
+             (progn
+               (cl-llama-cpp:set-log-callback
+                (lambda (level text)
+                  (declare (ignore level))
+                  (push text messages)))
+               (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+                 nil)
+               (ok (listp messages) "captured messages is a list")
+               (ok (plusp (length messages))
+                   (format nil "captured ~D log messages" (length messages)))
+               (ok (every #'stringp messages) "all messages are strings"))
+          (cl-llama-cpp:set-log-callback prev))))))
+
+(deftest set-log-callback-nil-restores-default
+  (testing "set-log-callback nil restores default logging without error"
+    (let ((prev (cl-llama-cpp:get-log-callback)))
+      (unwind-protect
+           (progn
+             (cl-llama-cpp:set-log-callback (lambda (level text) (declare (ignore level text))))
+             (ok (null (cl-llama-cpp:set-log-callback nil))
+                 "set-log-callback nil returned NIL")
+             (ok (null (cl-llama-cpp:get-log-callback))
+                 "get-log-callback returns NIL after clearing"))
+        (cl-llama-cpp:set-log-callback prev)))))
+
+;;; System query integration tests
+
+(deftest system-capabilities-values
+  (testing "system-capabilities returns a plist with boolean and integer values"
+    (let ((caps (cl-llama-cpp:system-capabilities)))
+      (ok (listp caps) "system-capabilities returned a list")
+      (ok (typep (getf caps :mmap) 'boolean) ":mmap is a boolean")
+      (ok (typep (getf caps :mlock) 'boolean) ":mlock is a boolean")
+      (ok (typep (getf caps :gpu-offload) 'boolean) ":gpu-offload is a boolean")
+      (ok (typep (getf caps :rpc) 'boolean) ":rpc is a boolean")
+      (ok (and (integerp (getf caps :max-devices))
+               (>= (getf caps :max-devices) 1))
+          (format nil ":max-devices >= 1: ~A" (getf caps :max-devices))))))
+
+(deftest time-us-monotonic
+  (testing "two successive time-us calls produce increasing values"
+    (let ((t1 (cl-llama-cpp:time-us))
+          (t2 (cl-llama-cpp:time-us)))
+      (ok (>= t2 t1)
+          (format nil "t2 (~D) >= t1 (~D)" t2 t1)))))
