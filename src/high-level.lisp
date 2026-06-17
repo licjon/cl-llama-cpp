@@ -81,7 +81,16 @@
     %llama:set-n-threads %llama:set-warmup %llama:set-causal-attn
     %llama:set-embeddings %llama:synchronize %llama:set-abort-callback
     ;; Threadpool management
-    %llama:attach-threadpool %llama:detach-threadpool))
+    %llama:attach-threadpool %llama:detach-threadpool
+    ;; Performance counters
+    %llama:perf-context %llama:perf-context-print %llama:perf-context-reset
+    %llama:perf-sampler %llama:perf-sampler-print %llama:perf-sampler-reset
+    ;; Logging
+    %llama:log-set %llama:log-get
+    ;; System queries
+    %llama:time-us %llama:max-devices
+    %llama:supports-mmap %llama:supports-mlock
+    %llama:supports-gpu-offload %llama:supports-rpc))
 
 (defun check-binding-deps ()
   "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.
@@ -1156,6 +1165,114 @@ not free it."
   (with-fp-traps-masked
     (%llama:detach-threadpool ctx))
   nil)
+
+;;; Performance counters
+
+(defun context-perf (ctx)
+  "Return performance data for CTX as a plist.
+Keys: :T-START-MS :T-LOAD-MS :T-P-EVAL-MS :T-EVAL-MS :N-P-EVAL :N-EVAL :N-REUSED"
+  (with-fp-traps-masked
+    (let ((data (%llama:perf-context ctx)))
+      (list :t-start-ms  (getf data '%llama::t-start-ms)
+            :t-load-ms   (getf data '%llama::t-load-ms)
+            :t-p-eval-ms (getf data '%llama::t-p-eval-ms)
+            :t-eval-ms   (getf data '%llama::t-eval-ms)
+            :n-p-eval    (getf data '%llama::n-p-eval)
+            :n-eval      (getf data '%llama::n-eval)
+            :n-reused    (getf data '%llama::n-reused)))))
+
+(defun print-context-perf (ctx)
+  "Print context performance statistics for CTX to stderr."
+  (with-fp-traps-masked
+    (%llama:perf-context-print ctx))
+  nil)
+
+(defun reset-context-perf (ctx)
+  "Reset context performance counters for CTX."
+  (with-fp-traps-masked
+    (%llama:perf-context-reset ctx))
+  nil)
+
+(defun sampler-perf (chain)
+  "Return performance data for sampler CHAIN as a plist.
+Keys: :T-SAMPLE-MS :N-SAMPLE"
+  (with-fp-traps-masked
+    (let ((data (%llama:perf-sampler chain)))
+      (list :t-sample-ms (getf data '%llama::t-sample-ms)
+            :n-sample    (getf data '%llama::n-sample)))))
+
+(defun print-sampler-perf (chain)
+  "Print sampler performance statistics for CHAIN to stderr."
+  (with-fp-traps-masked
+    (%llama:perf-sampler-print chain))
+  nil)
+
+(defun reset-sampler-perf (chain)
+  "Reset sampler performance counters for CHAIN."
+  (with-fp-traps-masked
+    (%llama:perf-sampler-reset chain))
+  nil)
+
+(defun print-perf (ctx)
+  "Print context performance statistics for CTX to stderr."
+  (print-context-perf ctx))
+
+(defun reset-perf (ctx)
+  "Reset context performance counters for CTX."
+  (reset-context-perf ctx))
+
+(defmacro with-perf ((ctx) &body body)
+  "Reset CTX's performance counters, execute BODY, then print perf to stderr.
+Performance is printed even on non-local exit. Returns the values of BODY."
+  (let ((ctx-var (gensym "CTX")))
+    `(let ((,ctx-var ,ctx))
+       (reset-perf ,ctx-var)
+       (unwind-protect
+            (progn ,@body)
+         (print-perf ,ctx-var)))))
+
+;;; Logging
+
+(defvar *log-callback* nil)
+
+(cffi:defcallback %log-dispatcher :void
+    ((level :int) (text :string) (data :pointer))
+  (declare (ignore data))
+  (when *log-callback*
+    (ignore-errors (funcall *log-callback* level text))))
+
+(defun set-log-callback (fn)
+  "Set FN as the Lisp log callback for all llama.cpp log messages.
+FN is called as (fn level text) where LEVEL is an integer (1=debug
+2=info 3=warn 4=error) and TEXT is the message string.
+Pass NIL to restore the default C stderr logger."
+  (setf *log-callback* fn)
+  (with-fp-traps-masked
+    (%llama:log-set
+     (if fn (cffi:callback %log-dispatcher) (cffi:null-pointer))
+     (cffi:null-pointer)))
+  nil)
+
+(defun get-log-callback ()
+  "Return the current Lisp log callback, or NIL if unset."
+  *log-callback*)
+
+;;; System queries
+
+(defun time-us ()
+  "Return the current wall-clock time in microseconds."
+  (with-fp-traps-masked
+    (%llama:time-us)))
+
+(defun system-capabilities ()
+  "Return a plist of system capability flags.
+Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES"
+  (with-fp-traps-masked
+    (list :mmap        (not (zerop (%llama:supports-mmap)))
+          :mlock       (not (zerop (%llama:supports-mlock)))
+          :gpu-offload (not (zerop (%llama:supports-gpu-offload)))
+          :rpc         (not (zerop (%llama:supports-rpc)))
+          :max-devices (%llama:max-devices))))
 
 ;;; Sampler utilities
 

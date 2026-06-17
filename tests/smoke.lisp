@@ -522,3 +522,127 @@
       (ok (= 2 init-count) "body ran twice (nesting works)")
       (ok (not cl-llama-cpp::*backend-initialized*)
           "*backend-initialized* cleared after outermost exit"))))
+
+;;; Performance, logging, and system info wrapper tests
+
+(deftest perf-symbols-exported
+  (testing "performance wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(context-perf print-context-perf reset-context-perf
+                   sampler-perf print-sampler-perf reset-sampler-perf
+                   print-perf reset-perf with-perf))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest perf-functions-fbound
+  (testing "performance wrapper functions are fbound"
+    (dolist (sym-name '("CONTEXT-PERF" "PRINT-CONTEXT-PERF" "RESET-CONTEXT-PERF"
+                        "SAMPLER-PERF" "PRINT-SAMPLER-PERF" "RESET-SAMPLER-PERF"
+                        "PRINT-PERF" "RESET-PERF"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest perf-binding-deps
+  (testing "performance bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:perf-context %llama:perf-context-print %llama:perf-context-reset
+                     %llama:perf-sampler %llama:perf-sampler-print %llama:perf-sampler-reset))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest logging-symbols-exported
+  (testing "logging wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(set-log-callback get-log-callback))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest logging-functions-fbound
+  (testing "logging wrapper functions are fbound"
+    (dolist (sym-name '("SET-LOG-CALLBACK" "GET-LOG-CALLBACK"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest logging-binding-deps
+  (testing "logging bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:log-set %llama:log-get))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest system-query-symbols-exported
+  (testing "system query wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(time-us system-capabilities))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest system-query-functions-fbound
+  (testing "system query wrapper functions are fbound"
+    (dolist (sym-name '("TIME-US" "SYSTEM-CAPABILITIES"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest system-query-binding-deps
+  (testing "system query bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:time-us %llama:max-devices
+                     %llama:supports-mmap %llama:supports-mlock
+                     %llama:supports-gpu-offload %llama:supports-rpc))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest system-capabilities-no-model
+  (testing "system-capabilities returns a well-formed plist without a model"
+    (let ((caps (cl-llama-cpp:system-capabilities)))
+      (ok (listp caps) "result is a list")
+      (ok (member :mmap caps) ":mmap key present")
+      (ok (member :mlock caps) ":mlock key present")
+      (ok (member :gpu-offload caps) ":gpu-offload key present")
+      (ok (member :rpc caps) ":rpc key present")
+      (ok (member :max-devices caps) ":max-devices key present")
+      (ok (typep (getf caps :max-devices) 'integer)
+          ":max-devices is an integer")
+      (ok (typep (getf caps :mmap) 'boolean) ":mmap is a boolean")
+      (ok (typep (getf caps :mlock) 'boolean) ":mlock is a boolean")
+      (ok (typep (getf caps :gpu-offload) 'boolean) ":gpu-offload is a boolean")
+      (ok (typep (getf caps :rpc) 'boolean) ":rpc is a boolean"))))
+
+(deftest time-us-no-model
+  (testing "time-us returns a positive integer without a model"
+    (let ((t1 (cl-llama-cpp:time-us)))
+      (ok (integerp t1) "time-us returned an integer")
+      (ok (plusp t1) "time-us returned a positive value"))))
+
+(deftest get-log-callback-initial
+  (testing "get-log-callback returns NIL initially (no callback set by this test)"
+    (let ((prev (cl-llama-cpp:get-log-callback)))
+      (ok (or (null prev) (functionp prev))
+          "get-log-callback returns NIL or function"))))
+
+(deftest set-log-callback-roundtrip
+  (testing "set-log-callback installs and get-log-callback retrieves it"
+    (let ((prev (cl-llama-cpp:get-log-callback))
+          (fn (lambda (level text) (declare (ignore level text)))))
+      (unwind-protect
+           (progn
+             (cl-llama-cpp:set-log-callback fn)
+             (ok (eq fn (cl-llama-cpp:get-log-callback))
+                 "get-log-callback returns the installed function")
+             (ok (null (cl-llama-cpp:set-log-callback nil))
+                 "set-log-callback returns NIL")
+             (ok (null (cl-llama-cpp:get-log-callback))
+                 "get-log-callback returns NIL after clearing"))
+        (cl-llama-cpp:set-log-callback prev)))))
