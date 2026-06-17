@@ -104,4 +104,20 @@
    #:set-abort-callback
    ;; Threadpool management
    #:attach-threadpool
-   #:detach-threadpool))
+   #:detach-threadpool
+   ;; Performance counters
+   #:context-perf
+   #:print-context-perf
+   #:reset-context-perf
+   #:sampler-perf
+   #:print-sampler-perf
+   #:reset-sampler-perf
+   #:print-perf
+   #:reset-perf
+   #:with-perf
+   ;; Logging
+   #:set-log-callback
+   #:get-log-callback
+   ;; System queries
+   #:time-us
+   #:system-capabilities))
