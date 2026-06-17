@@ -4,7 +4,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 
 ** Status
 
-*Work in progress.* The bindings cover the full llama.h C API (auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced llama.cpp features currently require using the raw %llama bindings directly. These are the current high-level wrappers:
+*Work in progress.* The low-level bindings cover the full public C API of llama.cpp and the bundled ggml and gguf libraries (=llama_=, =ggml_=, and =gguf_= symbols --- auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced features currently require using the raw =%llama= bindings directly. These are the current high-level wrappers:
 
 - Model loading and context creation
 - Tokenization / detokenization
@@ -25,6 +25,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Performance counters (structured timing data, =with-perf= macro)
 - Logging (route llama.cpp log messages to a Lisp callback)
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
+- Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
@@ -40,6 +41,8 @@ The API is unstable and will change without notice.
 These features provide functionality above what the llama.cpp C API offers directly:
 
 - =generate-parallel= --- Complete multiple prompts simultaneously in shared forward passes. A single function call handles batch allocation, multi-sequence decoding, per-sequence sampling, and result collection. The C API provides batch primitives but no built-in parallel generation loop.
+
+- =estimate-memory= / =feasibility-report= / =suggest-configuration= --- Estimate model + KV-cache + compute memory from GGUF metadata and validate a configuration against a VRAM budget before loading. Pure Lisp-side computation; llama.cpp has no equivalent planning API.
 
 ** Requirements
 
@@ -114,7 +117,7 @@ The =examples/chat.lisp= file provides a simple interactive chat session:
 
 - =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var=, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
 
-- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure.
+- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see [[*Resource Planning & Validation][Resource Planning & Validation]]): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
 
 - =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
 
@@ -309,6 +312,22 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =system-capabilities= --- Return a plist of system capability flags: =:mmap= (boolean), =:mlock= (boolean), =:gpu-offload= (boolean), =:rpc= (boolean), =:max-devices= (integer). These reflect build-time and hardware constants.
 
+*** Resource Planning & Validation
+
+Estimate memory use from GGUF metadata and validate a configuration against a VRAM budget --- before loading a model or creating a context. All sizes are in bytes. These read only model metadata, so they work well on a lightweight =:vocab-only= model load.
+
+- =estimate-memory model &key n-ctx type-k type-v= --- Return a plist =(:model-size :kv-cache :compute :total)= estimating memory for =model=. =n-ctx= defaults to the model's training context length; =type-k= / =type-v= default to =:f16= (the KV-cache quantization types, e.g. =:q8-0=). The =:compute= term is a fixed heuristic, so =:total= is an approximation.
+
+- =explain-memory-usage model &key n-ctx type-k type-v stream= --- Print a human-readable memory breakdown to =stream= (default =*standard-output*=). Returns =NIL=.
+
+- =validate-configuration model &key n-ctx type-k type-v n-gpu-layers vram-budget= --- Return a plist =(:status :safe/:unsafe/:unknown :reason string)=. Without =:vram-budget= the status is =:unknown=. When =:n-gpu-layers= is supplied, only the proportional GPU share of model weights (plus KV cache and compute) is checked against the budget.
+
+- =feasibility-report model &key n-ctx type-k type-v n-gpu-layers vram-budget stream= --- Print an estimate + validation report to =stream= and return the combined estimate/validation plist.
+
+- =suggest-configuration model &key n-ctx n-gpu-layers vram-budget= --- Return a plist =(:n-ctx n :n-gpu-layers n)= that fits within =:vram-budget=, or =NIL= if none is found (or no budget given). Reduces =n-gpu-layers= first, then halves =n-ctx=.
+
+*Runtime guardrails:* =with-context= accepts =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes). =:warn= signals =configuration-unsafe-warning= (a =warning=) and proceeds; =:error= signals =configuration-unsafe-error= and aborts context creation. =vram-budget= is currently caller-supplied --- automatic detection is tracked in issue #27.
+
 *** Batch API
 
 For most use cases, =generate-parallel= (above) is sufficient. These lower-level batch functions are available when you need direct control over token-level batching, such as custom decoding loops or embedding batches.
@@ -347,10 +366,13 @@ All conditions inherit from =llama-error=.
 | =grammar-error=          | =grammar= | Empty or invalid GBNF grammar string |
 | =batch-init-error=       | =n-tokens= | Batch allocation fails               |
 | =batch-overflow-error=   | =capacity=, =token-count= | Batch add exceeds capacity |
+| =configuration-unsafe-error= | =reason= | =with-context :validation :error= and config exceeds budget |
+
+=configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
 
 *** Low-level Access
 
-The full =llama.h= API is available in the =%llama= package as CFFI function wrappers. See =src/bindings.lisp= for the complete list. These are raw C bindings --- you will need to manage foreign memory and handle llama.cpp calling conventions yourself.
+The full public C API of llama.cpp *and* the bundled ggml and gguf libraries is available in the =%llama= package as CFFI function wrappers --- the =llama_=, =ggml_=, and =gguf_= symbols. The =llama_= prefix is stripped from Lisp names; =ggml_= / =gguf_= names keep their prefix (e.g. =%llama:ggml-backend-dev-count=, =%llama:gguf-get-key=). See =src/bindings.lisp= for the complete list. These are raw C bindings --- you will need to manage foreign memory and handle calling conventions yourself.
 
 ** Examples
 
@@ -631,6 +653,35 @@ See =examples/introspection.lisp= for a formatted report of all introspection da
 #+end_src
 
 See =examples/perf-and-logging.lisp= for a full walkthrough covering log capture, =with-perf=, structured throughput calculation, and sampler timing.
+
+*** Resource Planning
+
+#+begin_src lisp
+;; Estimate memory and check a configuration against a VRAM budget.
+;; :vocab-only 1 loads just the metadata — no weights — so this is fast.
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only 1)
+  ;; Human-readable breakdown
+  (cl-llama-cpp:explain-memory-usage model :n-ctx 8192)
+
+  ;; Programmatic check + suggestion against an 8 GiB budget
+  (let ((budget (* 8 1024 1024 1024)))
+    (format t "~S~%" (cl-llama-cpp:validate-configuration
+                      model :n-ctx 32768 :vram-budget budget))
+    (format t "Suggested: ~S~%" (cl-llama-cpp:suggest-configuration
+                                 model :n-ctx 32768 :vram-budget budget))))
+
+;; Pre-creation guardrail: refuse a context that won't fit the budget
+(cl-llama-cpp:with-model (model "/path/to/model.gguf")
+  (handler-case
+      (cl-llama-cpp:with-context (ctx model :n-ctx 32768
+                                            :validation :error
+                                            :vram-budget (* 1024 1024 1024))
+        ctx)
+    (cl-llama-cpp:configuration-unsafe-error (e)
+      (format t "Refused: ~A~%" e))))
+#+end_src
+
+See =examples/resource-planning.lisp= for a full walkthrough.
 
 ** Running Tests
 
