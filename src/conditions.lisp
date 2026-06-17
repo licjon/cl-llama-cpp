@@ -75,3 +75,15 @@
              (format s "Batch overflow: ~D tokens already at capacity ~D"
                      (batch-overflow-error-token-count c)
                      (batch-overflow-error-capacity c)))))
+
+(define-condition configuration-unsafe-warning (warning)
+  ((reason :initarg :reason :reader configuration-unsafe-warning-reason))
+  (:report (lambda (c s)
+             (format s "Configuration may be unsafe: ~A"
+                     (configuration-unsafe-warning-reason c)))))
+
+(define-condition configuration-unsafe-error (llama-error)
+  ((reason :initarg :reason :reader configuration-unsafe-error-reason))
+  (:report (lambda (c s)
+             (format s "Configuration is unsafe: ~A"
+                     (configuration-unsafe-error-reason c)))))

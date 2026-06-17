@@ -1303,3 +1303,212 @@ ws     ::= [ \\t\\n]*")
           (t2 (cl-llama-cpp:time-us)))
       (ok (>= t2 t1)
           (format nil "t2 (~D) >= t1 (~D)" t2 t1)))))
+
+;;; Resource planning & configuration validation integration tests
+
+(deftest estimate-memory-returns-plist
+  (when-model-available
+    (testing "estimate-memory returns a plist with expected keys"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((est (cl-llama-cpp:estimate-memory model)))
+          (ok (listp est) "estimate-memory returned a list")
+          (ok (integerp (getf est :model-size))
+              (format nil ":model-size is integer: ~A" (getf est :model-size)))
+          (ok (integerp (getf est :kv-cache))
+              (format nil ":kv-cache is integer: ~A" (getf est :kv-cache)))
+          (ok (integerp (getf est :compute))
+              (format nil ":compute is integer: ~A" (getf est :compute)))
+          (ok (integerp (getf est :total))
+              (format nil ":total is integer: ~A" (getf est :total))))))))
+
+(deftest estimate-memory-positive-values
+  (when-model-available
+    (testing "estimate-memory values are positive"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((est (cl-llama-cpp:estimate-memory model)))
+          (ok (> (getf est :model-size) 0) "model-size > 0")
+          (ok (> (getf est :kv-cache) 0) "kv-cache > 0")
+          (ok (> (getf est :compute) 0) "compute > 0")
+          (ok (> (getf est :total) 0) "total > 0"))))))
+
+(deftest estimate-memory-total-is-sum
+  (when-model-available
+    (testing "estimate-memory :total equals sum of components"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((est (cl-llama-cpp:estimate-memory model)))
+          (ok (= (getf est :total)
+                 (+ (getf est :model-size)
+                    (getf est :kv-cache)
+                    (getf est :compute)))
+              "total = model-size + kv-cache + compute"))))))
+
+(deftest estimate-memory-ctx-scaling
+  (when-model-available
+    (testing "doubling n-ctx roughly doubles KV cache estimate"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((est1 (cl-llama-cpp:estimate-memory model :n-ctx 512))
+               (est2 (cl-llama-cpp:estimate-memory model :n-ctx 1024))
+               (kv1 (getf est1 :kv-cache))
+               (kv2 (getf est2 :kv-cache)))
+          (ok (> kv2 kv1) "larger n-ctx has larger KV cache")
+          (let ((ratio (/ kv2 kv1)))
+            (ok (and (>= ratio 1.9) (<= ratio 2.1))
+                (format nil "KV cache ratio ~,2F ≈ 2.0" ratio))))))))
+
+(deftest estimate-memory-type-k-affects-kv
+  (when-model-available
+    (testing "quantized type-k reduces KV cache estimate"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((est-f16 (cl-llama-cpp:estimate-memory model :n-ctx 512 :type-k :f16))
+               (est-q8 (cl-llama-cpp:estimate-memory model :n-ctx 512 :type-k :q8-0)))
+          (ok (< (getf est-q8 :kv-cache) (getf est-f16 :kv-cache))
+              "q8-0 type-k reduces KV cache vs f16"))))))
+
+(deftest validate-configuration-unknown-without-budget
+  (when-model-available
+    (testing "validate-configuration returns :unknown without vram-budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (cl-llama-cpp:validate-configuration model :n-ctx 512)))
+          (ok (eq :unknown (getf result :status))
+              "status is :unknown without budget"))))))
+
+(deftest validate-configuration-safe-with-large-budget
+  (when-model-available
+    (testing "validate-configuration returns :safe with generous budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (cl-llama-cpp:validate-configuration
+                       model :n-ctx 512
+                             :vram-budget (* 100 1024 1024 1024))))
+          (ok (eq :safe (getf result :status))
+              (format nil "status is :safe: ~A" (getf result :reason))))))))
+
+(deftest validate-configuration-unsafe-with-tiny-budget
+  (when-model-available
+    (testing "validate-configuration returns :unsafe with tiny budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (cl-llama-cpp:validate-configuration
+                       model :n-ctx 512 :vram-budget 1024)))
+          (ok (eq :unsafe (getf result :status))
+              (format nil "status is :unsafe: ~A" (getf result :reason))))))))
+
+(deftest validate-configuration-gpu-layers-reduces-vram
+  (when-model-available
+    (testing "fewer GPU layers reduces VRAM estimate"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((est (cl-llama-cpp:estimate-memory model :n-ctx 512))
+               (tight-budget (+ (getf est :kv-cache) (getf est :compute)
+                                (ceiling (/ (getf est :model-size) 2))))
+               (result-all (cl-llama-cpp:validate-configuration
+                            model :n-ctx 512 :vram-budget tight-budget))
+               (result-half (cl-llama-cpp:validate-configuration
+                             model :n-ctx 512 :n-gpu-layers 1
+                                   :vram-budget tight-budget)))
+          (ok (or (eq :unsafe (getf result-all :status))
+                  (eq :safe (getf result-half :status)))
+              "fewer GPU layers helps fit budget"))))))
+
+(deftest suggest-configuration-nil-without-budget
+  (when-model-available
+    (testing "suggest-configuration returns NIL without vram-budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (ok (null (cl-llama-cpp:suggest-configuration model :n-ctx 512))
+            "returns NIL without budget")))))
+
+(deftest suggest-configuration-returns-valid-config
+  (when-model-available
+    (testing "suggest-configuration returns a valid config with large budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((suggestion (cl-llama-cpp:suggest-configuration
+                           model :n-ctx 4096
+                                 :vram-budget (* 100 1024 1024 1024))))
+          (ok (listp suggestion) "suggestion is a list")
+          (ok (integerp (getf suggestion :n-ctx)) ":n-ctx is an integer")
+          (ok (integerp (getf suggestion :n-gpu-layers)) ":n-gpu-layers is an integer")
+          (ok (> (getf suggestion :n-ctx) 0) ":n-ctx > 0"))))))
+
+(deftest suggest-configuration-reduces-params
+  (when-model-available
+    (testing "suggest-configuration reduces params for tight budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((est (cl-llama-cpp:estimate-memory model :n-ctx 4096))
+               (tight (ceiling (* (getf est :total) 0.5)))
+               (suggestion (cl-llama-cpp:suggest-configuration
+                            model :n-ctx 4096 :vram-budget tight)))
+          (when suggestion
+            (ok (or (< (getf suggestion :n-ctx) 4096)
+                    (< (getf suggestion :n-gpu-layers)
+                       (getf (cl-llama-cpp:model-info model) :n-layers)))
+                "suggestion reduced at least one parameter")))))))
+
+(deftest explain-memory-usage-prints
+  (when-model-available
+    (testing "explain-memory-usage prints to a stream"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((output (with-output-to-string (s)
+                        (cl-llama-cpp:explain-memory-usage model :n-ctx 512
+                                                                 :stream s))))
+          (ok (> (length output) 0) "produced output")
+          (ok (search "Model Weights" output) "contains Model Weights line")
+          (ok (search "KV Cache" output) "contains KV Cache line")
+          (ok (search "Total Estimated" output) "contains Total line"))))))
+
+(deftest feasibility-report-returns-plist
+  (when-model-available
+    (testing "feasibility-report returns combined estimate and validation plist"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (with-output-to-string (s)
+                        (setf result (cl-llama-cpp:feasibility-report
+                                      model :n-ctx 512
+                                            :vram-budget (* 100 1024 1024 1024)
+                                            :stream s)))))
+          (declare (ignore result))
+          t)
+        (let ((result (cl-llama-cpp:feasibility-report
+                       model :n-ctx 512
+                             :vram-budget (* 100 1024 1024 1024)
+                             :stream (make-string-output-stream))))
+          (ok (listp result) "result is a list")
+          (ok (member :model-size result) ":model-size present")
+          (ok (member :status result) ":status present")
+          (ok (eq :safe (getf result :status))
+              (format nil "status is :safe: ~A" (getf result :reason))))))))
+
+(deftest with-context-validation-warn
+  (when-model-available
+    (testing "with-context :validation :warn signals warning for tiny budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((warned nil))
+          (handler-bind ((cl-llama-cpp:configuration-unsafe-warning
+                          (lambda (c)
+                            (setf warned (cl-llama-cpp::configuration-unsafe-warning-reason c))
+                            (muffle-warning c))))
+            (cl-llama-cpp:with-context (ctx model :n-ctx 512
+                                                  :validation :warn
+                                                  :vram-budget 1024)
+              (ok (not (cffi:null-pointer-p ctx))
+                  "context still created despite warning")))
+          (ok warned (format nil "warning was signaled: ~A" warned)))))))
+
+(deftest with-context-validation-error
+  (when-model-available
+    (testing "with-context :validation :error prevents context creation for tiny budget"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (ok (handler-case
+                (cl-llama-cpp:with-context (ctx model :n-ctx 512
+                                                      :validation :error
+                                                      :vram-budget 1024)
+                  ctx
+                  nil)
+              (cl-llama-cpp:configuration-unsafe-error (c)
+                (cl-llama-cpp:configuration-unsafe-error-reason c)))
+            "configuration-unsafe-error was signaled")))))
+
+(deftest with-context-validation-off
+  (when-model-available
+    (testing "with-context :validation :off does not validate"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512
+                                              :validation :off
+                                              :vram-budget 1024)
+          (ok (not (cffi:null-pointer-p ctx))
+              "context created without validation"))))))
