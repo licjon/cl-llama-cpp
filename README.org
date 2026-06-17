@@ -22,6 +22,9 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 - Batch API and parallel decoding
 - Backend lifecycle management (=with-backend=, NUMA init, proper init/free)
 - Context runtime configuration (thread counts, mode flags, abort callbacks, threadpool management)
+- Performance counters (structured timing data, =with-perf= macro)
+- Logging (route llama.cpp log messages to a Lisp callback)
+- System capability queries (mmap, mlock, GPU offload, RPC, device count)
 
 *Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
 
@@ -273,6 +276,38 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 - =context-info ctx= --- Return a plist of context configuration: =:n-ctx=, =:n-batch=, =:n-ubatch=, =:n-seq-max=, =:n-threads=, =:n-threads-batch=, =:pooling-type=.
 
 - =system-info= --- Return a string describing the llama.cpp build and CPU capabilities.
+
+*** Performance Counters
+
+- =context-perf ctx= --- Return context performance data as a plist with keys: =:t-start-ms=, =:t-load-ms=, =:t-p-eval-ms=, =:t-eval-ms=, =:n-p-eval=, =:n-eval=, =:n-reused=. Timing values are doubles in milliseconds; counts are integers.
+
+- =print-context-perf ctx= --- Print context performance statistics to stderr (the default llama.cpp format).
+
+- =reset-context-perf ctx= --- Zero all context performance counters.
+
+- =sampler-perf chain= --- Return sampler performance data as a plist with keys: =:t-sample-ms=, =:n-sample=.
+
+- =print-sampler-perf chain= --- Print sampler performance statistics to stderr.
+
+- =reset-sampler-perf chain= --- Zero all sampler performance counters.
+
+- =print-perf ctx= --- Convenience alias for =print-context-perf=.
+
+- =reset-perf ctx= --- Convenience alias for =reset-context-perf=.
+
+- =with-perf (ctx) &body body= --- Reset context performance counters, execute =body=, then print performance to stderr. Printing happens even on non-local exit (via =unwind-protect=). Returns the values of =body=.
+
+*** Logging
+
+- =set-log-callback fn= --- Route all llama.cpp log messages to Lisp function =fn=. =fn= is called as =(fn level text)= where =level= is an integer (1=debug, 2=info, 3=warn, 4=error) and =text= is the message string. Pass =NIL= to restore the default C stderr logger. The callback is installed via a =cffi:defcallback= dispatcher --- errors in =fn= are silently caught to prevent unwinding into C.
+
+- =get-log-callback= --- Return the current Lisp log callback, or =NIL= if unset.
+
+*** System Queries
+
+- =time-us= --- Return the current wall-clock time in microseconds as an integer.
+
+- =system-capabilities= --- Return a plist of system capability flags: =:mmap= (boolean), =:mlock= (boolean), =:gpu-offload= (boolean), =:rpc= (boolean), =:max-devices= (integer). These reflect build-time and hardware constants.
 
 *** Batch API
 
@@ -562,6 +597,40 @@ See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tun
 #+end_src
 
 See =examples/introspection.lisp= for a formatted report of all introspection data.
+
+*** Performance and Logging
+
+#+begin_src lisp
+;; System capabilities — no model needed
+(let ((caps (cl-llama-cpp:system-capabilities)))
+  (format t "GPU offload: ~A, Max devices: ~D~%"
+          (getf caps :gpu-offload) (getf caps :max-devices)))
+
+;; Redirect log output to a Lisp function during model load
+(let ((messages '()))
+  (cl-llama-cpp:set-log-callback
+   (lambda (level text)
+     (when (>= level 3)  ; warn and error only
+       (push text messages))))
+  (cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 0)
+    (cl-llama-cpp:set-log-callback nil)  ; restore default
+    (format t "Captured ~D warnings/errors~%" (length messages))
+
+    ;; with-perf resets counters before, prints timing after
+    (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+      (cl-llama-cpp:with-perf (ctx)
+        (cl-llama-cpp:generate ctx "Hello" :max-tokens 32))
+
+      ;; Or get structured data for programmatic use
+      (cl-llama-cpp:reset-perf ctx)
+      (cl-llama-cpp:generate ctx "Roses are red," :max-tokens 32 :temp 0.1)
+      (let ((perf (cl-llama-cpp:context-perf ctx)))
+        (format t "Prompt: ~,1F ms (~D tokens), Decode: ~,1F ms (~D tokens)~%"
+                (getf perf :t-p-eval-ms) (getf perf :n-p-eval)
+                (getf perf :t-eval-ms) (getf perf :n-eval))))))
+#+end_src
+
+See =examples/perf-and-logging.lisp= for a full walkthrough covering log capture, =with-perf=, structured throughput calculation, and sampler timing.
 
 ** Running Tests
 
