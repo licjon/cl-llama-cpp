@@ -1183,16 +1183,18 @@ ws     ::= [ \\t\\n]*")
 
 (deftest reset-context-perf-clears-counters
   (when-model-available
-    (testing "reset-context-perf zeroes timing counters"
+    (testing "reset-context-perf resets timing counters (n-eval/n-p-eval clamped to 1 by upstream)"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (cl-llama-cpp:with-context (ctx model :n-ctx 512)
           (decode-tokens ctx (cl-llama-cpp:tokenize model "Hello"))
           (cl-llama-cpp:reset-context-perf ctx)
           (let ((perf (cl-llama-cpp:context-perf ctx)))
-            (ok (zerop (getf perf :n-eval))
-                (format nil ":n-eval is 0 after reset: ~A" (getf perf :n-eval)))
-            (ok (zerop (getf perf :n-p-eval))
-                (format nil ":n-p-eval is 0 after reset: ~A" (getf perf :n-p-eval)))))))))
+            ;; Upstream llama.cpp uses std::max(1, n_eval) in llama_perf_context
+            ;; to prevent downstream division-by-zero errors in throughput math.
+            (ok (= 1 (getf perf :n-eval))
+                (format nil ":n-eval is 1 after reset: ~A" (getf perf :n-eval)))
+            (ok (= 1 (getf perf :n-p-eval))
+                (format nil ":n-p-eval is 1 after reset: ~A" (getf perf :n-p-eval)))))))))
 
 (deftest print-context-perf-returns-nil
   (when-model-available
