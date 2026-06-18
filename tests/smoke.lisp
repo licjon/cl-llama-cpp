@@ -626,6 +626,64 @@
       (ok (integerp t1) "time-us returned an integer")
       (ok (plusp t1) "time-us returned a positive value"))))
 
+;;; Resource planning & configuration validation wrapper tests
+
+(deftest resource-planning-symbols-exported
+  (testing "resource planning symbols are exported from cl-llama-cpp"
+    (dolist (sym '(estimate-memory
+                   explain-memory-usage
+                   feasibility-report
+                   validate-configuration
+                   suggest-configuration
+                   configuration-unsafe-warning
+                   configuration-unsafe-error
+                   configuration-unsafe-error-reason))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest resource-planning-functions-fbound
+  (testing "resource planning functions are fbound"
+    (dolist (sym-name '("ESTIMATE-MEMORY"
+                        "EXPLAIN-MEMORY-USAGE"
+                        "FEASIBILITY-REPORT"
+                        "VALIDATE-CONFIGURATION"
+                        "SUGGEST-CONFIGURATION"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest resource-planning-condition-hierarchy
+  (testing "configuration-unsafe-warning is a warning"
+    (ok (subtypep 'cl-llama-cpp:configuration-unsafe-warning 'warning)
+        "configuration-unsafe-warning is a warning"))
+  (testing "configuration-unsafe-error is a llama-error"
+    (ok (subtypep 'cl-llama-cpp:configuration-unsafe-error 'cl-llama-cpp:llama-error)
+        "configuration-unsafe-error is a llama-error")))
+
+(deftest resource-planning-condition-signaling
+  (testing "configuration-unsafe-warning can be signaled and caught"
+    (let ((caught nil))
+      (handler-bind ((cl-llama-cpp:configuration-unsafe-warning
+                      (lambda (c)
+                        (setf caught c)
+                        (muffle-warning c))))
+        (warn 'cl-llama-cpp:configuration-unsafe-warning :reason "test reason"))
+      (ok (typep caught 'cl-llama-cpp:configuration-unsafe-warning)
+          "configuration-unsafe-warning is catchable")))
+  (testing "configuration-unsafe-error can be signaled and caught with reason slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:configuration-unsafe-error :reason "test reason")
+                    (cl-llama-cpp:configuration-unsafe-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:configuration-unsafe-error)
+          "configuration-unsafe-error is catchable")
+      (ok (string= "test reason" (cl-llama-cpp:configuration-unsafe-error-reason caught))
+          "configuration-unsafe-error-reason accessor works"))))
+
 (deftest get-log-callback-initial
   (testing "get-log-callback returns NIL initially (no callback set by this test)"
     (let ((prev (cl-llama-cpp:get-log-callback)))

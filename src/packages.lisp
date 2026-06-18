@@ -120,4 +120,13 @@
    #:get-log-callback
    ;; System queries
    #:time-us
-   #:system-capabilities))
+   #:system-capabilities
+   ;; Resource planning & configuration validation
+   #:estimate-memory
+   #:explain-memory-usage
+   #:feasibility-report
+   #:validate-configuration
+   #:suggest-configuration
+   #:configuration-unsafe-warning
+   #:configuration-unsafe-error
+   #:configuration-unsafe-error-reason))
