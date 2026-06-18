@@ -1632,8 +1632,9 @@ TYPE-K and TYPE-V default to :F16."
            (type-v (or type-v :f16))
            (n-layers (%llama:model-n-layer model))
            (n-embd (%llama:model-n-embd model))
-           (n-heads (%llama:model-n-head model))
-           (n-kv-heads (%llama:model-n-head-kv model))
+           ;; n-head/n-head-kv abort in C when n_layer_all == 0 (vocab-only models)
+           (n-heads (if (zerop n-layers) 0 (%llama:model-n-head model)))
+           (n-kv-heads (if (zerop n-layers) 0 (%llama:model-n-head-kv model)))
            (head-dim (if (zerop n-heads) 0 (/ n-embd n-heads)))
            (model-size (%llama:model-size model))
            (k-bytes (* n-ctx n-layers n-kv-heads head-dim
@@ -1667,6 +1668,7 @@ Returns NIL."
       (format stream "Compute Buffers:  ~A~%" (%format-bytes (getf estimate :compute)))
       (format stream "~%")
       (format stream "Total Estimated:  ~A~%" (%format-bytes (getf estimate :total)))
+      (finish-output stream)
       nil)))
 
 (defun validate-configuration (model &key n-ctx type-k type-v
@@ -1730,6 +1732,7 @@ Returns a plist with the memory estimate and validation status."
       (format stream "Status: ~A~%" (string-upcase (symbol-name status)))
       (when reason
         (format stream "Reason: ~A~%" reason))
+      (finish-output stream)
       (append estimate validation))))
 
 (defun suggest-configuration (model &key n-ctx n-gpu-layers vram-budget)
