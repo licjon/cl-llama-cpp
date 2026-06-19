@@ -166,7 +166,12 @@ Performance is printed even on non-local exit. Returns the values of BODY."
     ((level :int) (text :string) (data :pointer))
   (declare (ignore data))
   (when *log-callback*
-    (ignore-errors (funcall *log-callback* level text))))
+    (handler-bind ((error (lambda (c)
+			    ;; Capture or log the error first.
+                            (log-error-to-safe-buffer c) 
+                            ;; Return control to C without a crash.
+                            (return-from %log-dispatcher))))
+      (funcall *log-callback* level text))))
 
 (defun set-log-callback (fn)
   "Set FN as the Lisp log callback for all llama.cpp log messages.
