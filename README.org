@@ -353,21 +353,21 @@ For most use cases, =generate-parallel= (above) is sufficient. These lower-level
 
 All conditions inherit from =llama-error=.
 
-| Condition              | Slot    | When                                 |
-|------------------------+---------+--------------------------------------|
-| =model-load-error=       | =path=    | Model file cannot be loaded          |
-| =context-creation-error= |         | Context allocation fails             |
-| =tokenization-error=     | =text=    | Tokenization fails                   |
-| =decode-error=           | =code=    | =llama_decode= returns non-zero        |
-| =chat-template-error=    |         | Chat template rendering fails        |
-| =lora-load-error=        | =path=    | LoRA adapter file cannot be loaded   |
-| =lora-apply-error=       | =code=    | =set-adapters-lora= returns non-zero   |
-| =session-save-error=     | =path=    | Session file save fails              |
-| =session-load-error=     | =path=    | Session file load fails              |
-| =grammar-error=          | =grammar= | Empty or invalid GBNF grammar string |
-| =batch-init-error=       | =n-tokens= | Batch allocation fails               |
-| =batch-overflow-error=   | =capacity=, =token-count= | Batch add exceeds capacity |
-| =configuration-unsafe-error= | =reason= | =with-context :validation :error= and config exceeds budget |
+| Condition                  | Slot                  | When                                                      |
+|----------------------------+-----------------------+-----------------------------------------------------------|
+| =model-load-error=           | =path=                  | Model file cannot be loaded                               |
+| =context-creation-error=     |                       | Context allocation fails                                  |
+| =tokenization-error=         | =text=                  | Tokenization fails                                        |
+| =decode-error=               | =code=                  | =llama_decode= returns non-zero                             |
+| =chat-template-error=        |                       | Chat template rendering fails                             |
+| =lora-load-error=            | =path=                  | LoRA adapter file cannot be loaded                        |
+| =lora-apply-error=           | =code=                  | =set-adapters-lora= returns non-zero                        |
+| =session-save-error=         | =path=                  | Session file save fails                                   |
+| =session-load-error=         | =path=                  | Session file load fails                                   |
+| =grammar-error=              | =grammar=               | Empty or invalid GBNF grammar string                      |
+| =batch-init-error=           | =n-tokens=              | Batch allocation fails                                    |
+| =batch-overflow-error=       | =capacity=, =token-count= | Batch add exceeds capacity                                |
+| =configuration-unsafe-error= | =reason=                | =with-context :validation :error= and config exceeds budget |
 
 =configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
 
