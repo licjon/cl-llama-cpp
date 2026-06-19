@@ -12,8 +12,19 @@
 
 (cffi:use-foreign-library libllama)
 
-(defmacro with-fp-traps-masked (&body body)
-  #+sbcl `(sb-int:with-float-traps-masked
-              (:overflow :invalid :divide-by-zero :underflow :inexact)
-            ,@body)
-  #-sbcl (error "cl-llama-cpp requires SBCL"))
+(defvar *llama-fp-wrapper*
+  #+sbcl
+  (lambda (fn)
+    (sb-int:with-float-traps-masked
+        (:overflow :invalid :divide-by-zero :underflow :inexact)
+      (funcall fn)))
+  #-sbcl
+  #'funcall)
+
+(defun call-with-llama-compatible-fp-environment (fn)
+  (funcall *llama-fp-wrapper* fn))
+
+(defmacro with-llama-compatible-fp-environment (&body body)
+  `(call-with-llama-compatible-fp-environment
+     (lambda ()
+       ,@body)))

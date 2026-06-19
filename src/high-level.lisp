@@ -114,7 +114,7 @@ Returns T if all present, signals a warning per missing symbol."
 
 (defun ensure-backend ()
   (unless *backend-initialized*
-    (with-fp-traps-masked
+    (with-llama-compatible-fp-environment
       (%llama:backend-init))
     (setf *backend-initialized* t)))
 
@@ -127,14 +127,14 @@ calls llama-numa-init before executing BODY."
   (let ((outermost (gensym "OUTERMOST")))
     `(let ((,outermost (not *backend-initialized*)))
        (unless *backend-initialized*
-         (with-fp-traps-masked (%llama:backend-init))
+         (with-llama-compatible-fp-environment (%llama:backend-init))
          (setf *backend-initialized* t))
        ,(when numa
-          `(with-fp-traps-masked (%llama:numa-init ,numa)))
+          `(with-llama-compatible-fp-environment (%llama:numa-init ,numa)))
        (unwind-protect
             (progn ,@body)
          (when ,outermost
-           (with-fp-traps-masked (%llama:backend-free))
+           (with-llama-compatible-fp-environment (%llama:backend-free))
            (setf *backend-initialized* nil))))))
 
 (defun %bool->c (x) (if x 1 0))
@@ -159,7 +159,7 @@ PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 
         (path-val (gensym "PATH")))
     `(progn
        (ensure-backend)
-       (with-fp-traps-masked
+       (with-llama-compatible-fp-environment
          (let* ((,path-val ,path)
                 (defaults (%llama:model-default-params))
                 (model-params (override-params defaults (list ,@params)))
@@ -183,7 +183,7 @@ control pre-creation resource validation."
                              append (list k v)))
          (ctx-ptr (gensym "CTX"))
          (model-var (gensym "MODEL")))
-    `(with-fp-traps-masked
+    `(with-llama-compatible-fp-environment
        (let* ((,model-var ,model)
               (defaults (%llama:context-default-params))
               (ctx-params (override-params defaults (list ,@clean-params))))
@@ -200,7 +200,7 @@ control pre-creation resource validation."
 
 (defun tokenize (model text &key (add-special t) (parse-special nil))
   "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (text-len (length text))
            (add-sp (if add-special 1 0))
@@ -225,7 +225,7 @@ control pre-creation resource validation."
 
 (defun detokenize (model tokens &key (remove-special nil) (unparse-special t))
   "Detokenize a vector of TOKENS using MODEL's vocabulary. Returns a string."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (n-tokens (length tokens))
            (remove-sp (if remove-special 1 0))
@@ -429,7 +429,7 @@ chain is replaced with the mirostat sampler."
                    dynamic-temp-range dynamic-temp-exponent
                    adaptive-p adaptive-p-decay))
   (let ((chain (gensym "CHAIN")))
-    `(with-fp-traps-masked
+    `(with-llama-compatible-fp-environment
        (let ((,chain (build-sampler-chain ,@args)))
          (unwind-protect
               (let ((,var ,chain))
@@ -461,7 +461,7 @@ Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
 Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD,
 :MIROSTAT, :MIROSTAT-V2, :REPEAT-PENALTY, :FREQUENCY-PENALTY, :PRESENCE-PENALTY,
 :DRY-MULTIPLIER, :LOGIT-BIAS, :TOP-N-SIGMA, :DYNAMIC-TEMP-RANGE, :ADAPTIVE-P, etc."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((model (%llama:get-model ctx))
            (vocab (%llama:model-get-vocab model))
            (prompt-tokens (or prompt-tokens
@@ -544,7 +544,7 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
   "Compute embeddings for TEXT. Returns a vector of single-floats.
 The context must have been created with :embeddings 1.
 When NORMALIZE is true (default), L2-normalizes the result."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((model (%llama:get-model ctx))
            (tokens (tokenize model text))
            (n-tokens (length tokens))
@@ -572,7 +572,7 @@ When NORMALIZE is true (default), L2-normalizes the result."
 (defun model-chat-template (model &optional name)
   "Return the chat template string embedded in MODEL.
 If NAME is given, look up a specific named template."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:model-chat-template model (or name (cffi:null-pointer)))))
 
 (defun list-chat-templates ()
@@ -589,7 +589,7 @@ If NAME is given, look up a specific named template."
   "Format MESSAGES as a chat prompt string using a Jinja-style chat template.
 MESSAGES is a list of plists with :role and :content keys.
 Uses MODEL's embedded chat template unless TEMPLATE is provided."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((tmpl (or template (model-chat-template model)))
            (tmpl-arg (or tmpl (cffi:null-pointer)))
            ;; Gemma templates use "model" instead of "assistant"
@@ -675,7 +675,7 @@ on subsequent turns. Returns a token vector suitable for GENERATE's :prompt-toke
         (path-val (gensym "PATH")))
     `(progn
        (ensure-backend)
-       (with-fp-traps-masked
+       (with-llama-compatible-fp-environment
          (let* ((,path-val ,path)
                 (,adapter-ptr (%llama:adapter-lora-init ,model ,path-val)))
            (when (cffi:null-pointer-p ,adapter-ptr)
@@ -690,7 +690,7 @@ on subsequent turns. Returns a token vector suitable for GENERATE's :prompt-toke
 Replaces any previously applied adapters — calling this twice does not
 compose; only the last call's adapter remains active.
 Returns NIL on success, signals LORA-APPLY-ERROR on failure."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((scale-f (coerce scale 'single-float)))
       (unless (<= most-negative-single-float scale-f most-positive-single-float)
         (error 'type-error :datum scale :expected-type 'single-float))
@@ -719,7 +719,7 @@ READER-FN is called as (funcall reader-fn adapter index buf buf-size)."
 
 (defun lora-metadata (adapter)
   "Return metadata from ADAPTER as an alist of (key . value) string pairs."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((count (%llama:adapter-meta-count adapter)))
       (loop for i from 0 below count
             collect (cons
@@ -732,7 +732,7 @@ READER-FN is called as (funcall reader-fn adapter index buf buf-size)."
 
 (defun clear-kv-cache (ctx)
   "Clear all KV cache state for CTX."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:memory-clear (%llama:get-memory ctx) 1))
   nil)
 
@@ -740,25 +740,25 @@ READER-FN is called as (funcall reader-fn adapter index buf buf-size)."
   "Remove cached tokens in positions [P0, P1) for SEQ-ID.
 P0=-1 means from the start, P1=-1 means to the end.
 Returns T if cells were removed, NIL if no matching data."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (not (zerop (%llama:memory-seq-rm
                  (%llama:get-memory ctx) seq-id p0 p1)))))
 
 (defun kv-cache-seq-cp (ctx src-seq dst-seq p0 p1)
   "Copy cached data from SRC-SEQ to DST-SEQ for positions [P0, P1)."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:memory-seq-cp (%llama:get-memory ctx) src-seq dst-seq p0 p1))
   nil)
 
 (defun kv-cache-seq-keep (ctx seq-id)
   "Keep only SEQ-ID's cached data, removing all other sequences."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:memory-seq-keep (%llama:get-memory ctx) seq-id))
   nil)
 
 (defun kv-cache-seq-add (ctx seq-id p0 p1 delta)
   "Shift positions in [P0, P1) for SEQ-ID by DELTA."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:memory-seq-add (%llama:get-memory ctx) seq-id p0 p1 delta))
   nil)
 
@@ -766,20 +766,20 @@ Returns T if cells were removed, NIL if no matching data."
   "Divide positions in [P0, P1) for SEQ-ID by D. D must be non-zero."
   (when (zerop d)
     (error "Divisor must be non-zero"))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:memory-seq-div (%llama:get-memory ctx) seq-id p0 p1 d))
   nil)
 
 (defun kv-cache-pos (ctx seq-id)
   "Return the minimum and maximum cached positions for SEQ-ID as (VALUES MIN MAX)."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((mem (%llama:get-memory ctx)))
       (values (%llama:memory-seq-pos-min mem seq-id)
               (%llama:memory-seq-pos-max mem seq-id)))))
 
 (defun kv-cache-can-shift-p (ctx)
   "Return T if CTX's memory supports position shifting, NIL otherwise."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (not (zerop (%llama:memory-can-shift (%llama:get-memory ctx))))))
 
 ;;; Session state save/load wrappers
@@ -787,7 +787,7 @@ Returns T if cells were removed, NIL if no matching data."
 (defun save-session (ctx path &optional tokens)
   "Save full context state to a session file at PATH.
 TOKENS is an optional vector of token integers to store alongside the state."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-tokens (if tokens (length tokens) 0))
            (path-str (namestring path)))
       (if (zerop n-tokens)
@@ -809,7 +809,7 @@ TOKENS is an optional vector of token integers to store alongside the state."
 (defun load-session (ctx path)
   "Load context state from a session file at PATH.
 Returns a vector of cached token integers that were stored with the state."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((path-str (namestring path))
            (capacity (%llama:n-ctx ctx))
            (tok-buf (cffi:foreign-alloc '%llama:token :count capacity)))
@@ -828,7 +828,7 @@ Returns a vector of cached token integers that were stored with the state."
 (defun save-session-seq (ctx path seq-id &optional tokens)
   "Save a single sequence's state to a file at PATH.
 TOKENS is an optional vector of token integers to store alongside the state."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-tokens (if tokens (length tokens) 0))
            (path-str (namestring path)))
       (if (zerop n-tokens)
@@ -852,7 +852,7 @@ TOKENS is an optional vector of token integers to store alongside the state."
 (defun load-session-seq (ctx path seq-id)
   "Load a single sequence's state from a file at PATH.
 Returns a vector of cached token integers that were stored with the state."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((path-str (namestring path))
            (capacity (%llama:n-ctx ctx))
            (tok-buf (cffi:foreign-alloc '%llama:token :count capacity)))
@@ -871,7 +871,7 @@ Returns a vector of cached token integers that were stored with the state."
 
 (defun save-state (ctx)
   "Serialize full context state to a Lisp octet vector."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((size (%llama:state-get-size ctx)))
       (when (zerop size)
         (return-from save-state
@@ -887,7 +887,7 @@ Returns a vector of cached token integers that were stored with the state."
 (defun load-state (ctx state-bytes)
   "Restore context state from a Lisp octet vector STATE-BYTES.
 Returns the number of bytes consumed."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((size (length state-bytes)))
       (when (zerop size)
         (return-from load-state 0))
@@ -902,7 +902,7 @@ Returns the number of bytes consumed."
 (defun save-state-seq (ctx seq-id &key flags)
   "Serialize one sequence's state to a Lisp octet vector.
 When FLAGS is provided, uses the extended variant with llama_state_seq_flags."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((size (if flags
                     (%llama:state-seq-get-size-ext ctx seq-id flags)
                     (%llama:state-seq-get-size ctx seq-id))))
@@ -923,7 +923,7 @@ When FLAGS is provided, uses the extended variant with llama_state_seq_flags."
   "Restore one sequence's state from a Lisp octet vector STATE-BYTES.
 When FLAGS is provided, uses the extended variant with llama_state_seq_flags.
 Returns the number of bytes consumed."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((size (length state-bytes)))
       (when (zerop size)
         (return-from load-state-seq 0))
@@ -946,7 +946,7 @@ or add to a sampler chain (which frees it automatically)."
   (check-type grammar string)
   (when (zerop (length grammar))
     (error 'grammar-error :grammar grammar))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (sampler (%llama:sampler-init-grammar vocab grammar root)))
       (when (cffi:null-pointer-p sampler)
@@ -967,7 +967,7 @@ Returns a sampler pointer. Caller must free with %llama:sampler-free."
     (error 'grammar-error :grammar grammar))
   (when (and trigger-words trigger-patterns)
     (error "Cannot specify both :TRIGGER-WORDS and :TRIGGER-PATTERNS"))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (use-patterns-p (not (null trigger-patterns)))
            (strings (if use-patterns-p trigger-patterns (or trigger-words nil)))
@@ -1004,7 +1004,7 @@ Returns a sampler pointer. Caller must free with %llama:sampler-free."
 (defun make-infill-sampler (model)
   "Create a fill-in-the-middle sampler for FIM-capable models.
 Returns a sampler pointer. Caller must free with %llama:sampler-free."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (sampler (%llama:sampler-init-infill vocab)))
       (when (cffi:null-pointer-p sampler)
@@ -1019,7 +1019,7 @@ Returns a sampler pointer. Caller must free with %llama:sampler-free."
   "Create a grammar sampler, bind to VAR, execute BODY, free the sampler.
 When LAZY is true, creates a lazy grammar sampler with optional trigger args."
   (let ((sampler-ptr (gensym "GRAMMAR-SAMPLER")))
-    `(with-fp-traps-masked
+    `(with-llama-compatible-fp-environment
        (let ((,sampler-ptr (if ,lazy
                                (make-grammar-sampler-lazy
                                 ,model ,grammar
@@ -1053,12 +1053,12 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 
 (defun model-description (model)
   "Return MODEL's description as a string."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (read-model-buffer-string model #'%llama:model-desc)))
 
 (defun model-metadata (model)
   "Return all metadata from MODEL as an alist of (key . value) string pairs."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((count (%llama:model-meta-count model)))
       (loop for i from 0 below count
             collect (cons
@@ -1069,7 +1069,7 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 
 (defun model-info (model)
   "Return a plist of MODEL's numeric and boolean properties."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (list :n-params (%llama:model-n-params model)
           :n-layers (%llama:model-n-layer model)
           :n-ctx-train (%llama:model-n-ctx-train model)
@@ -1090,12 +1090,12 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 
 (defun model-cls-label (model index)
   "Return the classification label string at INDEX, or NIL if unavailable."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:model-cls-label model index)))
 
 (defun context-info (ctx)
   "Return a plist of CTX's configuration properties."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (list :n-ctx (%llama:n-ctx ctx)
           :n-batch (%llama:n-batch ctx)
           :n-ubatch (%llama:n-ubatch ctx)
@@ -1106,7 +1106,7 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 
 (defun system-info ()
   "Return a string describing the llama.cpp build and system capabilities."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:print-system-info)))
 
 ;;; Context runtime configuration
@@ -1116,19 +1116,19 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 and batch decoding (N-THREADS-BATCH). Both values are required together."
   (check-type n-threads (integer 0 *))
   (check-type n-threads-batch (integer 0 *))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:set-n-threads ctx n-threads n-threads-batch))
   nil)
 
 (defun set-warmup (ctx warmup-p)
   "Enable or disable the warmup pass on CTX."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:set-warmup ctx (%bool->c warmup-p)))
   nil)
 
 (defun set-causal-attn (ctx causal-attn-p)
   "Enable or disable causal attention on CTX."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:set-causal-attn ctx (%bool->c causal-attn-p)))
   nil)
 
@@ -1137,13 +1137,13 @@ and batch decoding (N-THREADS-BATCH). Both values are required together."
 the context was created with: enable only on contexts created with :embeddings
 non-nil, disable only on contexts created without it. Toggling on a mismatched
 context leaves internal C state inconsistent."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:set-embeddings ctx (%bool->c embeddings-p)))
   nil)
 
 (defun synchronize (ctx)
   "Block until all pending async operations on CTX have completed."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:synchronize ctx))
   nil)
 
@@ -1151,7 +1151,7 @@ context leaves internal C state inconsistent."
   "Register an abort callback on CTX. CALLBACK must be a foreign function
 pointer obtained via CFFI:CALLBACK, or NIL to clear the callback.
 DATA is an optional opaque data pointer passed to the callback."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:set-abort-callback
      ctx
      (or callback (cffi:null-pointer))
@@ -1165,7 +1165,7 @@ DATA is an optional opaque data pointer passed to the callback."
 threadpool for batch operations; when omitted, THREADPOOL is used for both.
 The caller retains ownership of the threadpool — detach-threadpool does
 not free it."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:attach-threadpool
      ctx
      threadpool
@@ -1174,7 +1174,7 @@ not free it."
 
 (defun detach-threadpool (ctx)
   "Detach the threadpool from CTX. Does not free the threadpool."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:detach-threadpool ctx))
   nil)
 
@@ -1183,7 +1183,7 @@ not free it."
 (defun context-perf (ctx)
   "Return performance data for CTX as a plist.
 Keys: :T-START-MS :T-LOAD-MS :T-P-EVAL-MS :T-EVAL-MS :N-P-EVAL :N-EVAL :N-REUSED"
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((data (%llama:perf-context ctx)))
       (list :t-start-ms  (getf data '%llama::t-start-ms)
             :t-load-ms   (getf data '%llama::t-load-ms)
@@ -1195,33 +1195,33 @@ Keys: :T-START-MS :T-LOAD-MS :T-P-EVAL-MS :T-EVAL-MS :N-P-EVAL :N-EVAL :N-REUSED
 
 (defun print-context-perf (ctx)
   "Print context performance statistics for CTX to stderr."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:perf-context-print ctx))
   nil)
 
 (defun reset-context-perf (ctx)
   "Reset context performance counters for CTX."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:perf-context-reset ctx))
   nil)
 
 (defun sampler-perf (chain)
   "Return performance data for sampler CHAIN as a plist.
 Keys: :T-SAMPLE-MS :N-SAMPLE"
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((data (%llama:perf-sampler chain)))
       (list :t-sample-ms (getf data '%llama::t-sample-ms)
             :n-sample    (getf data '%llama::n-sample)))))
 
 (defun print-sampler-perf (chain)
   "Print sampler performance statistics for CHAIN to stderr."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:perf-sampler-print chain))
   nil)
 
 (defun reset-sampler-perf (chain)
   "Reset sampler performance counters for CHAIN."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:perf-sampler-reset chain))
   nil)
 
@@ -1259,7 +1259,7 @@ FN is called as (fn level text) where LEVEL is an integer (1=debug
 2=info 3=warn 4=error) and TEXT is the message string.
 Pass NIL to restore the default C stderr logger."
   (setf *log-callback* fn)
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:log-set
      (if fn (cffi:callback %log-dispatcher) (cffi:null-pointer))
      (cffi:null-pointer)))
@@ -1273,13 +1273,13 @@ Pass NIL to restore the default C stderr logger."
 
 (defun time-us ()
   "Return the current wall-clock time in microseconds."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:time-us)))
 
 (defun system-capabilities ()
   "Return a plist of system capability flags.
 Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES"
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (list :mmap        (not (zerop (%llama:supports-mmap)))
           :mlock       (not (zerop (%llama:supports-mlock)))
           :gpu-offload (not (zerop (%llama:supports-gpu-offload)))
@@ -1290,7 +1290,7 @@ Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES"
 
 (defun sampler-seed (sampler)
   "Return the current RNG seed from SAMPLER as an integer."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (%llama:sampler-get-seed sampler)))
 
 ;;; Batch API wrappers
@@ -1317,7 +1317,7 @@ Signals BATCH-INIT-ERROR if N-TOKENS <= 0 or allocation fails."
         (seq-max-val (gensym "SEQ-MAX"))
         (plist (gensym "PLIST"))
         (handle (gensym "HANDLE")))
-    `(with-fp-traps-masked
+    `(with-llama-compatible-fp-environment
        (let* ((,cap ,n-tokens)
               (,embd-val ,n-embd)
               (,seq-max-val ,n-seq-max))
@@ -1436,7 +1436,7 @@ Signals BATCH-OVERFLOW-ERROR if BATCH would exceed capacity."
 (defun batch-decode (ctx batch)
   "Decode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((rc (%llama:decode ctx (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
@@ -1445,7 +1445,7 @@ Signals DECODE-ERROR on failure. Returns NIL on success."
 (defun batch-encode (ctx batch)
   "Encode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let ((rc (%llama:encode ctx (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
@@ -1478,7 +1478,7 @@ Returns two values: a list of generated strings and a list of stop
 reasons (:eog or :length) corresponding to each prompt."
   (when (endp prompts)
     (return-from generate-parallel (values nil nil)))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((model (%llama:get-model ctx))
            (vocab (%llama:model-get-vocab model))
            (n-seq (length prompts))
@@ -1626,7 +1626,7 @@ reasons (:eog or :length) corresponding to each prompt."
 Returns a plist with :MODEL-SIZE, :KV-CACHE, :COMPUTE, and :TOTAL (all in bytes).
 N-CTX defaults to the model's training context length.
 TYPE-K and TYPE-V default to :F16."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
@@ -1652,7 +1652,7 @@ TYPE-K and TYPE-V default to :F16."
                                         (stream *standard-output*))
   "Print a human-readable memory breakdown for MODEL with the given parameters.
 Returns NIL."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
@@ -1685,7 +1685,7 @@ against VRAM-BUDGET."
     (if (null vram-budget)
         (list :status :unknown
               :reason "No VRAM budget supplied; cannot determine feasibility.")
-        (with-fp-traps-masked
+        (with-llama-compatible-fp-environment
           (let* ((n-layers (%llama:model-n-layer model))
                  (gpu-layers (if n-gpu-layers
                                  (min n-gpu-layers n-layers)
@@ -1709,7 +1709,7 @@ against VRAM-BUDGET."
                                       (stream *standard-output*))
   "Print a feasibility report for MODEL with the given parameters.
 Returns a plist with the memory estimate and validation status."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
@@ -1741,7 +1741,7 @@ Returns a plist (:N-CTX n :N-GPU-LAYERS n) or NIL if no viable configuration fou
 Reduces N-GPU-LAYERS first, then halves N-CTX until the estimate fits."
   (unless vram-budget
     (return-from suggest-configuration nil))
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((n-layers (%llama:model-n-layer model))
            (n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
            (n-gpu-layers (if n-gpu-layers (min n-gpu-layers n-layers) n-layers)))
