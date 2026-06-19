@@ -41,7 +41,7 @@ ws      ::= [ ]*")
 (defun sample-loop (ctx sampler model prompt &key (max-tokens 128))
   "Decode PROMPT into CTX, then sample up to MAX-TOKENS using SAMPLER,
 streaming each token to stdout.  Returns the generated text."
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab model))
            (tokens (tokenize model prompt :parse-special t))
            (n (length tokens))
@@ -102,7 +102,7 @@ streaming each token to stdout.  Returns the generated text."
   (format t "make-grammar-sampler and add it to a chain yourself.  The chain~%")
   (format t "takes ownership — freeing the chain frees all its samplers.~2%")
   (format t "Prompt: \"Output a JSON object describing a dog.\"~2%")
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((gs (make-grammar-sampler model *json-grammar*))
            (chain (%llama:sampler-chain-init
                    (%llama:sampler-chain-default-params))))
@@ -170,7 +170,7 @@ streaming each token to stdout.  Returns the generated text."
       (let ((sampler (make-grammar-sampler model "%%%not-valid-gbnf%%%")))
         (format t "  C library accepted the string (returned non-null sampler).~%")
         (format t "  Freeing sampler.~2%")
-        (with-fp-traps-masked (%llama:sampler-free sampler)))
+        (with-llama-compatible-fp-environment (%llama:sampler-free sampler)))
     (grammar-error (c)
       (format t "  Caught: ~A~2%" c)))
 

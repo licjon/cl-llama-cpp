@@ -18,7 +18,7 @@
   "Load a model and start a chat session. Use SAY to send messages, END-CHAT to clean up."
   (when *model* (end-chat))
   (cl-llama-cpp::ensure-backend)
-  (with-fp-traps-masked
+  (with-llama-compatible-fp-environment
     (let* ((defaults (%llama:model-default-params))
            (params (cl-llama-cpp::override-params defaults
                      (list :n-gpu-layers n-gpu-layers)))
@@ -41,10 +41,10 @@
 (defun end-chat ()
   "Free model and context resources."
   (when *ctx*
-    (with-fp-traps-masked (%llama:free *ctx*))
+    (with-llama-compatible-fp-environment (%llama:free *ctx*))
     (setf *ctx* nil))
   (when *model*
-    (with-fp-traps-masked (%llama:model-free *model*))
+    (with-llama-compatible-fp-environment (%llama:model-free *model*))
     (setf *model* nil))
   (setf *messages* nil)
   (values))

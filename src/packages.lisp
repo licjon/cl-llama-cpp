@@ -5,7 +5,8 @@
   (:use #:cl)
   (:export
    ;; Utility
-   #:with-fp-traps-masked
+   #:call-with-llama-compatible-fp-environment
+   #:with-llama-compatible-fp-environment
    #:*binding-deps*
    #:check-binding-deps
    ;; Conditions

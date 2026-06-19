@@ -45,7 +45,7 @@ simpler batch-get-one always targets seq 0.
 Returns the number of tokens decoded."
   (let* ((tokens (tokenize model text :add-special nil))
          (n (length tokens)))
-    (with-fp-traps-masked
+    (with-llama-compatible-fp-environment
       ;; batch-init allocates arrays for n tokens, 0 embedding dims, 1 seq per token
       (let ((batch (%llama:batch-init n 0 1)))
         (unwind-protect
