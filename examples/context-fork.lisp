@@ -52,7 +52,7 @@ alternative continuations from the same point."
         ;; Tokenize and decode the prompt into the KV cache
         (let ((tokens (tokenize model prompt :parse-special t)))
           (format t "Tokenized to ~D tokens.~%" (length tokens))
-          (with-fp-traps-masked
+          (with-llama-compatible-fp-environment
             (cffi:with-foreign-object (tok-buf '%llama:token (length tokens))
               (dotimes (i (length tokens))
                 (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))

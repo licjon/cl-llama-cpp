@@ -4,7 +4,8 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 
 ** Status
 
-*Work in progress.* The low-level bindings cover the full public C API of llama.cpp and the bundled ggml and gguf libraries (=llama_=, =ggml_=, and =gguf_= symbols --- auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced features currently require using the raw =%llama= bindings directly. These are the current high-level wrappers:
+*Active Development/Beta*
+The low-level bindings cover the full public C API of llama.cpp and the bundled ggml and gguf libraries (=llama_=, =ggml_=, and =gguf_= symbols --- auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced features currently require using the raw =%llama= bindings directly. These are the current high-level wrappers:
 
 - Model loading and context creation
 - Tokenization / detokenization
@@ -46,7 +47,7 @@ These features provide functionality above what the llama.cpp C API offers direc
 
 ** Requirements
 
-- *SBCL* (required --- llama.cpp triggers floating-point exceptions that must be masked via =sb-int:with-float-traps-masked=; the library signals a compile-time error on other implementations)
+- *SBCL* (Recommended --- llama.cpp triggers floating-point exceptions that must be masked. This is handled automatically on SBCL; other implementations are supported via the configurable **llama-fp-wrapper**, though they may require implementation-specific trap masking to prevent crashes.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 
@@ -704,6 +705,13 @@ sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
      --eval '(quit)'
 #+end_src
 
+#+begin_src bash
+LLAMA_TEST_MODEL=/path/to/model.gguf \
+LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+LLAMA_TEST_LORA=/path/to/adapter.gguf \
+ros -e '(ql:quickload "cl-llama-cpp/tests")' \
+    -e '(asdf:test-system "cl-llama-cpp/tests")'
+#+end_src
 ** License
 
 MIT

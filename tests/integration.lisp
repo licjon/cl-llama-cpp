@@ -169,7 +169,7 @@
     (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
       (dotimes (i n-tokens)
         (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:decode ctx (%llama:batch-get-one tok-buf n-tokens))))))
 
 (deftest clear-kv-cache-returns-nil
@@ -403,7 +403,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "grammar sampler pointer is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest make-grammar-sampler-custom-root
@@ -415,7 +415,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "grammar sampler with custom root is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest make-grammar-sampler-empty-grammar-signals-error
@@ -437,7 +437,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "lazy grammar sampler is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest make-grammar-sampler-lazy-with-trigger-words
@@ -450,7 +450,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "lazy grammar sampler with trigger words is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest make-grammar-sampler-lazy-with-trigger-patterns
@@ -463,7 +463,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "lazy grammar sampler with trigger patterns is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest make-grammar-sampler-lazy-words-and-patterns-error
@@ -487,7 +487,7 @@ ws     ::= [ \\t\\n]*")
           (unwind-protect
                (ok (not (cffi:null-pointer-p sampler))
                    "infill sampler is non-null")
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (%llama:sampler-free sampler))))))))
 
 (deftest with-grammar-sampler-binds-and-frees
@@ -552,7 +552,7 @@ ws     ::= [ \\t\\n]*")
   (testing "build-sampler-chain with :grammar but no :model signals error"
     (ok (handler-case
             (progn
-              (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-llama-compatible-fp-environment
                 (cl-llama-cpp::build-sampler-chain :grammar *json-grammar*))
               nil)
           (error () t))
@@ -748,7 +748,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-typical-p
   (when-model-available
     (testing "build-sampler-chain with :typical-p creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain :typical-p 0.9)))
           (unwind-protect
@@ -759,7 +759,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-xtc
   (when-model-available
     (testing "build-sampler-chain with :xtc-probability creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain
                       :xtc-probability 0.5 :xtc-threshold 0.1)))
@@ -771,7 +771,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-top-n-sigma
   (when-model-available
     (testing "build-sampler-chain with :top-n-sigma creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain :top-n-sigma 2.0)))
           (unwind-protect
@@ -782,7 +782,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-penalties
   (when-model-available
     (testing "build-sampler-chain with penalty keywords creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain
                       :repeat-penalty 1.1
@@ -797,7 +797,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-dynamic-temp
   (when-model-available
     (testing "build-sampler-chain with :dynamic-temp-range uses temp-ext"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain
                       :dynamic-temp-range 0.2
@@ -810,7 +810,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-adaptive-p
   (when-model-available
     (testing "build-sampler-chain with :adaptive-p creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain
                       :adaptive-p 0.5 :adaptive-p-decay 0.01)))
@@ -822,7 +822,7 @@ ws     ::= [ \\t\\n]*")
 (deftest build-sampler-chain-with-mirostat-v2
   (when-model-available
     (testing "build-sampler-chain with :mirostat-v2 creates a valid chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain
                       :mirostat-v2 t :mirostat-tau 5.0 :mirostat-eta 0.1)))
@@ -835,7 +835,7 @@ ws     ::= [ \\t\\n]*")
   (when-model-available
     (testing "build-sampler-chain with :mirostat requires model and creates a valid chain"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (cl-llama-cpp:with-fp-traps-masked
+        (cl-llama-cpp:with-llama-compatible-fp-environment
           (let ((chain (cl-llama-cpp::build-sampler-chain
                         :model model :mirostat t
                         :mirostat-tau 5.0 :mirostat-eta 0.1)))
@@ -848,7 +848,7 @@ ws     ::= [ \\t\\n]*")
   (testing "build-sampler-chain rejects both :mirostat and :mirostat-v2"
     (ok (handler-case
             (progn
-              (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-llama-compatible-fp-environment
                 (cl-llama-cpp::build-sampler-chain :mirostat t :mirostat-v2 t))
               nil)
           (error () t))
@@ -858,7 +858,7 @@ ws     ::= [ \\t\\n]*")
   (testing "build-sampler-chain with :mirostat but no :model signals error"
     (ok (handler-case
             (progn
-              (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-llama-compatible-fp-environment
                 (cl-llama-cpp::build-sampler-chain :mirostat t))
               nil)
           (error () t))
@@ -868,7 +868,7 @@ ws     ::= [ \\t\\n]*")
   (testing "build-sampler-chain with :dry-multiplier but no :model signals error"
     (ok (handler-case
             (progn
-              (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-llama-compatible-fp-environment
                 (cl-llama-cpp::build-sampler-chain :dry-multiplier 0.8))
               nil)
           (error () t))
@@ -878,7 +878,7 @@ ws     ::= [ \\t\\n]*")
   (testing "build-sampler-chain with :logit-bias but no :model signals error"
     (ok (handler-case
             (progn
-              (cl-llama-cpp:with-fp-traps-masked
+              (cl-llama-cpp:with-llama-compatible-fp-environment
                 (cl-llama-cpp::build-sampler-chain :logit-bias '((1 . -100.0))))
               nil)
           (error () t))
@@ -888,7 +888,7 @@ ws     ::= [ \\t\\n]*")
   (when-model-available
     (testing "build-sampler-chain with :logit-bias creates a valid chain"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (cl-llama-cpp:with-fp-traps-masked
+        (cl-llama-cpp:with-llama-compatible-fp-environment
           (let ((chain (cl-llama-cpp::build-sampler-chain
                         :model model
                         :logit-bias '((1 . -100.0) (2 . 50.0)))))
@@ -901,7 +901,7 @@ ws     ::= [ \\t\\n]*")
   (when-model-available
     (testing "build-sampler-chain with :dry-multiplier creates a valid chain"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (cl-llama-cpp:with-fp-traps-masked
+        (cl-llama-cpp:with-llama-compatible-fp-environment
           (let ((chain (cl-llama-cpp::build-sampler-chain
                         :model model
                         :dry-multiplier 0.8
@@ -917,7 +917,7 @@ ws     ::= [ \\t\\n]*")
 (deftest sampler-seed-returns-integer
   (when-model-available
     (testing "sampler-seed returns an integer from a sampler chain"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((chain (cl-llama-cpp::build-sampler-chain :seed 12345)))
           (unwind-protect
@@ -945,7 +945,7 @@ ws     ::= [ \\t\\n]*")
 (deftest with-batch-creates-batch
   (when-model-available
     (testing "with-batch allocates a batch and binds a handle"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 32)
           (ok batch "batch handle is non-nil")
@@ -955,7 +955,7 @@ ws     ::= [ \\t\\n]*")
 (deftest with-batch-invalid-capacity
   (testing "with-batch signals batch-init-error for n-tokens <= 0"
     (ok (handler-case
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (cl-llama-cpp:with-batch (batch 0)
                 (declare (ignore batch))
                 nil))
@@ -966,7 +966,7 @@ ws     ::= [ \\t\\n]*")
 (deftest with-batch-negative-capacity
   (testing "with-batch signals batch-init-error for negative n-tokens"
     (ok (handler-case
-            (cl-llama-cpp:with-fp-traps-masked
+            (cl-llama-cpp:with-llama-compatible-fp-environment
               (cl-llama-cpp:with-batch (batch -1)
                 (declare (ignore batch))
                 nil))
@@ -976,7 +976,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-token-basic
   (when-model-available
     (testing "batch-add-token adds tokens and increments count"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 32)
           (cl-llama-cpp:batch-add-token batch 100 0 0)
@@ -989,7 +989,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-token-with-logits
   (when-model-available
     (testing "batch-add-token accepts :logits keyword"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 32)
           (cl-llama-cpp:batch-add-token batch 100 0 0 :logits nil)
@@ -1000,7 +1000,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-token-multi-seq
   (when-model-available
     (testing "batch-add-token accepts a list of seq-ids"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 32 :n-seq-max 3)
           (cl-llama-cpp:batch-add-token batch 100 0 '(0 1 2))
@@ -1010,7 +1010,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-token-overflow
   (when-model-available
     (testing "batch-add-token signals batch-overflow-error at capacity"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 2)
           (cl-llama-cpp:batch-add-token batch 100 0 0)
@@ -1025,7 +1025,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-clear-resets-count
   (when-model-available
     (testing "batch-clear resets token count to 0"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 32)
           (cl-llama-cpp:batch-add-token batch 100 0 0)
@@ -1040,7 +1040,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-clear-allows-reuse
   (when-model-available
     (testing "batch can be reused after clear"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 2)
           (cl-llama-cpp:batch-add-token batch 100 0 0)
@@ -1074,7 +1074,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-sequence-logits-modes
   (when-model-available
     (testing "batch-add-sequence accepts :logits :last, :all, and nil"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 64)
           (cl-llama-cpp:batch-add-sequence batch #(1 2 3) 0 :logits :last)
@@ -1092,7 +1092,7 @@ ws     ::= [ \\t\\n]*")
 (deftest batch-add-sequence-overflow
   (when-model-available
     (testing "batch-add-sequence signals overflow when exceeding capacity"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (cl-llama-cpp:with-batch (batch 2)
           (ok (handler-case
@@ -1145,7 +1145,7 @@ ws     ::= [ \\t\\n]*")
 (deftest with-batch-cleanup-on-error
   (when-model-available
     (testing "with-batch frees batch on non-local exit"
-      (cl-llama-cpp:with-fp-traps-masked
+      (cl-llama-cpp:with-llama-compatible-fp-environment
         (%llama:backend-init)
         (let ((captured nil))
           (ignore-errors

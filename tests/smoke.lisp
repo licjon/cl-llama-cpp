@@ -13,27 +13,27 @@
 
 (deftest model-default-params
   (testing "llama_model_default_params returns a struct via cffi-libffi"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (let ((params (%llama:model-default-params)))
         (ok params "model-default-params returned non-nil")
         (ok (listp params) "result is a plist")))))
 
 (deftest context-default-params
   (testing "llama_context_default_params returns a struct via cffi-libffi"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (let ((params (%llama:context-default-params)))
         (ok params "context-default-params returned non-nil")
         (ok (listp params) "result is a plist")))))
 
 (deftest sampler-chain-default-params
   (testing "llama_sampler_chain_default_params returns a struct via cffi-libffi"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (let ((params (%llama:sampler-chain-default-params)))
         (ok (listp params) "result is a plist")))))
 
 (deftest backend-init
   (testing "llama_backend_init runs without error"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (%llama:backend-init)
       (pass "backend-init completed"))))
 
@@ -73,7 +73,7 @@
 
 (deftest with-model-bad-path
   (testing "with-model signals model-load-error on nonexistent path"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (%llama:backend-init)
       (ok (handler-case
               (cl-llama-cpp:with-model (model "/nonexistent/path/to/model.gguf")
@@ -495,7 +495,7 @@
 
 (deftest set-n-threads-type-check
   (testing "set-n-threads rejects non-integer arguments"
-    (cl-llama-cpp:with-fp-traps-masked
+    (cl-llama-cpp:with-llama-compatible-fp-environment
       (%llama:backend-init)
       (ok (handler-case
               (cl-llama-cpp:set-n-threads nil 8 4)
