@@ -12,7 +12,18 @@
                  (:file "library")
                  (:file "bindings")
                  (:file "conditions")
-                 (:file "high-level")))))
+                 (:file "binding-deps")
+		 (:file "introspection")
+		 (:file "tokenization")
+		 (:file "resource-planning")
+		 (:file "lifecycle")
+		 (:file "chat")
+		 (:file "grammar")
+		 (:file "generation")
+		 (:file "batch")
+		 (:file "kv-cache")
+		 (:file "session")
+		 (:file "lora")))))
 
 (defsystem "cl-llama-cpp/examples"
   :description "Example programs for cl-llama-cpp"

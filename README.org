@@ -694,6 +694,11 @@ sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
      --eval '(quit)'
 #+end_src
 
+#+begin_src bash
+ros -e '(ql:quickload "cl-llama-cpp/tests")' \
+    -e '(asdf:test-system "cl-llama-cpp/tests")'
+#+end_src
+
 Integration tests require GGUF model files:
 
 #+begin_src bash
