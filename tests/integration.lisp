@@ -82,6 +82,26 @@
                   "all elements are numbers")))))
       (skip "LLAMA_TEST_EMBED_MODEL not set — skipping")))
 
+(deftest embed-without-embeddings-signals-error
+  (when-model-available
+    (testing "embed on a non-embedding context signals a clear error (null-pointer convention)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:embed ctx "Hello") nil)
+                (error (c)
+                  (search "EMBEDDINGS" (princ-to-string c))))
+              "error mentions :EMBEDDINGS"))))))
+
+(deftest model-chat-template-nil-for-bad-name
+  (when-model-available
+    (testing "model-chat-template returns NIL for nonexistent template name (null→NIL convention)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((result (cl-llama-cpp:model-chat-template
+                       model "nonexistent-template-name-xyz")))
+          (ok (null result)
+              "model-chat-template returned NIL for bad name"))))))
+
 ;;; LoRA adapter wrapper integration tests
 
 (defmacro when-lora-available (&body body)

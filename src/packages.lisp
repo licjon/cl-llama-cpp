@@ -3,6 +3,17 @@
 
 (defpackage #:cl-llama-cpp
   (:use #:cl)
+  (:documentation
+   "High-level Common Lisp interface to llama.cpp.
+
+Nullability convention — every high-level wrapper follows this rule:
+
+  INPUT:  Lisp NIL  →  C null pointer   (for optional pointer arguments)
+  OUTPUT: C null pointer  →  Lisp NIL   (for nullable return values)
+          C null pointer  →  signal an error  (for allocation/init failures)
+
+Users never need to call CFFI:NULL-POINTER or CFFI:NULL-POINTER-P.
+New wrappers must follow this convention.")
   (:export
    ;; Utility
    #:call-with-llama-compatible-fp-environment
