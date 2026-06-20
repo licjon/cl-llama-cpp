@@ -262,7 +262,8 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                       :dynamic-temp-exponent dynamic-temp-exponent
                       :adaptive-p adaptive-p
                       :adaptive-p-decay adaptive-p-decay))
-            (emitted-len 0))
+            (emitted-len 0)
+            (stop-reason nil))
         (unwind-protect
             ;; sampler-sample already calls sampler-accept internally — do NOT
             ;; call sampler-accept again or the grammar FSM double-advances.
@@ -271,22 +272,34 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
-                       (handler-case
-                           (let* ((full (detokenize model generated
-                                                    :remove-special t))
-                                  (new-text (subseq full emitted-len)))
-                             (when (plusp (length new-text))
-                               (setf emitted-len (length full))
-                               (unless (funcall token-callback new-text)
-                                 (loop-finish))))
-                         (error ())))
+                       ;; detokenize is a library concern — errors propagate naturally
+                       (let* ((full (detokenize model generated :remove-special t))
+                              (new-text (subseq full emitted-len)))
+                         (when (plusp (length new-text))
+                           (setf emitted-len (length full))
+                           ;; callback is the user's concern — separate handler boundary
+                           (restart-case
+                               (handler-bind
+                                   ((error (lambda (c)
+                                             (declare (ignore c))
+                                             (invoke-restart 'abort-generation))))
+                                 (unless (funcall token-callback new-text)
+                                   (setf stop-reason :callback)
+                                   (loop-finish)))
+                             (ignore-callback-error ()
+                               :report "Ignore the callback error and continue generation"
+                               nil)
+                             (abort-generation ()
+                               :report "Abort generation due to token-callback error"
+                               (setf stop-reason :error)
+                               (loop-finish))))))
                      (cffi:with-foreign-object (tok-buf '%llama:token 1)
                        (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
                        (let* ((batch (%llama:batch-get-one tok-buf 1))
                               (rc (%llama:decode ctx batch)))
                          (unless (zerop rc)
                            (error 'decode-error :code rc)))))
-          (%llama:sampler-free sampler)))
+          (%llama:sampler-free sampler))
       ;; Convert generated tokens to string
       (let ((text (if (zerop (length generated))
                       ""
@@ -294,10 +307,10 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                                                        :element-type 'fixnum)))
                         (dotimes (i (length generated))
                           (setf (aref result-tokens i) (aref generated i)))
-                        (detokenize model result-tokens :remove-special t))))
-            (stop-reason (cond ((= (length generated) max-tokens) :length)
-                               (t :eog))))
-        (values text stop-reason)))))
+                        (detokenize model result-tokens :remove-special t)))))
+        (values text
+                (or stop-reason
+                    (if (= (length generated) max-tokens) :length :eog))))))))
 
 (defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.

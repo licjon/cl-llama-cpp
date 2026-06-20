@@ -7,7 +7,7 @@
 ;;; decoding, and "choose your own adventure" style branching.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/context-fork.lisp")
@@ -19,9 +19,7 @@
 
 (in-package #:cl-llama-cpp/examples/context-fork)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────
 
@@ -38,6 +36,8 @@
 (defun run ()
   "Process a prompt once, snapshot the state, then generate multiple
 alternative continuations from the same point."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (format t "~&Loading model: ~A~%" *model-path*)
   (with-model (model *model-path* :n-gpu-layers 99)
     (with-context (ctx model :n-ctx 2048)

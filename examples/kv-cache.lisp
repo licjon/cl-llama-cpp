@@ -5,7 +5,7 @@
 ;;; This script doubles as a regression test — run it top-to-bottom.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/kv-cache.lisp")
@@ -17,9 +17,7 @@
 
 (in-package #:cl-llama-cpp/examples/kv-cache)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────
 
@@ -82,6 +80,8 @@ Returns the number of tokens decoded."
   "Run the multi-user chat server simulation.
 Demonstrates kv-cache-seq-cp, kv-cache-seq-rm, kv-cache-seq-add,
 kv-cache-seq-keep, kv-cache-pos, kv-cache-can-shift-p, and clear-kv-cache."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (format t "~&Loading model: ~A~%" *model-path*)
   (with-model (model *model-path* :n-gpu-layers 99)
     ;; n-seq-max >= 3 because cells will belong to seq 0, 1, and 2
