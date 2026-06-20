@@ -123,6 +123,8 @@ incremental decoding that reuses the KV cache.
 
 *Nullability convention:* Every high-level wrapper translates between Lisp =NIL= and C null pointers automatically. Pass =NIL= for optional pointer arguments (e.g. =set-abort-callback= callback, =attach-threadpool= batch threadpool); receive =NIL= for nullable returns (e.g. =model-chat-template= when no template exists). Allocation failures (null pointer from =llama_model_load_from_file=, etc.) signal a condition rather than returning =NIL=. Users never need to call =cffi:null-pointer= or =cffi:null-pointer-p=.
 
+*Boolean convention:* Parameters that are semantically boolean in the C API (=:embeddings=, =:vocab-only=, =:offload-kqv=, =:no-perf=, etc.) accept both idiomatic Lisp booleans (=T= / =NIL=) and raw C integers (=1= / =0=). Integers pass through unchanged for backward compatibility; =T= becomes =1= and =NIL= becomes =0=. Other types signal a =type-error=. This applies to all =:char=-typed boolean fields in =llama_model_params= and =llama_context_params= when passed as keyword overrides to =with-model= and =with-context=.
+
 *** Resource Management
 
 - =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var=, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
@@ -161,7 +163,7 @@ incremental decoding that reuses the KV cache.
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
-- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings 1=.
+- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings t= (or =1=).
 
 *** Chat Templates
 
@@ -324,7 +326,7 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 *** Resource Planning & Validation
 
-Estimate memory use from GGUF metadata and validate a configuration against a VRAM budget --- before loading a model or creating a context. All sizes are in bytes. These read only model metadata, so they work well on a lightweight =:vocab-only= model load.
+Estimate memory use from GGUF metadata and validate a configuration against a VRAM budget --- before loading a model or creating a context. All sizes are in bytes. These read only model metadata, so they work well on a lightweight =:vocab-only t= model load.
 
 - =estimate-memory model &key n-ctx type-k type-v= --- Return a plist =(:model-size :kv-cache :compute :total)= estimating memory for =model=. =n-ctx= defaults to the model's training context length; =type-k= / =type-v= default to =:f16= (the KV-cache quantization types, e.g. =:q8-0=). The =:compute= term is a fixed heuristic, so =:total= is an approximation.
 
@@ -478,7 +480,7 @@ Model quantization has no high-level wrapper. You can do it with =%llama= direct
 
 #+begin_src lisp
 (cl-llama-cpp:with-model (model "/path/to/embedding-model.gguf" :n-gpu-layers 0)
-  (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1 :pooling-type 1)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings t :pooling-type 1)
     (let ((vec (cl-llama-cpp:embed ctx "Hello, world!")))
       (format t "~D dimensions~%" (length vec)))))
 #+end_src
@@ -733,8 +735,8 @@ See =examples/perf-and-logging.lisp= for a full walkthrough covering log capture
 
 #+begin_src lisp
 ;; Estimate memory and check a configuration against a VRAM budget.
-;; :vocab-only 1 loads just the metadata — no weights — so this is fast.
-(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only 1)
+;; :vocab-only t loads just the metadata — no weights — so this is fast.
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
   ;; Human-readable breakdown
   (cl-llama-cpp:explain-memory-usage model :n-ctx 8192)
 
