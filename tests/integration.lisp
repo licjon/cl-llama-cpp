@@ -1535,6 +1535,44 @@ ws     ::= [ \\t\\n]*")
           (ok (not (cffi:null-pointer-p ctx))
               "context created without validation"))))))
 
+;;; Boolean ergonomics integration tests (issue #43)
+
+(deftest with-context-embeddings-t
+  (if *test-embed-model-path*
+      (testing "with-context accepts :embeddings T and embedding works"
+        (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+          (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings t
+                                                :pooling-type 1)
+            (let ((embedding (cl-llama-cpp:embed ctx "Hello")))
+              (ok (vectorp embedding)
+                  "embed returned a vector with :embeddings T")
+              (ok (> (length embedding) 0)
+                  "embedding is non-empty")))))
+      (skip "LLAMA_TEST_EMBED_MODEL not set — skipping")))
+
+(deftest with-context-embeddings-nil
+  (when-model-available
+    (testing "with-context accepts :embeddings NIL (no embeddings mode)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings nil)
+          (ok (not (cffi:null-pointer-p ctx))
+              "context created with :embeddings NIL"))))))
+
+(deftest with-model-vocab-only-t
+  (when-model-available
+    (testing "with-model accepts :vocab-only T"
+      (cl-llama-cpp:with-model (model *test-model-path* :vocab-only t)
+        (ok (not (cffi:null-pointer-p model))
+            "model loaded with :vocab-only T")))))
+
+(deftest with-context-bool-backward-compat
+  (when-model-available
+    (testing "with-context still accepts integer 0/1 for boolean params"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 0)
+          (ok (not (cffi:null-pointer-p ctx))
+              "context created with :embeddings 0 (backward compat)"))))))
+
 ;;; Callback safety integration tests (issue #40)
 
 (deftest log-callback-error-captured-in-last-error
