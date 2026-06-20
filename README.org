@@ -28,12 +28,14 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
 
-*Not yet wrapped* at the high level (you can use the raw =%llama= bindings directly):
+*Not yet wrapped* at the high level (use the =%llama= bindings directly --- see [[*Low-level =%llama= Access (Escape Hatch)][Low-level =%llama= Access]]):
 
 - Model quantization
 - Speculative decoding
 - Multimodal inputs (vision, audio)
 - Fine-grained sequence control
+
+The generated =%llama= layer covers 100% of the public C API surface (881 functions, 38 enums, 59 structs), so a missing high-level wrapper is never a blocker. See the [[*Low-level =%llama= Access (Escape Hatch)][escape hatch documentation]] for naming conventions and usage.
 
 The API is unstable and will change without notice.
 
@@ -376,9 +378,74 @@ All conditions inherit from =llama-error=.
 
 =configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
 
-*** Low-level Access
+*** Low-level =%llama= Access (Escape Hatch)
 
-The full public C API of llama.cpp *and* the bundled ggml and gguf libraries is available in the =%llama= package as CFFI function wrappers --- the =llama_=, =ggml_=, and =gguf_= symbols. The =llama_= prefix is stripped from Lisp names; =ggml_= / =gguf_= names keep their prefix (e.g. =%llama:ggml-backend-dev-count=, =%llama:gguf-get-key=). See =src/bindings.lisp= for the complete list. These are raw C bindings --- you will need to manage foreign memory and handle calling conventions yourself.
+The =%llama= package is a *supported, first-class escape hatch*. It exposes the complete public C API of llama.cpp and the bundled ggml and gguf libraries as CFFI bindings --- 881 functions, 38 enums, and 59 structs auto-generated from the upstream headers via [[https://github.com/borodust/claw][CLAW]]. If a high-level wrapper doesn't exist yet for something llama.cpp can do, drop down to =%llama:= and call the C function directly. A missing wrapper is never a blocker.
+
+The high-level =cl-llama-cpp= API is an ergonomic convenience layer built on top of =%llama=. Both layers are equally supported; =%llama= is not an implementation detail.
+
+**** Naming Conventions
+
+| C name           | Lisp symbol            | Rule                                              |
+|------------------+------------------------+---------------------------------------------------|
+| =llama_decode=     | =%llama:decode=          | =llama_= prefix stripped, underscores become hyphens |
+| =LLAMA_SPLIT_MODE= | =%llama:split-mode=      | =LLAMA_= prefix stripped from enum/constant names    |
+| =ggml_mul_mat=     | =%llama:ggml-mul-mat=    | =ggml_= prefix kept, underscores become hyphens     |
+| =gguf_get_key=     | =%llama:gguf-get-key=    | =gguf_= prefix kept, underscores become hyphens     |
+| =GGML_TYPE_F16=    | =%llama:ggml-type-f16=   | =GGML_= prefix kept for enum values                 |
+
+Everything lives in one package (=%llama=) regardless of which C library it came from.
+
+**** Structs and Enums
+
+C structs and enums follow the same naming convention as functions:
+
+- *Structs* are accessed as =(:struct %llama:NAME)= in CFFI type specifiers. Opaque types (=llama_model=, =llama_context=, =ggml_context=, etc.) are pointer-sized --- pass them as =:pointer=.
+
+- *Enums* are Lisp keywords. =LLAMA_SPLIT_MODE_LAYER= becomes =:layer=, =GGML_TYPE_F16= becomes =:f16=. CLAW strips the common enum-name prefix from values. Use =(cffi:foreign-enum-value '%llama:split-mode :layer)= for the integer, or just pass the keyword where a CFFI function expects the enum type.
+
+- *Bitfields* work like enums but multiple values can be OR'd together. CFFI handles the masking.
+
+**** Floating-Point Environment
+
+llama.cpp's SIMD code triggers floating-point exceptions (denormals, inexact results) that SBCL traps by default. All =%llama= calls that enter C code must run inside:
+
+#+begin_src lisp
+(cl-llama-cpp:with-llama-compatible-fp-environment ()
+  (%llama:backend-init)
+  ;; ... all your %llama calls ...
+  )
+#+end_src
+
+The high-level API handles this automatically; you only need it when calling =%llama= directly. On non-SBCL implementations, this expands to the configured FP-trap masking wrapper (see the library source for details).
+
+**** Discovering Symbols
+
+- =src/bindings.lisp= is the generated binding source --- grep it, or use =M-.= from your editor.
+- =(apropos "DECODE" '%llama)= from the REPL lists all symbols matching a substring.
+- Every =%llama= function has a docstring containing its C prototype, e.g. =(describe #'%llama:decode)=.
+- =src/binding-deps.lisp= lists the specific =%llama= symbols the high-level API depends on and provides =(cl-llama-cpp:check-binding-deps)= to verify they're all present after regenerating.
+
+**** Example: Dropping Down to =%llama=
+
+Model quantization has no high-level wrapper. You can do it with =%llama= directly:
+
+#+begin_src lisp
+(cl-llama-cpp:with-llama-compatible-fp-environment ()
+  (%llama:backend-init)
+  (unwind-protect
+      (cffi:with-foreign-object (params '(:struct %llama:model-quantize-params))
+        (cffi:convert-into-foreign-memory
+         (%llama:model-quantize-default-params)
+         '(:struct %llama:model-quantize-params) params)
+        (setf (cffi:foreign-slot-value params
+               '(:struct %llama:model-quantize-params) '%llama:ftype)
+              :q4-k-m)
+        (%llama:model-quantize "/path/to/f16.gguf"
+                               "/path/to/q4km.gguf"
+                               params))
+    (%llama:backend-free)))
+#+end_src
 
 ** Examples
 
