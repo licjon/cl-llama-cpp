@@ -95,22 +95,27 @@ If you use Quicklisp and want =ql:quickload= to find it, run =ql:register-local-
 
 *** Multi-turn Chat
 
-The =examples/chat.lisp= file provides a simple interactive chat session:
+The =examples/simple-chat.lisp= file provides a minimal interactive chat
+session. =main= loads a model, then loops reading a line from standard input
+and printing the model's reply, keeping the conversation history so the model
+has context. Type =exit= or =quit= to end the session.
 
 #+begin_src lisp
 (asdf:load-system "cl-llama-cpp/examples")
 
-(cl-llama-cpp/examples/chat:start-chat
+(cl-llama-cpp/examples/simple-chat:main
   :model-path "/path/to/chat-model.gguf")
-
-(cl-llama-cpp/examples/chat:say "What is Common Lisp?")
-;; streams response to *standard-output*
-
-(cl-llama-cpp/examples/chat:say "Tell me more about CLOS.")
-;; continues the conversation with history
-
-(cl-llama-cpp/examples/chat:end-chat)
+;; User> What is Common Lisp?
+;; AI> ... (streams the reply, then prompts again)
+;; User> Tell me more about CLOS.
+;; AI> ... (continues with history)
+;; User> exit
 #+end_src
+
+This is the simple, not the fast, approach: every turn re-tokenizes and
+re-processes the entire conversation from scratch, so per-turn latency grows
+with history length. That is fine for a short demo; long sessions would want
+incremental decoding that reuses the KV cache.
 
 ** API Reference
 

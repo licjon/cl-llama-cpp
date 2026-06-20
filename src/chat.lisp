@@ -4,7 +4,12 @@
   "Return the chat template string embedded in MODEL.
 If NAME is given, look up a specific named template."
   (with-llama-compatible-fp-environment
-    (%llama:model-chat-template model (or name (cffi:null-pointer)))))
+    (let ((res-ptr (if name
+                       (cffi:with-foreign-string (name-ptr name)
+                         (%llama:model-chat-template model name-ptr))
+                       (%llama:model-chat-template model (cffi:null-pointer)))))
+      (unless (cffi:null-pointer-p res-ptr)
+        (cffi:foreign-string-to-lisp res-ptr)))))
 
 (defun list-chat-templates ()
   "Return a list of built-in chat template name strings."
