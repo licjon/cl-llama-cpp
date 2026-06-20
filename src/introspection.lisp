@@ -161,15 +161,20 @@ Performance is printed even on non-local exit. Returns the values of BODY."
 ;;; Logging
 
 (defvar *log-callback* nil)
+(defvar *last-log-callback-error* nil
+  "The last error condition caught inside the log-callback panic boundary, or NIL.")
+
+(defun log-error-to-safe-buffer (condition)
+  (setf *last-log-callback-error* condition)
+  (ignore-errors
+    (format *debug-io* "~&[cl-llama-cpp] log callback error: ~A~%" condition)))
 
 (cffi:defcallback %log-dispatcher :void
     ((level :int) (text :string) (data :pointer))
   (declare (ignore data))
   (when *log-callback*
     (handler-bind ((error (lambda (c)
-			    ;; Capture or log the error first.
-                            (log-error-to-safe-buffer c) 
-                            ;; Return control to C without a crash.
+                            (log-error-to-safe-buffer c)
                             (return-from %log-dispatcher))))
       (funcall *log-callback* level text))))
 

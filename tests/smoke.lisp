@@ -684,6 +684,16 @@
       (ok (string= "test reason" (cl-llama-cpp:configuration-unsafe-error-reason caught))
           "configuration-unsafe-error-reason accessor works"))))
 
+(deftest last-log-callback-error-exported
+  (testing "*last-log-callback-error* is exported from cl-llama-cpp"
+    (multiple-value-bind (sym status)
+        (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)
+      (ok sym "*LAST-LOG-CALLBACK-ERROR* is accessible")
+      (ok (eq status :external) "*LAST-LOG-CALLBACK-ERROR* is exported")))
+  (testing "*last-log-callback-error* is bound"
+    (let ((sym (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)))
+      (ok (boundp sym) "*LAST-LOG-CALLBACK-ERROR* is boundp"))))
+
 (deftest get-log-callback-initial
   (testing "get-log-callback returns NIL initially (no callback set by this test)"
     (let ((prev (cl-llama-cpp:get-log-callback)))

@@ -11,7 +11,7 @@
 ;;; with-perf            — reset before body, print after (even on error)
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/perf-and-logging.lisp")
@@ -23,9 +23,7 @@
 
 (in-package #:cl-llama-cpp/examples/perf-and-logging)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF chat model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────
@@ -43,6 +41,8 @@
 
 (defun run ()
   "Run all performance / logging demonstrations."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
 
   ;; ════════════════════════════════════════════════════════════════════
   (banner "PHASE 1: System capabilities (no model required)")
