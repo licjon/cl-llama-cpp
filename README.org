@@ -5,7 +5,7 @@ Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via
 ** Status
 
 *Active Development/Beta*
-The low-level bindings cover the full public C API of llama.cpp and the bundled ggml and gguf libraries (=llama_=, =ggml_=, and =gguf_= symbols --- auto-generated via CLAW). A higher-level Lisp interface is provided for common inference workflows, while some advanced features currently require using the raw =%llama= bindings directly. These are the current high-level wrappers:
+The low-level bindings cover the full public C API of llama.cpp and the bundled ggml and gguf libraries (=llama_=, =ggml_=, and =gguf_= symbols --- auto-generated via claw). A higher-level Lisp interface is provided for common inference workflows, while some advanced features currently require using the raw =%llama= bindings directly. These are the current high-level wrappers:
 
 - Model loading and context creation
 - Tokenization / detokenization
@@ -120,6 +120,8 @@ with history length. That is fine for a short demo; long sessions would want
 incremental decoding that reuses the KV cache.
 
 ** API Reference
+
+*Nullability convention:* Every high-level wrapper translates between Lisp =NIL= and C null pointers automatically. Pass =NIL= for optional pointer arguments (e.g. =set-abort-callback= callback, =attach-threadpool= batch threadpool); receive =NIL= for nullable returns (e.g. =model-chat-template= when no template exists). Allocation failures (null pointer from =llama_model_load_from_file=, etc.) signal a condition rather than returning =NIL=. Users never need to call =cffi:null-pointer= or =cffi:null-pointer-p=.
 
 *** Resource Management
 
@@ -386,13 +388,13 @@ The high-level =cl-llama-cpp= API is an ergonomic convenience layer built on top
 
 **** Naming Conventions
 
-| C name           | Lisp symbol            | Rule                                              |
-|------------------+------------------------+---------------------------------------------------|
-| =llama_decode=     | =%llama:decode=          | =llama_= prefix stripped, underscores become hyphens |
-| =LLAMA_SPLIT_MODE= | =%llama:split-mode=      | =LLAMA_= prefix stripped from enum/constant names    |
-| =ggml_mul_mat=     | =%llama:ggml-mul-mat=    | =ggml_= prefix kept, underscores become hyphens     |
-| =gguf_get_key=     | =%llama:gguf-get-key=    | =gguf_= prefix kept, underscores become hyphens     |
-| =GGML_TYPE_F16=    | =%llama:ggml-type-f16=   | =GGML_= prefix kept for enum values                 |
+| C name           | Lisp symbol          | Rule                                               |
+|------------------+----------------------+----------------------------------------------------|
+| =llama_decode=     | =%llama:decode=        | =llama_= prefix stripped, underscores become hyphens |
+| =LLAMA_SPLIT_MODE= | =%llama:split-mode=    | =LLAMA_= prefix stripped from enum/constant names    |
+| =ggml_mul_mat=     | =%llama:ggml-mul-mat=  | =ggml_= prefix kept, underscores become hyphens      |
+| =gguf_get_key=     | =%llama:gguf-get-key=  | =gguf_= prefix kept, underscores become hyphens      |
+| =GGML_TYPE_F16=    | =%llama:ggml-type-f16= | =GGML_= prefix kept for enum values                  |
 
 Everything lives in one package (=%llama=) regardless of which C library it came from.
 
