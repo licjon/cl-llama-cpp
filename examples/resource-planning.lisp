@@ -3,7 +3,7 @@
 ;;; alternatives when a budget is too tight.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/resource-planning.lisp")
@@ -21,9 +21,7 @@
 
 (in-package #:cl-llama-cpp/examples/resource-planning)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────
 
@@ -43,6 +41,8 @@ VRAM-GIB is the simulated VRAM budget in GiB (default 8).
 When GUARDRAILS is non-nil, also demonstrate the runtime :validation hooks
 of WITH-CONTEXT. This loads the FULL model (not vocab-only) and is slow and
 CPU-bound, so it is disabled by default."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (let ((vram-budget (ceiling (* vram-gib 1024 1024 1024))))
     (format t "~&Loading model (vocab-only): ~A~%" *model-path*)
 

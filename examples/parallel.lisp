@@ -6,7 +6,7 @@
 ;;; better use of GPU compute.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/parallel.lisp")
@@ -18,12 +18,12 @@
 
 (in-package #:cl-llama-cpp/examples/parallel)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 (defun run (&key (max-tokens 64) (temp 0.7))
   "Complete multiple prompts in parallel using the batch API."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (format t "~&Loading model: ~A~2%" *model-path*)
   (with-model (model *model-path* :n-gpu-layers 99)
     (with-context (ctx model :n-ctx 2048 :n-seq-max 8)

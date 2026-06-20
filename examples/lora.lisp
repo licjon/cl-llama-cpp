@@ -50,16 +50,16 @@
 
 (in-package #:cl-llama-cpp/examples/lora)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
-(defparameter *lora-path*
-  (or (uiop:getenv "LLAMA_LORA")
-      (error "Set LLAMA_LORA to the path of a LoRA adapter GGUF.")))
+(defvar *lora-path* (uiop:getenv "LLAMA_LORA"))
 
 (defun run (&optional (prompt "Tell me about the Common Lisp programming language."))
   "Chat with the LoRA-adapted model, streaming to stdout."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
+  (unless *lora-path*
+    (error "Set *lora-path* or export LLAMA_LORA before calling run."))
   (with-model (model *model-path* :n-gpu-layers 99)
     (with-context (ctx model :n-ctx 4096)
       (with-lora (adapter model *lora-path*)

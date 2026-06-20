@@ -1514,3 +1514,102 @@ ws     ::= [ \\t\\n]*")
                                               :vram-budget 1024)
           (ok (not (cffi:null-pointer-p ctx))
               "context created without validation"))))))
+
+;;; Callback safety integration tests (issue #40)
+
+(deftest log-callback-error-captured-in-last-error
+  (when-model-available
+    (testing "errors in log callback are captured in *last-log-callback-error*"
+      (let ((prev (cl-llama-cpp:get-log-callback))
+            (prev-err cl-llama-cpp:*last-log-callback-error*))
+        (unwind-protect
+             (progn
+               (setf cl-llama-cpp:*last-log-callback-error* nil)
+               (cl-llama-cpp:set-log-callback
+                (lambda (level text)
+                  (declare (ignore level text))
+                  (error "deliberate callback error")))
+               ;; Loading a model triggers log messages, which invokes the callback
+               (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+                 nil)
+               (ok (typep cl-llama-cpp:*last-log-callback-error* 'error)
+                   (format nil "error was captured: ~A"
+                           cl-llama-cpp:*last-log-callback-error*)))
+          (cl-llama-cpp:set-log-callback prev)
+          (setf cl-llama-cpp:*last-log-callback-error* prev-err))))))
+
+(deftest generate-token-callback-nil-returns-callback
+  (when-model-available
+    (testing "token callback returning NIL produces :callback stop reason"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "The capital of France is"
+                                     :max-tokens 64
+                                     :temp 0.1
+                                     :token-callback (lambda (chunk)
+                                                       (declare (ignore chunk))
+                                                       nil))
+            (ok (stringp text) "generate returned a string")
+            (ok (eq :callback stop-reason)
+                (format nil "stop-reason is :callback: ~A" stop-reason))))))))
+
+(deftest generate-token-callback-error-returns-error-stop
+  (when-model-available
+    (testing "token callback that signals an error produces :error stop reason"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "The capital of France is"
+                                     :max-tokens 64
+                                     :temp 0.1
+                                     :token-callback (lambda (chunk)
+                                                       (declare (ignore chunk))
+                                                       (error "deliberate callback error")))
+            (ok (stringp text) "generate returned a string despite callback error")
+            (ok (eq :error stop-reason)
+                (format nil "stop-reason is :error: ~A" stop-reason))))))))
+
+(deftest generate-token-callback-ignore-restart-continues
+  (when-model-available
+    (testing "invoking ignore-callback-error restart allows generation to continue"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((call-count 0))
+            (multiple-value-bind (text stop-reason)
+                (cl-llama-cpp:generate
+                 ctx "The capital of France is"
+                 :max-tokens 16
+                 :temp 0.1
+                 :token-callback
+                 ;; Handler-bind inside the callback is closer to the signal
+                 ;; than generate's internal handler, so it runs first.
+                 (lambda (chunk)
+                   (declare (ignore chunk))
+                   (incf call-count)
+                   (when (= call-count 1)
+                     (handler-bind
+                         ((error (lambda (c)
+                                   (declare (ignore c))
+                                   (when (find-restart 'cl-llama-cpp::ignore-callback-error)
+                                     (invoke-restart 'cl-llama-cpp::ignore-callback-error)))))
+                       (error "first call errors")))))
+              (ok (stringp text) "generate returned text after error recovery")
+              (ok (member stop-reason '(:eog :length :callback))
+                  (format nil "stop-reason is not :error after recovery: ~A" stop-reason))
+              (ok (> call-count 1)
+                  (format nil "callback was invoked ~D times (continued after error)"
+                          call-count)))))))))
+
+(deftest generate-without-token-callback-unaffected
+  (when-model-available
+    (testing "generate without token callback still returns :eog or :length"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "The capital of France is"
+                                     :max-tokens 16
+                                     :temp 0.1)
+            (ok (stringp text) "generate returned text")
+            (ok (member stop-reason '(:eog :length))
+                (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))

@@ -8,7 +8,7 @@
 ;;; set-abort-callback — interrupt long-running inference via a deadline
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
 ;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/backend-lifecycle.lisp")
@@ -20,9 +20,7 @@
 
 (in-package #:cl-llama-cpp/examples/backend-lifecycle)
 
-(defparameter *model-path*
-  (or (uiop:getenv "LLAMA_MODEL")
-      (error "Set LLAMA_MODEL to the path of a GGUF model.")))
+(defvar *model-path* (uiop:getenv "LLAMA_MODEL"))
 
 ;;; ── Abort callback ───────────────────────────────────────────────────
 ;;;
@@ -53,6 +51,8 @@
 
 (defun run ()
   "Run all backend-lifecycle demonstrations."
+  (unless *model-path*
+    (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (format t "~&Loading model: ~A~%" *model-path*)
 
   ;; with-backend is the proper replacement for bare ensure-backend calls.
