@@ -30,7 +30,17 @@
   :depends-on ("cl-llama-cpp")
   :components ((:module "examples"
                 :components
-                ((:file "chat")))))
+                ((:file "simple-chat")
+                 (:file "backend-lifecycle")
+                 (:file "context-fork")
+                 (:file "introspection")
+                 (:file "kv-cache")
+                 (:file "lora")
+                 (:file "parallel")
+                 (:file "perf-and-logging")
+                 (:file "resource-planning")
+                 (:file "sampler-comparison")
+                 (:file "sampler-showcase")))))
 
 (defsystem "cl-llama-cpp/generate"
   :description "Binding generator for cl-llama-cpp (developers only)"
