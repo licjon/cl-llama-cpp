@@ -119,6 +119,7 @@
    ;; Logging
    #:set-log-callback
    #:get-log-callback
+   #:*last-log-callback-error*
    ;; System queries
    #:time-us
    #:system-capabilities

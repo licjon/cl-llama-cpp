@@ -23,7 +23,7 @@
 (in-package #:cl-llama-cpp/examples/simple-chat)
 
 (defparameter *default-model-path*
-  "/home/jh/models/qwen2.5-14b-instruct-q4_k_m.gguf")
+  "/path/to/model.gguf")
 
 (defun main (&key (model-path *default-model-path*)
                   (n-gpu-layers 99)
