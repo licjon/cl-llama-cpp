@@ -29,17 +29,34 @@ calls llama-numa-init before executing BODY."
 
 (defun %bool->c (x) (if x 1 0))
 
+(defun %coerce-bool-param (x)
+  (etypecase x
+    (integer x)
+    (boolean (if x 1 0))))
+
+(defparameter *bool-param-names*
+  '("VOCAB-ONLY" "USE-MMAP" "USE-DIRECT-IO" "USE-MLOCK"
+    "CHECK-TENSORS" "USE-EXTRA-BUFTS" "NO-HOST" "NO-ALLOC"
+    "EMBEDDINGS" "OFFLOAD-KQV" "NO-PERF" "OP-OFFLOAD"
+    "SWA-FULL" "KV-UNIFIED"))
+
 (defun override-params (defaults overrides)
   "Override struct plist DEFAULTS with keyword OVERRIDES.
 OVERRIDES is a plist like (:n-gpu-layers 99). Keys are matched
-against the default plist keys by symbol name."
+against the default plist keys by symbol name. Boolean-typed C
+params (e.g. :embeddings, :vocab-only) accept T/NIL in addition
+to 0/1."
   (let ((result (copy-list defaults)))
     (loop for (key val) on overrides by #'cddr
-          do (let ((match (loop for (k v) on result by #'cddr
-                                when (string= (symbol-name key) (symbol-name k))
-                                return k)))
+          do (let* ((key-name (symbol-name key))
+                    (match (loop for (k v) on result by #'cddr
+                                 when (string= key-name (symbol-name k))
+                                 return k)))
                (when match
-                 (setf (getf result match) val))))
+                 (setf (getf result match)
+                       (if (member key-name *bool-param-names* :test #'string=)
+                           (%coerce-bool-param val)
+                           val)))))
     result))
 
 (defmacro with-model ((var path &rest params) &body body)
