@@ -16,10 +16,12 @@
                      (:spec-path ,(project-path "spec/"))
                      ;; Cover the full public surface of everything llama.h
                      ;; pulls in: llama (llama_/LLAMA_), ggml core + backends
-                     ;; (ggml_/GGML_), and gguf (gguf_/GGUF_). Audited against the
-                     ;; c2ffi spec: matches 100% of project symbols and 0 system
-                     ;; (libc) symbols. :symbolicate-names below only strips the
-                     ;; llama_ prefix, so ggml_/gguf_ names keep their prefix.
+                     ;; (ggml_/GGML_), and gguf (gguf_/GGUF_). Audited against
+                     ;; public headers (llama.h, ggml.h, ggml-backend.h, gguf.h,
+                     ;; ggml-cpu.h, ggml-alloc.h, ggml-opt.h): 881 functions,
+                     ;; 38 enums, 59 structs — 0 gaps, 0 system (libc) symbols.
+                     ;; :symbolicate-names below only strips the llama_ prefix,
+                     ;; so ggml_/gguf_ names keep their prefix.
                      (:include-definitions "^(llama|LLAMA|ggml|GGML|gguf|GGUF)_\\w+")
                      (:language :c))
      :in-package :%llama
