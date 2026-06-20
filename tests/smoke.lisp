@@ -694,6 +694,72 @@
     (let ((sym (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)))
       (ok (boundp sym) "*LAST-LOG-CALLBACK-ERROR* is boundp"))))
 
+;;; Boolean ergonomics (issue #43)
+
+(deftest bool-coercion-t-nil
+  (testing "%coerce-bool-param converts T and NIL to 1 and 0"
+    (ok (= 1 (cl-llama-cpp::%coerce-bool-param t))
+        "T → 1")
+    (ok (= 0 (cl-llama-cpp::%coerce-bool-param nil))
+        "NIL → 0")))
+
+(deftest bool-coercion-integers-passthrough
+  (testing "%coerce-bool-param passes integers through unchanged"
+    (ok (= 1 (cl-llama-cpp::%coerce-bool-param 1))
+        "1 → 1")
+    (ok (= 0 (cl-llama-cpp::%coerce-bool-param 0))
+        "0 → 0")))
+
+(deftest bool-coercion-rejects-other-types
+  (testing "%coerce-bool-param rejects non-integer non-boolean values"
+    (ok (handler-case
+            (progn (cl-llama-cpp::%coerce-bool-param "true") nil)
+          (type-error () t))
+        "string signals type-error")
+    (ok (handler-case
+            (progn (cl-llama-cpp::%coerce-bool-param :yes) nil)
+          (type-error () t))
+        "keyword signals type-error")))
+
+(deftest override-params-bool-coercion
+  (testing "override-params coerces T/NIL for known boolean keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:context-default-params))
+             (overridden (cl-llama-cpp::override-params
+                          defaults '(:embeddings t))))
+        (ok (= 1 (getf overridden '%llama::embeddings))
+            ":embeddings T → 1")))
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:context-default-params))
+             (overridden (cl-llama-cpp::override-params
+                          defaults '(:embeddings nil))))
+        (ok (= 0 (getf overridden '%llama::embeddings))
+            ":embeddings NIL → 0")))))
+
+(deftest override-params-bool-backward-compat
+  (testing "override-params still accepts 0/1 for boolean keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:context-default-params))
+             (overridden (cl-llama-cpp::override-params
+                          defaults '(:embeddings 1))))
+        (ok (= 1 (getf overridden '%llama::embeddings))
+            ":embeddings 1 → 1")))
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:context-default-params))
+             (overridden (cl-llama-cpp::override-params
+                          defaults '(:embeddings 0))))
+        (ok (= 0 (getf overridden '%llama::embeddings))
+            ":embeddings 0 → 0")))))
+
+(deftest override-params-model-bool-keys
+  (testing "override-params coerces T/NIL for model-params boolean keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:model-default-params))
+             (overridden (cl-llama-cpp::override-params
+                          defaults '(:vocab-only t))))
+        (ok (= 1 (getf overridden '%llama::vocab-only))
+            ":vocab-only T → 1")))))
+
 (deftest get-log-callback-initial
   (testing "get-log-callback returns NIL initially (no callback set by this test)"
     (let ((prev (cl-llama-cpp:get-log-callback)))
