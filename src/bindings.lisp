@@ -7932,11 +7932,10 @@
 (cffi:defcstruct model)
 
 
-(cffi:defcfun ("llama_model_chat_template" model-chat-template)
-    :string
+(cffi:defcfun ("llama_model_chat_template" model-chat-template) :pointer
   "char* llama_model_chat_template(struct llama_model* model, char* name);"
-  (model (:pointer (:struct model)))
-  (name :string))
+  (model :pointer)
+  (name :pointer)) ;; Accept null pointers safely
 
 
 (cffi:defcstruct model)
