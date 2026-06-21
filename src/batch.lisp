@@ -147,6 +147,7 @@ Signals DECODE-ERROR on failure. Returns NIL on success."
     (let ((rc (%llama:decode (llama-context-pointer ctx) (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
+      (setf (llama-context-compute-pending-p ctx) t)
       nil)))
 
 (defun batch-encode (ctx batch)
@@ -156,6 +157,7 @@ Signals DECODE-ERROR on failure. Returns NIL on success."
     (let ((rc (%llama:encode (llama-context-pointer ctx) (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
+      (setf (llama-context-compute-pending-p ctx) t)
       nil)))
 
 (defun generate-parallel (ctx prompts &key (max-tokens 256) (temp 0.8)

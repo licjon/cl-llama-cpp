@@ -4,7 +4,8 @@
   (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
 
 (defstruct (llama-context (:constructor %make-llama-context) (:copier nil))
-  (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
+  (pointer (cffi:null-pointer) :type cffi:foreign-pointer)
+  (compute-pending-p nil :type boolean))
 
 (defstruct (llama-sampler (:constructor %make-llama-sampler) (:copier nil))
   (pointer (cffi:null-pointer) :type cffi:foreign-pointer))

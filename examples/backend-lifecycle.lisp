@@ -125,8 +125,9 @@
         ;; ══════════════════════════════════════════════════════════════
         ;;
         ;; synchronize is a barrier: it blocks until the GPU (or async
-        ;; CPU backend) finishes pending compute. Call it before reading
-        ;; logits or embeddings if you have issued non-blocking work.
+        ;; CPU backend) finishes pending compute. High-level accessors
+        ;; like embed auto-synchronize before reading; call this explicitly
+        ;; in batched pipelines where you need finer-grained control.
 
         (format t "Calling (synchronize ctx) as a compute barrier:~%")
         (synchronize ctx)
