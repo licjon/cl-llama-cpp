@@ -46,7 +46,7 @@ These features provide functionality above what the llama.cpp C API offers direc
 
 - =generate-parallel= --- Complete multiple prompts simultaneously in shared forward passes. A single function call handles batch allocation, multi-sequence decoding, per-sequence sampling, and result collection. The C API provides batch primitives but no built-in parallel generation loop.
 
-- =estimate-memory= / =feasibility-report= / =suggest-configuration= --- Estimate model + KV-cache + compute memory from GGUF metadata and validate a configuration against a VRAM budget before loading. Pure Lisp-side computation; llama.cpp has no equivalent planning API.
+- =estimate-memory= / =feasibility-report= / =suggest-configuration= --- Estimate model + KV-cache + compute memory from GGUF metadata and validate a configuration against a VRAM budget before loading. Free VRAM is auto-detected from the GPU when no budget is supplied. Pure Lisp-side computation; llama.cpp has no equivalent planning API.
 
 ** Requirements
 
@@ -387,21 +387,23 @@ Enumerate and query the GGML backend devices and registries. Requires the backen
 
 - =detect-free-vram= --- Return the total free VRAM in bytes across all GPU and IGPU devices, or =NIL= if no GPU devices are registered.
 
+- =detect-total-vram= --- Return the total VRAM capacity in bytes across all GPU and IGPU devices, or =NIL= if no GPU devices are registered.
+
 *** Resource Planning & Validation
 
-Estimate memory use from GGUF metadata and validate a configuration against a VRAM budget --- before loading a model or creating a context. All sizes are in bytes. These read only model metadata, so they work well on a lightweight =:vocab-only t= model load.
+Estimate memory use from GGUF metadata and validate a configuration against a VRAM budget --- before loading a model or creating a context. All sizes are in bytes. Snapshot =detect-free-vram= before loading for pre-load planning; after loading, the returned value reflects remaining headroom only.
 
 - =estimate-memory model &key n-ctx type-k type-v= --- Return a plist =(:model-size :kv-cache :compute :total)= estimating memory for =model=. =n-ctx= defaults to the model's training context length; =type-k= / =type-v= default to =:f16= (the KV-cache quantization types, e.g. =:q8-0=). The =:compute= term is a fixed heuristic, so =:total= is an approximation.
 
 - =explain-memory-usage model &key n-ctx type-k type-v stream= --- Print a human-readable memory breakdown to =stream= (default =*standard-output*=). Returns =NIL=.
 
-- =validate-configuration model &key n-ctx type-k type-v n-gpu-layers vram-budget= --- Return a plist =(:status :safe/:unsafe/:unknown :reason string)=. Without =:vram-budget= the status is =:unknown=. When =:n-gpu-layers= is supplied, only the proportional GPU share of model weights (plus KV cache and compute) is checked against the budget.
+- =validate-configuration model &key n-ctx type-k type-v n-gpu-layers vram-budget= --- Return a plist =(:status :safe/:unsafe/:unknown :reason string)=. Without =:vram-budget=, free VRAM is auto-detected via =detect-free-vram=; status is =:unknown= only when no GPU is present. When =:n-gpu-layers= is supplied, only the proportional GPU share of model weights (plus KV cache and compute) is checked against the budget.
 
-- =feasibility-report model &key n-ctx type-k type-v n-gpu-layers vram-budget stream= --- Print an estimate + validation report to =stream= and return the combined estimate/validation plist.
+- =feasibility-report model &key n-ctx type-k type-v n-gpu-layers vram-budget stream= --- Print an estimate + validation report to =stream= and return the combined estimate/validation plist. When =:vram-budget= is omitted, prints a "Detected VRAM" header showing free/total and device name(s).
 
-- =suggest-configuration model &key n-ctx n-gpu-layers vram-budget= --- Return a plist =(:n-ctx n :n-gpu-layers n)= that fits within =:vram-budget=, or =NIL= if none is found (or no budget given). Reduces =n-gpu-layers= first, then halves =n-ctx=.
+- =suggest-configuration model &key n-ctx n-gpu-layers vram-budget= --- Return a plist =(:n-ctx n :n-gpu-layers n)= that fits within =:vram-budget=, or =NIL= if none is found. Without =:vram-budget=, free VRAM is auto-detected; returns =NIL= on CPU-only builds. Reduces =n-gpu-layers= first, then halves =n-ctx=.
 
-*Runtime guardrails:* =with-context= accepts =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes). =:warn= signals =configuration-unsafe-warning= (a =warning=) and proceeds; =:error= signals =configuration-unsafe-error= and aborts context creation. =vram-budget= is currently caller-supplied --- automatic detection is tracked in issue #27.
+*Runtime guardrails:* =with-context= accepts =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes). =:warn= signals =configuration-unsafe-warning= (a =warning=) and proceeds; =:error= signals =configuration-unsafe-error= and aborts context creation. Without =:vram-budget=, free VRAM is auto-detected from the GPU.
 
 *** Batch API
 

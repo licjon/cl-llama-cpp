@@ -1389,11 +1389,18 @@ ws     ::= [ \\t\\n]*")
 
 (deftest validate-configuration-unknown-without-budget
   (when-model-available
-    (testing "validate-configuration returns :unknown without vram-budget"
-      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (let ((result (cl-llama-cpp:validate-configuration model :n-ctx 512)))
-          (ok (eq :unknown (getf result :status))
-              "status is :unknown without budget"))))))
+    (testing "validate-configuration without vram-budget: auto-detects GPU or returns :unknown"
+      (cl-llama-cpp:with-llama-compatible-fp-environment
+        (%llama:backend-init)
+        (let* ((detected (cl-llama-cpp:detect-free-vram))
+               (result (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+                         (cl-llama-cpp:validate-configuration model :n-ctx 512)))
+               (status (getf result :status)))
+          (if detected
+              (ok (member status '(:safe :unsafe))
+                  (format nil "GPU detected: status is :safe or :unsafe, got ~A" status))
+              (ok (eq :unknown status)
+                  "no GPU detected: status is :unknown")))))))
 
 (deftest validate-configuration-safe-with-large-budget
   (when-model-available
@@ -1432,10 +1439,17 @@ ws     ::= [ \\t\\n]*")
 
 (deftest suggest-configuration-nil-without-budget
   (when-model-available
-    (testing "suggest-configuration returns NIL without vram-budget"
-      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (ok (null (cl-llama-cpp:suggest-configuration model :n-ctx 512))
-            "returns NIL without budget")))))
+    (testing "suggest-configuration without vram-budget: auto-detects GPU or returns NIL"
+      (cl-llama-cpp:with-llama-compatible-fp-environment
+        (%llama:backend-init)
+        (let* ((detected (cl-llama-cpp:detect-free-vram))
+               (result (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+                         (cl-llama-cpp:suggest-configuration model :n-ctx 512))))
+          (if detected
+              (ok (or (null result) (listp result))
+                  (format nil "GPU detected: returns a config or NIL, got ~A" result))
+              (ok (null result)
+                  "no GPU detected: returns NIL")))))))
 
 (deftest suggest-configuration-returns-valid-config
   (when-model-available
@@ -1881,6 +1895,40 @@ ws     ::= [ \\t\\n]*")
             (format nil "detect-free-vram returned ~A" vram))
         (when vram
           (ok (>= vram 0) "detect-free-vram is non-negative"))))))
+
+(deftest detect-total-vram-type
+  (testing "detect-total-vram returns an integer or NIL"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((total (cl-llama-cpp:detect-total-vram)))
+        (ok (or (null total) (integerp total))
+            (format nil "detect-total-vram returned ~A" total))
+        (when total
+          (ok (>= total 0) "detect-total-vram is non-negative"))))))
+
+(deftest detect-total-vram-not-less-than-free
+  (testing "detect-total-vram >= detect-free-vram when GPU is present"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((free  (cl-llama-cpp:detect-free-vram))
+            (total (cl-llama-cpp:detect-total-vram)))
+        (when (and free total)
+          (ok (>= total free)
+              (format nil "total ~A >= free ~A" total free)))))))
+
+(deftest validate-configuration-auto-detects-budget
+  (testing "validate-configuration with no vram-budget matches explicit detected budget"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((detected (cl-llama-cpp:detect-free-vram)))
+        (when detected
+          (when-model-available
+            (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+              (let* ((explicit (cl-llama-cpp:validate-configuration
+                                model :n-ctx 512 :vram-budget detected))
+                     (auto    (cl-llama-cpp:validate-configuration model :n-ctx 512)))
+                (ok (eq (getf explicit :status) (getf auto :status))
+                    "auto-detected budget gives same status as explicit same budget")))))))))
 
 (deftest system-capabilities-backend-keys
   (testing "system-capabilities returns extended backend keys"

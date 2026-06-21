@@ -725,7 +725,7 @@
                    backend-dev-by-name backend-dev-by-type
                    backend-reg-count backend-reg-get backend-reg-name
                    backend-reg-dev-count backend-reg-dev-get backend-reg-by-name
-                   gpu-devices detect-free-vram))
+                   gpu-devices detect-free-vram detect-total-vram))
       (multiple-value-bind (s status)
           (find-symbol (symbol-name sym) :cl-llama-cpp)
         (ok s (format nil "~A is accessible" sym))
@@ -741,7 +741,7 @@
                         "BACKEND-DEV-BY-NAME" "BACKEND-DEV-BY-TYPE"
                         "BACKEND-REG-COUNT" "BACKEND-REG-GET" "BACKEND-REG-NAME"
                         "BACKEND-REG-DEV-COUNT" "BACKEND-REG-DEV-GET" "BACKEND-REG-BY-NAME"
-                        "GPU-DEVICES" "DETECT-FREE-VRAM"))
+                        "GPU-DEVICES" "DETECT-FREE-VRAM" "DETECT-TOTAL-VRAM"))
       (let ((sym (find-symbol sym-name :cl-llama-cpp)))
         (ok (and sym (fboundp sym))
             (format nil "~A is fbound" sym-name))))))

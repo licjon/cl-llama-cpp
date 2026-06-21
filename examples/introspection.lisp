@@ -47,7 +47,7 @@
   (unless *model-path*
     (error "Set *model-path* or export LLAMA_MODEL before calling run."))
   (format t "~&Loading model: ~A~%" *model-path*)
-  (with-model (model *model-path* :n-gpu-layers 0)
+  (with-model (model *model-path*)
     (with-context (ctx model :n-ctx 2048)
 
       ;; ── Model description ──────────────────────────────────────────
