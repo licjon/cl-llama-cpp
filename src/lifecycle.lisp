@@ -60,7 +60,7 @@ to 0/1."
     result))
 
 (defmacro with-model ((var path &rest params) &body body)
-  "Load a model from PATH, bind it to VAR, execute BODY, free the model.
+  "Load a model from PATH, bind it to VAR as a LLAMA-MODEL handle, execute BODY, free the model.
 PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 99)."
   (let ((model-ptr (gensym "MODEL"))
         (path-val (gensym "PATH")))
@@ -73,13 +73,13 @@ PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 
                 (,model-ptr (%llama:model-load-from-file ,path-val model-params)))
            (when (cffi:null-pointer-p ,model-ptr)
              (error 'model-load-error :path ,path-val))
-           (let ((,var ,model-ptr))
+           (let ((,var (%make-llama-model :pointer ,model-ptr)))
              (unwind-protect
                   (progn ,@body)
-               (%llama:model-free ,var))))))))
+               (%llama:model-free ,model-ptr))))))))
 
 (defmacro with-context ((var model &rest params) &body body)
-  "Create an inference context from MODEL, bind to VAR, execute BODY, free context.
+  "Create an inference context from MODEL, bind to VAR as a LLAMA-CONTEXT handle, execute BODY, free context.
 PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048).
 Additional keywords :VALIDATION (:off :warn :error) and :VRAM-BUDGET (bytes)
 control pre-creation resource validation."
@@ -97,13 +97,14 @@ control pre-creation resource validation."
          ,@(when validation-form
              `((%validate-context-params
                 ,model-var ctx-params ,validation-form ,vram-budget-form)))
-         (let ((,ctx-ptr (%llama:new-context-with-model ,model-var ctx-params)))
+         (let ((,ctx-ptr (%llama:new-context-with-model
+                          (llama-model-pointer ,model-var) ctx-params)))
            (when (cffi:null-pointer-p ,ctx-ptr)
              (error 'context-creation-error))
-           (let ((,var ,ctx-ptr))
+           (let ((,var (%make-llama-context :pointer ,ctx-ptr)))
              (unwind-protect
                   (progn ,@body)
-               (%llama:free ,var))))))))
+               (%llama:free ,ctx-ptr))))))))
 
 ;;; Context runtime configuration
 
@@ -113,19 +114,19 @@ and batch decoding (N-THREADS-BATCH). Both values are required together."
   (check-type n-threads (integer 0 *))
   (check-type n-threads-batch (integer 0 *))
   (with-llama-compatible-fp-environment
-    (%llama:set-n-threads ctx n-threads n-threads-batch))
+    (%llama:set-n-threads (llama-context-pointer ctx) n-threads n-threads-batch))
   nil)
 
 (defun set-warmup (ctx warmup-p)
   "Enable or disable the warmup pass on CTX."
   (with-llama-compatible-fp-environment
-    (%llama:set-warmup ctx (%bool->c warmup-p)))
+    (%llama:set-warmup (llama-context-pointer ctx) (%bool->c warmup-p)))
   nil)
 
 (defun set-causal-attn (ctx causal-attn-p)
   "Enable or disable causal attention on CTX."
   (with-llama-compatible-fp-environment
-    (%llama:set-causal-attn ctx (%bool->c causal-attn-p)))
+    (%llama:set-causal-attn (llama-context-pointer ctx) (%bool->c causal-attn-p)))
   nil)
 
 (defun set-embeddings (ctx embeddings-p)
@@ -134,13 +135,13 @@ the context was created with: enable only on contexts created with :embeddings
 non-nil, disable only on contexts created without it. Toggling on a mismatched
 context leaves internal C state inconsistent."
   (with-llama-compatible-fp-environment
-    (%llama:set-embeddings ctx (%bool->c embeddings-p)))
+    (%llama:set-embeddings (llama-context-pointer ctx) (%bool->c embeddings-p)))
   nil)
 
 (defun synchronize (ctx)
   "Block until all pending async operations on CTX have completed."
   (with-llama-compatible-fp-environment
-    (%llama:synchronize ctx))
+    (%llama:synchronize (llama-context-pointer ctx)))
   nil)
 
 (defun set-abort-callback (ctx callback &optional data)
@@ -149,7 +150,7 @@ pointer obtained via CFFI:CALLBACK, or NIL to clear the callback.
 DATA is an optional opaque data pointer passed to the callback."
   (with-llama-compatible-fp-environment
     (%llama:set-abort-callback
-     ctx
+     (llama-context-pointer ctx)
      (or callback (cffi:null-pointer))
      (or data (cffi:null-pointer))))
   nil)
@@ -163,7 +164,7 @@ The caller retains ownership of the threadpool — detach-threadpool does
 not free it."
   (with-llama-compatible-fp-environment
     (%llama:attach-threadpool
-     ctx
+     (llama-context-pointer ctx)
      threadpool
      (or threadpool-batch (cffi:null-pointer))))
   nil)
@@ -171,5 +172,5 @@ not free it."
 (defun detach-threadpool (ctx)
   "Detach the threadpool from CTX. Does not free the threadpool."
   (with-llama-compatible-fp-environment
-    (%llama:detach-threadpool ctx))
+    (%llama:detach-threadpool (llama-context-pointer ctx)))
   nil)

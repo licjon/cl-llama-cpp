@@ -16,9 +16,13 @@
   (when-model-available
     (testing "with-model + with-context creates valid context"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
-        (ok (not (cffi:null-pointer-p model)) "model loaded")
+        (ok (cl-llama-cpp:llama-model-p model) "model is a llama-model handle")
+        (ok (cffi:pointerp (cl-llama-cpp:llama-model-pointer model))
+            "llama-model-pointer returns a CFFI pointer")
         (cl-llama-cpp:with-context (ctx model :n-ctx 512)
-          (ok (not (cffi:null-pointer-p ctx)) "context created"))))))
+          (ok (cl-llama-cpp:llama-context-p ctx) "context is a llama-context handle")
+          (ok (cffi:pointerp (cl-llama-cpp:llama-context-pointer ctx))
+              "llama-context-pointer returns a CFFI pointer"))))))
 
 (deftest tokenize-roundtrip
   (when-model-available
@@ -185,12 +189,13 @@
 
 (defun decode-tokens (ctx tokens)
   "Helper: decode a token vector into CTX's KV cache."
-  (let ((n-tokens (length tokens)))
+  (let ((n-tokens (length tokens))
+        (ctx-ptr (cl-llama-cpp:llama-context-pointer ctx)))
     (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
       (dotimes (i n-tokens)
         (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
       (cl-llama-cpp:with-llama-compatible-fp-environment
-        (%llama:decode ctx (%llama:batch-get-one tok-buf n-tokens))))))
+        (%llama:decode ctx-ptr (%llama:batch-get-one tok-buf n-tokens))))))
 
 (deftest clear-kv-cache-returns-nil
   (when-model-available
@@ -417,14 +422,14 @@ ws     ::= [ \\t\\n]*")
 
 (deftest make-grammar-sampler-creates-sampler
   (when-model-available
-    (testing "make-grammar-sampler returns a non-null pointer"
+    (testing "make-grammar-sampler returns a llama-sampler handle"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (let ((sampler (cl-llama-cpp:make-grammar-sampler model *json-grammar*)))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "grammar sampler pointer is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "grammar sampler is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest make-grammar-sampler-custom-root
   (when-model-available
@@ -433,10 +438,10 @@ ws     ::= [ \\t\\n]*")
         (let ((sampler (cl-llama-cpp:make-grammar-sampler
                         model *json-grammar* :root "root")))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "grammar sampler with custom root is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "grammar sampler with custom root is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest make-grammar-sampler-empty-grammar-signals-error
   (when-model-available
@@ -450,15 +455,15 @@ ws     ::= [ \\t\\n]*")
 
 (deftest make-grammar-sampler-lazy-creates-sampler
   (when-model-available
-    (testing "make-grammar-sampler-lazy returns a non-null pointer"
+    (testing "make-grammar-sampler-lazy returns a llama-sampler handle"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (let ((sampler (cl-llama-cpp:make-grammar-sampler-lazy
                         model *json-grammar*)))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "lazy grammar sampler is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "lazy grammar sampler is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest make-grammar-sampler-lazy-with-trigger-words
   (when-model-available
@@ -468,10 +473,10 @@ ws     ::= [ \\t\\n]*")
                         model *json-grammar*
                         :trigger-words '("{" "["))))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "lazy grammar sampler with trigger words is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "lazy grammar sampler with trigger words is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest make-grammar-sampler-lazy-with-trigger-patterns
   (when-model-available
@@ -481,10 +486,10 @@ ws     ::= [ \\t\\n]*")
                         model *json-grammar*
                         :trigger-patterns '("\\{" "\\["))))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "lazy grammar sampler with trigger patterns is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "lazy grammar sampler with trigger patterns is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest make-grammar-sampler-lazy-words-and-patterns-error
   (when-model-available
@@ -501,14 +506,14 @@ ws     ::= [ \\t\\n]*")
 
 (deftest make-infill-sampler-creates-sampler
   (when-model-available
-    (testing "make-infill-sampler returns a non-null pointer"
+    (testing "make-infill-sampler returns a llama-sampler handle"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (let ((sampler (cl-llama-cpp:make-infill-sampler model)))
           (unwind-protect
-               (ok (not (cffi:null-pointer-p sampler))
-                   "infill sampler is non-null")
+               (ok (cl-llama-cpp:llama-sampler-p sampler)
+                   "infill sampler is a llama-sampler handle")
             (cl-llama-cpp:with-llama-compatible-fp-environment
-              (%llama:sampler-free sampler))))))))
+              (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer sampler)))))))))
 
 (deftest with-grammar-sampler-binds-and-frees
   (when-model-available
@@ -517,9 +522,9 @@ ws     ::= [ \\t\\n]*")
         (let ((captured nil))
           (cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*)
             (setf captured gs)
-            (ok (not (cffi:null-pointer-p gs))
-                "grammar sampler is non-null inside body"))
-          (ok captured "sampler pointer was captured"))))))
+            (ok (cl-llama-cpp:llama-sampler-p gs)
+                "grammar sampler is a llama-sampler handle inside body"))
+          (ok captured "sampler handle was captured"))))))
 
 (deftest with-grammar-sampler-lazy-mode
   (when-model-available
@@ -528,8 +533,8 @@ ws     ::= [ \\t\\n]*")
         (cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*
                                                :lazy t
                                                :trigger-words '("{"))
-          (ok (not (cffi:null-pointer-p gs))
-              "lazy grammar sampler is non-null inside body"))))))
+          (ok (cl-llama-cpp:llama-sampler-p gs)
+              "lazy grammar sampler is a llama-sampler handle inside body"))))))
 
 (deftest with-grammar-sampler-cleanup-on-error
   (when-model-available
@@ -565,8 +570,8 @@ ws     ::= [ \\t\\n]*")
                                                 :grammar *json-grammar*
                                                 :grammar-root "root"
                                                 :temp 0.1)
-          (ok (not (cffi:null-pointer-p chain))
-              "sampler chain with grammar is non-null"))))))
+          (ok (cl-llama-cpp:llama-sampler-p chain)
+              "sampler chain with grammar is a llama-sampler handle"))))))
 
 (deftest build-sampler-chain-grammar-without-model-signals-error
   (testing "build-sampler-chain with :grammar but no :model signals error"
@@ -937,14 +942,10 @@ ws     ::= [ \\t\\n]*")
 (deftest sampler-seed-returns-integer
   (when-model-available
     (testing "sampler-seed returns an integer from a sampler chain"
-      (cl-llama-cpp:with-llama-compatible-fp-environment
-        (%llama:backend-init)
-        (let ((chain (cl-llama-cpp::build-sampler-chain :seed 12345)))
-          (unwind-protect
-               (let ((seed (cl-llama-cpp:sampler-seed chain)))
-                 (ok (integerp seed)
-                     (format nil "sampler-seed returned integer: ~A" seed)))
-            (%llama:sampler-free chain)))))))
+      (cl-llama-cpp:with-sampler-chain (chain :seed 12345)
+        (let ((seed (cl-llama-cpp:sampler-seed chain)))
+          (ok (integerp seed)
+              (format nil "sampler-seed returned integer: ~A" seed)))))))
 
 (deftest generate-with-extended-samplers
   (when-model-available
@@ -1507,7 +1508,7 @@ ws     ::= [ \\t\\n]*")
             (cl-llama-cpp:with-context (ctx model :n-ctx 512
                                                   :validation :warn
                                                   :vram-budget 1024)
-              (ok (not (cffi:null-pointer-p ctx))
+              (ok (cl-llama-cpp:llama-context-p ctx)
                   "context still created despite warning")))
           (ok warned (format nil "warning was signaled: ~A" warned)))))))
 
@@ -1532,7 +1533,7 @@ ws     ::= [ \\t\\n]*")
         (cl-llama-cpp:with-context (ctx model :n-ctx 512
                                               :validation :off
                                               :vram-budget 1024)
-          (ok (not (cffi:null-pointer-p ctx))
+          (ok (cl-llama-cpp:llama-context-p ctx)
               "context created without validation"))))))
 
 ;;; Boolean ergonomics integration tests (issue #43)
@@ -1555,14 +1556,14 @@ ws     ::= [ \\t\\n]*")
     (testing "with-context accepts :embeddings NIL (no embeddings mode)"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings nil)
-          (ok (not (cffi:null-pointer-p ctx))
+          (ok (cl-llama-cpp:llama-context-p ctx)
               "context created with :embeddings NIL"))))))
 
 (deftest with-model-vocab-only-t
   (when-model-available
     (testing "with-model accepts :vocab-only T"
       (cl-llama-cpp:with-model (model *test-model-path* :vocab-only t)
-        (ok (not (cffi:null-pointer-p model))
+        (ok (cl-llama-cpp:llama-model-p model)
             "model loaded with :vocab-only T")))))
 
 (deftest with-context-bool-backward-compat
@@ -1570,7 +1571,7 @@ ws     ::= [ \\t\\n]*")
     (testing "with-context still accepts integer 0/1 for boolean params"
       (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
         (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 0)
-          (ok (not (cffi:null-pointer-p ctx))
+          (ok (cl-llama-cpp:llama-context-p ctx)
               "context created with :embeddings 0 (backward compat)"))))))
 
 ;;; Callback safety integration tests (issue #40)
@@ -1671,3 +1672,51 @@ ws     ::= [ \\t\\n]*")
             (ok (stringp text) "generate returned text")
             (ok (member stop-reason '(:eog :length))
                 (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))
+
+;;; Typed opaque handles (issue #41)
+
+(deftest handle-type-safety
+  (when-model-available
+    (testing "model and context handles are distinct types"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (ok (cl-llama-cpp:llama-model-p model) "model is llama-model")
+        (ok (not (cl-llama-cpp:llama-context-p model))
+            "model is not llama-context")
+        (ok (not (cl-llama-cpp:llama-sampler-p model))
+            "model is not llama-sampler")
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (cl-llama-cpp:llama-context-p ctx) "ctx is llama-context")
+          (ok (not (cl-llama-cpp:llama-model-p ctx))
+              "ctx is not llama-model")
+          (ok (not (cl-llama-cpp:llama-sampler-p ctx))
+              "ctx is not llama-sampler")
+          (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-model-pointer model)))
+              "llama-model-pointer is non-null")
+          (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-context-pointer ctx)))
+              "llama-context-pointer is non-null"))))))
+
+(deftest sampler-handle-type
+  (when-model-available
+    (testing "with-sampler-chain binds a llama-sampler handle"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-sampler-chain (s :temp 0.8 :seed 42)
+            (ok (cl-llama-cpp:llama-sampler-p s) "s is llama-sampler")
+            (ok (not (cl-llama-cpp:llama-model-p s))
+                "s is not llama-model")
+            (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer s)))
+                "llama-sampler-pointer is non-null")
+            (ok (integerp (cl-llama-cpp:sampler-seed s))
+                "sampler-seed works on llama-sampler handle")))))))
+
+(deftest grammar-sampler-handle-type
+  (when-model-available
+    (testing "make-grammar-sampler returns a llama-sampler handle"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((grammar "root ::= \"yes\" | \"no\"")
+               (s (cl-llama-cpp:make-grammar-sampler model grammar)))
+          (ok (cl-llama-cpp:llama-sampler-p s)
+              "make-grammar-sampler returns a llama-sampler")
+          (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer s)))
+              "grammar sampler pointer is non-null")
+          (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer s)))))))

@@ -15,6 +15,10 @@ Nullability convention — every high-level wrapper follows this rule:
 Users never need to call CFFI:NULL-POINTER or CFFI:NULL-POINTER-P.
 New wrappers must follow this convention.")
   (:export
+   ;; Typed handles
+   #:llama-model #:llama-model-p #:llama-model-pointer
+   #:llama-context #:llama-context-p #:llama-context-pointer
+   #:llama-sampler #:llama-sampler-p #:llama-sampler-pointer
    ;; Utility
    #:call-with-llama-compatible-fp-environment
    #:with-llama-compatible-fp-environment
