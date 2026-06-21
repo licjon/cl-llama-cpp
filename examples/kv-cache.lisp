@@ -38,41 +38,12 @@
 
 (defun decode-for-seq (ctx model text seq-id start-pos)
   "Tokenize TEXT and decode into CTX's KV cache for SEQ-ID starting at
-START-POS. Uses batch-init to target a specific sequence, since the
-simpler batch-get-one always targets seq 0.
-Returns the number of tokens decoded."
+START-POS. Returns the number of tokens decoded."
   (let* ((tokens (tokenize model text :add-special nil))
-         (n (length tokens))
-         (ctx-ptr (llama-context-pointer ctx)))
-    (with-llama-compatible-fp-environment
-      ;; batch-init allocates arrays for n tokens, 0 embedding dims, 1 seq per token
-      (let ((batch (%llama:batch-init n 0 1)))
-        (unwind-protect
-            (progn
-              ;; Set the actual token count (batch-init initializes it to 0)
-              (setf (getf batch '%llama::n-tokens) n)
-              ;; Fill each slot: token id, position, sequence assignment, logit flag
-              (let ((tok-ptr   (getf batch '%llama::token))
-                    (pos-ptr   (getf batch '%llama::pos))
-                    (nseq-ptr  (getf batch '%llama::n-seq-id))
-                    (seqid-ptr (getf batch '%llama::seq-id))
-                    (logit-ptr (getf batch '%llama::logits)))
-                (dotimes (i n)
-                  (setf (cffi:mem-aref tok-ptr :int i) (aref tokens i))
-                  (setf (cffi:mem-aref pos-ptr :int i) (+ start-pos i))
-                  (setf (cffi:mem-aref nseq-ptr :int i) 1)
-                  ;; seq-id is (:pointer (:pointer seq-id)) — array of pointers
-                  ;; to per-token seq-id arrays. Dereference twice.
-                  (setf (cffi:mem-aref
-                         (cffi:mem-aref seqid-ptr :pointer i) :int 0)
-                        seq-id)
-                  ;; Request logits only for the last token
-                  (setf (cffi:mem-aref logit-ptr :char i)
-                        (if (= i (1- n)) 1 0))))
-              (let ((rc (%llama:decode ctx-ptr batch)))
-                (assert (zerop rc) ()
-                        "decode failed with code ~D for seq ~D" rc seq-id)))
-          (%llama:batch-free batch))))
+         (n (length tokens)))
+    (with-batch (batch n)
+      (batch-add-sequence batch tokens seq-id :start-pos start-pos :logits :last)
+      (batch-decode ctx batch))
     n))
 
 ;;; ── Main simulation ─────────────────────────────────────────────────
