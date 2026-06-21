@@ -88,13 +88,22 @@ READER-FN is called as (apply reader-fn model-ptr ...extra-args buf buf-size)."
 
 (defun system-capabilities ()
   "Return a plist of system capability flags.
-Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES"
+Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES
+      :N-BACKEND-DEVS :N-BACKEND-REGS :HAS-GPU"
   (with-llama-compatible-fp-environment
-    (list :mmap        (not (zerop (%llama:supports-mmap)))
-          :mlock       (not (zerop (%llama:supports-mlock)))
-          :gpu-offload (not (zerop (%llama:supports-gpu-offload)))
-          :rpc         (not (zerop (%llama:supports-rpc)))
-          :max-devices (%llama:max-devices))))
+    (let* ((n-devs (%llama:ggml-backend-dev-count))
+           (has-gpu (loop for i below n-devs
+                          for dev-ptr = (%llama:ggml-backend-dev-get i)
+                          for dev-type = (%llama:ggml-backend-dev-type dev-ptr)
+                          thereis (member dev-type '(:gpu :igpu)))))
+      (list :mmap           (not (zerop (%llama:supports-mmap)))
+            :mlock          (not (zerop (%llama:supports-mlock)))
+            :gpu-offload    (not (zerop (%llama:supports-gpu-offload)))
+            :rpc            (not (zerop (%llama:supports-rpc)))
+            :max-devices    (%llama:max-devices)
+            :n-backend-devs n-devs
+            :n-backend-regs (%llama:ggml-backend-reg-count)
+            :has-gpu        (if has-gpu t nil)))))
 
 ;;; Performance counters
 
@@ -211,3 +220,161 @@ Pass NIL to restore the default C stderr logger. Thread-safe."
 (defun get-log-callback ()
   "Return the current Lisp log callback, or NIL if unset."
   (%with-log-lock *log-callback*))
+
+;;; Backend device introspection
+
+(defun backend-dev-count ()
+  "Return the total number of registered backend devices."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-dev-count)))
+
+(defun backend-dev-get (index)
+  "Return the GGML-BACKEND-DEVICE at INDEX, or NIL if the pointer is null.
+Signals an error if INDEX is out of range."
+  (check-type index (integer 0))
+  (with-llama-compatible-fp-environment
+    (let ((count (%llama:ggml-backend-dev-count)))
+      (when (>= index count)
+        (error "Device index ~D out of range [0, ~D)" index count))
+      (let ((ptr (%llama:ggml-backend-dev-get index)))
+        (unless (cffi:null-pointer-p ptr)
+          (%make-ggml-backend-device :pointer ptr))))))
+
+(defun backend-dev-name (device)
+  "Return the name string of DEVICE."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-dev-name (ggml-backend-device-pointer device))))
+
+(defun backend-dev-description (device)
+  "Return the description string of DEVICE."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-dev-description (ggml-backend-device-pointer device))))
+
+(defun backend-dev-type (device)
+  "Return the type of DEVICE as a keyword: :CPU :GPU :IGPU :ACCEL or :META."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-dev-type (ggml-backend-device-pointer device))))
+
+(defun backend-dev-memory (device)
+  "Return free and total memory for DEVICE as (values free-bytes total-bytes)."
+  (with-llama-compatible-fp-environment
+    (cffi:with-foreign-objects ((free-ptr '%llama::size-t)
+                                (total-ptr '%llama::size-t))
+      (%llama:ggml-backend-dev-memory (ggml-backend-device-pointer device)
+                                      free-ptr total-ptr)
+      (values (cffi:mem-ref free-ptr '%llama::size-t)
+              (cffi:mem-ref total-ptr '%llama::size-t)))))
+
+(defun backend-dev-props (device)
+  "Return a plist of all properties for DEVICE.
+Keys: :NAME :DESCRIPTION :MEMORY-FREE :MEMORY-TOTAL :TYPE :DEVICE-ID
+      :ASYNC :HOST-BUFFER :BUFFER-FROM-HOST-PTR :EVENTS"
+  (with-llama-compatible-fp-environment
+    (cffi:with-foreign-object (props '(:struct %llama::ggml-backend-dev-props))
+      (%llama:ggml-backend-dev-get-props (ggml-backend-device-pointer device) props)
+      (let ((caps-ptr (cffi:foreign-slot-pointer
+                        props '(:struct %llama::ggml-backend-dev-props) '%llama::caps)))
+        (list :name
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::name)
+              :description
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::description)
+              :memory-free
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::memory-free)
+              :memory-total
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::memory-total)
+              :type
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::type)
+              :device-id
+              (cffi:foreign-slot-value props '(:struct %llama::ggml-backend-dev-props) '%llama::device-id)
+              :async
+              (not (zerop (cffi:foreign-slot-value caps-ptr '(:struct %llama::ggml-backend-dev-caps) '%llama::async)))
+              :host-buffer
+              (not (zerop (cffi:foreign-slot-value caps-ptr '(:struct %llama::ggml-backend-dev-caps) '%llama::host-buffer)))
+              :buffer-from-host-ptr
+              (not (zerop (cffi:foreign-slot-value caps-ptr '(:struct %llama::ggml-backend-dev-caps) '%llama::buffer-from-host-ptr)))
+              :events
+              (not (zerop (cffi:foreign-slot-value caps-ptr '(:struct %llama::ggml-backend-dev-caps) '%llama::events))))))))
+
+(defun backend-dev-by-name (name)
+  "Return the GGML-BACKEND-DEVICE named NAME, or NIL if not found."
+  (with-llama-compatible-fp-environment
+    (let ((ptr (%llama:ggml-backend-dev-by-name name)))
+      (unless (cffi:null-pointer-p ptr)
+        (%make-ggml-backend-device :pointer ptr)))))
+
+(defun backend-dev-by-type (type)
+  "Return the first GGML-BACKEND-DEVICE of TYPE (a keyword), or NIL if not found.
+TYPE is one of :CPU :GPU :IGPU :ACCEL :META."
+  (with-llama-compatible-fp-environment
+    (let ((ptr (%llama:ggml-backend-dev-by-type type)))
+      (unless (cffi:null-pointer-p ptr)
+        (%make-ggml-backend-device :pointer ptr)))))
+
+;;; Backend registry introspection
+
+(defun backend-reg-count ()
+  "Return the total number of registered backend registries."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-reg-count)))
+
+(defun backend-reg-get (index)
+  "Return the GGML-BACKEND-REGISTRY at INDEX, or NIL if the pointer is null.
+Signals an error if INDEX is out of range."
+  (check-type index (integer 0))
+  (with-llama-compatible-fp-environment
+    (let ((count (%llama:ggml-backend-reg-count)))
+      (when (>= index count)
+        (error "Registry index ~D out of range [0, ~D)" index count))
+      (let ((ptr (%llama:ggml-backend-reg-get index)))
+        (unless (cffi:null-pointer-p ptr)
+          (%make-ggml-backend-registry :pointer ptr))))))
+
+(defun backend-reg-name (reg)
+  "Return the name string of registry REG."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-reg-name (ggml-backend-registry-pointer reg))))
+
+(defun backend-reg-dev-count (reg)
+  "Return the number of devices in registry REG."
+  (with-llama-compatible-fp-environment
+    (%llama:ggml-backend-reg-dev-count (ggml-backend-registry-pointer reg))))
+
+(defun backend-reg-dev-get (reg index)
+  "Return the GGML-BACKEND-DEVICE at INDEX within registry REG, or NIL if null.
+Signals an error if INDEX is out of range."
+  (check-type index (integer 0))
+  (with-llama-compatible-fp-environment
+    (let ((count (%llama:ggml-backend-reg-dev-count (ggml-backend-registry-pointer reg))))
+      (when (>= index count)
+        (error "Registry device index ~D out of range [0, ~D)" index count))
+      (let ((ptr (%llama:ggml-backend-reg-dev-get (ggml-backend-registry-pointer reg) index)))
+        (unless (cffi:null-pointer-p ptr)
+          (%make-ggml-backend-device :pointer ptr))))))
+
+(defun backend-reg-by-name (name)
+  "Return the GGML-BACKEND-REGISTRY named NAME, or NIL if not found."
+  (with-llama-compatible-fp-environment
+    (let ((ptr (%llama:ggml-backend-reg-by-name name)))
+      (unless (cffi:null-pointer-p ptr)
+        (%make-ggml-backend-registry :pointer ptr)))))
+
+;;; High-level backend aggregates
+
+(defun gpu-devices ()
+  "Return a list of property plists for all registered GPU and IGPU devices.
+Each plist has the keys from BACKEND-DEV-PROPS."
+  (with-llama-compatible-fp-environment
+    (let ((count (%llama:ggml-backend-dev-count))
+          (result nil))
+      (dotimes (i count (nreverse result))
+        (let ((ptr (%llama:ggml-backend-dev-get i)))
+          (when (member (%llama:ggml-backend-dev-type ptr) '(:gpu :igpu))
+            (push (backend-dev-props (%make-ggml-backend-device :pointer ptr))
+                  result)))))))
+
+(defun detect-free-vram ()
+  "Return total free VRAM in bytes across all GPU and IGPU devices.
+Returns NIL if no GPU devices are registered."
+  (let ((devices (gpu-devices)))
+    (when devices
+      (reduce #'+ devices :key (lambda (p) (getf p :memory-free))))))

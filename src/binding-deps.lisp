@@ -90,7 +90,18 @@
     ;; System queries
     %llama:time-us %llama:max-devices
     %llama:supports-mmap %llama:supports-mlock
-    %llama:supports-gpu-offload %llama:supports-rpc))
+    %llama:supports-gpu-offload %llama:supports-rpc
+    ;; Backend device introspection
+    %llama:ggml-backend-dev-count %llama:ggml-backend-dev-get
+    %llama:ggml-backend-dev-name %llama:ggml-backend-dev-description
+    %llama:ggml-backend-dev-type %llama:ggml-backend-dev-memory
+    %llama:ggml-backend-dev-get-props
+    %llama:ggml-backend-dev-by-name %llama:ggml-backend-dev-by-type
+    ;; Backend registry introspection
+    %llama:ggml-backend-reg-count %llama:ggml-backend-reg-get
+    %llama:ggml-backend-reg-name
+    %llama:ggml-backend-reg-dev-count %llama:ggml-backend-reg-dev-get
+    %llama:ggml-backend-reg-by-name))
 
 (defun check-binding-deps ()
   "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.

@@ -1673,6 +1673,229 @@ ws     ::= [ \\t\\n]*")
             (ok (member stop-reason '(:eog :length))
                 (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))
 
+;;; Backend device & registry introspection integration tests (issue #29)
+
+(deftest backend-dev-count-positive
+  (testing "backend-dev-count returns at least 1 after backend-init"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((count (cl-llama-cpp:backend-dev-count)))
+        (ok (>= count 1)
+            (format nil "backend-dev-count >= 1: ~D" count))))))
+
+(deftest backend-dev-get-returns-handle
+  (testing "backend-dev-get returns a ggml-backend-device handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((dev (cl-llama-cpp:backend-dev-get 0)))
+        (ok (cl-llama-cpp:ggml-backend-device-p dev)
+            "backend-dev-get returned a ggml-backend-device")
+        (ok (not (cffi:null-pointer-p (cl-llama-cpp:ggml-backend-device-pointer dev)))
+            "device pointer is non-null")))))
+
+(deftest backend-dev-get-out-of-range-signals-error
+  (testing "backend-dev-get with out-of-range index signals error"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((count (cl-llama-cpp:backend-dev-count)))
+        (ok (handler-case
+                (progn (cl-llama-cpp:backend-dev-get count) nil)
+              (error () t))
+            "error signaled for out-of-range index")))))
+
+(deftest backend-dev-name-returns-string
+  (testing "backend-dev-name returns a non-empty string"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((dev (cl-llama-cpp:backend-dev-get 0))
+             (name (cl-llama-cpp:backend-dev-name dev)))
+        (ok (stringp name) "backend-dev-name returned a string")
+        (ok (> (length name) 0)
+            (format nil "device name: ~S" name))))))
+
+(deftest backend-dev-description-returns-string
+  (testing "backend-dev-description returns a string"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((dev (cl-llama-cpp:backend-dev-get 0))
+             (desc (cl-llama-cpp:backend-dev-description dev)))
+        (ok (stringp desc)
+            (format nil "backend-dev-description returned a string: ~S" desc))))))
+
+(deftest backend-dev-type-returns-keyword
+  (testing "backend-dev-type returns a valid keyword"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((dev (cl-llama-cpp:backend-dev-get 0))
+             (type (cl-llama-cpp:backend-dev-type dev)))
+        (ok (member type '(:cpu :gpu :igpu :accel :meta))
+            (format nil "device type is a valid keyword: ~A" type))))))
+
+(deftest backend-dev-memory-returns-values
+  (testing "backend-dev-memory returns two non-negative integers"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((dev (cl-llama-cpp:backend-dev-get 0)))
+        (multiple-value-bind (free total)
+            (cl-llama-cpp:backend-dev-memory dev)
+          (ok (integerp free)
+              (format nil "free-bytes is integer: ~D" free))
+          (ok (integerp total)
+              (format nil "total-bytes is integer: ~D" total))
+          (ok (>= free 0) "free-bytes >= 0")
+          (ok (>= total 0) "total-bytes >= 0"))))))
+
+(deftest backend-dev-props-returns-plist
+  (testing "backend-dev-props returns a plist with all expected keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((dev (cl-llama-cpp:backend-dev-get 0))
+             (props (cl-llama-cpp:backend-dev-props dev)))
+        (ok (listp props) "backend-dev-props returned a list")
+        (ok (stringp (getf props :name)) ":name is a string")
+        (ok (stringp (getf props :description)) ":description is a string")
+        (ok (integerp (getf props :memory-free)) ":memory-free is an integer")
+        (ok (integerp (getf props :memory-total)) ":memory-total is an integer")
+        (ok (member (getf props :type) '(:cpu :gpu :igpu :accel :meta))
+            (format nil ":type is valid keyword: ~A" (getf props :type)))
+        (ok (typep (getf props :async) 'boolean) ":async is a boolean")
+        (ok (typep (getf props :host-buffer) 'boolean) ":host-buffer is a boolean")
+        (ok (typep (getf props :buffer-from-host-ptr) 'boolean)
+            ":buffer-from-host-ptr is a boolean")
+        (ok (typep (getf props :events) 'boolean) ":events is a boolean")))))
+
+(deftest backend-dev-by-type-cpu-found
+  (testing "backend-dev-by-type :cpu returns a ggml-backend-device"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((dev (cl-llama-cpp:backend-dev-by-type :cpu)))
+        (ok (cl-llama-cpp:ggml-backend-device-p dev)
+            "backend-dev-by-type :cpu returned a ggml-backend-device")
+        (ok (eq :cpu (cl-llama-cpp:backend-dev-type dev))
+            "device type is :cpu")))))
+
+(deftest backend-dev-by-name-roundtrip
+  (testing "backend-dev-by-name finds a device using its own name"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((dev0 (cl-llama-cpp:backend-dev-get 0))
+             (name (cl-llama-cpp:backend-dev-name dev0))
+             (found (cl-llama-cpp:backend-dev-by-name name)))
+        (ok (cl-llama-cpp:ggml-backend-device-p found)
+            (format nil "found device by name: ~S" name))
+        (ok (string= name (cl-llama-cpp:backend-dev-name found))
+            "found device has same name")))))
+
+(deftest backend-dev-by-name-not-found
+  (testing "backend-dev-by-name returns NIL for unknown name"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (ok (null (cl-llama-cpp:backend-dev-by-name "nonexistent-device-xyz"))
+          "backend-dev-by-name returned NIL for unknown name"))))
+
+(deftest backend-reg-count-positive
+  (testing "backend-reg-count returns at least 1 after backend-init"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((count (cl-llama-cpp:backend-reg-count)))
+        (ok (>= count 1)
+            (format nil "backend-reg-count >= 1: ~D" count))))))
+
+(deftest backend-reg-get-returns-handle
+  (testing "backend-reg-get returns a ggml-backend-registry handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((reg (cl-llama-cpp:backend-reg-get 0)))
+        (ok (cl-llama-cpp:ggml-backend-registry-p reg)
+            "backend-reg-get returned a ggml-backend-registry")
+        (ok (not (cffi:null-pointer-p (cl-llama-cpp:ggml-backend-registry-pointer reg)))
+            "registry pointer is non-null")))))
+
+(deftest backend-reg-name-returns-string
+  (testing "backend-reg-name returns a non-empty string"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((reg (cl-llama-cpp:backend-reg-get 0))
+             (name (cl-llama-cpp:backend-reg-name reg)))
+        (ok (stringp name) "backend-reg-name returned a string")
+        (ok (> (length name) 0)
+            (format nil "registry name: ~S" name))))))
+
+(deftest backend-reg-dev-count-non-negative
+  (testing "backend-reg-dev-count returns a non-negative integer"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((reg (cl-llama-cpp:backend-reg-get 0))
+             (count (cl-llama-cpp:backend-reg-dev-count reg)))
+        (ok (integerp count) "backend-reg-dev-count returned an integer")
+        (ok (>= count 0)
+            (format nil "backend-reg-dev-count >= 0: ~D" count))))))
+
+(deftest backend-reg-dev-get-returns-handle
+  (testing "backend-reg-dev-get returns a ggml-backend-device when count > 0"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((reg (cl-llama-cpp:backend-reg-get 0))
+             (count (cl-llama-cpp:backend-reg-dev-count reg)))
+        (when (> count 0)
+          (let ((dev (cl-llama-cpp:backend-reg-dev-get reg 0)))
+            (ok (cl-llama-cpp:ggml-backend-device-p dev)
+                "backend-reg-dev-get returned a ggml-backend-device")))))))
+
+(deftest backend-reg-by-name-roundtrip
+  (testing "backend-reg-by-name finds a registry using its own name"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let* ((reg0 (cl-llama-cpp:backend-reg-get 0))
+             (name (cl-llama-cpp:backend-reg-name reg0))
+             (found (cl-llama-cpp:backend-reg-by-name name)))
+        (ok (cl-llama-cpp:ggml-backend-registry-p found)
+            (format nil "found registry by name: ~S" name))
+        (ok (string= name (cl-llama-cpp:backend-reg-name found))
+            "found registry has same name")))))
+
+(deftest backend-reg-by-name-not-found
+  (testing "backend-reg-by-name returns NIL for unknown name"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (ok (null (cl-llama-cpp:backend-reg-by-name "nonexistent-registry-xyz"))
+          "backend-reg-by-name returned NIL for unknown name"))))
+
+(deftest gpu-devices-returns-list
+  (testing "gpu-devices returns a list (possibly empty on CPU-only machines)"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((devs (cl-llama-cpp:gpu-devices)))
+        (ok (listp devs) "gpu-devices returned a list")
+        (when devs
+          (ok (every #'listp devs) "each entry is a plist")
+          (ok (stringp (getf (first devs) :name))
+              ":name is a string in first GPU device plist"))))))
+
+(deftest detect-free-vram-type
+  (testing "detect-free-vram returns an integer or NIL"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((vram (cl-llama-cpp:detect-free-vram)))
+        (ok (or (null vram) (integerp vram))
+            (format nil "detect-free-vram returned ~A" vram))
+        (when vram
+          (ok (>= vram 0) "detect-free-vram is non-negative"))))))
+
+(deftest system-capabilities-backend-keys
+  (testing "system-capabilities returns extended backend keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((caps (cl-llama-cpp:system-capabilities)))
+        (ok (integerp (getf caps :n-backend-devs))
+            (format nil ":n-backend-devs is integer: ~A" (getf caps :n-backend-devs)))
+        (ok (integerp (getf caps :n-backend-regs))
+            (format nil ":n-backend-regs is integer: ~A" (getf caps :n-backend-regs)))
+        (ok (typep (getf caps :has-gpu) 'boolean)
+            (format nil ":has-gpu is boolean: ~A" (getf caps :has-gpu)))
+        (ok (>= (getf caps :n-backend-devs) 1)
+            ":n-backend-devs >= 1 after backend-init")))))
+
 ;;; Typed opaque handles (issue #41)
 
 (deftest handle-type-safety
