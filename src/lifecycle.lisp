@@ -209,6 +209,7 @@ context leaves internal C state inconsistent."
   "Block until all pending async operations on CTX have completed."
   (with-llama-compatible-fp-environment
     (%llama:synchronize (llama-context-pointer ctx)))
+  (setf (llama-context-compute-pending-p ctx) nil)
   nil)
 
 (defun set-abort-callback (ctx callback &optional data)

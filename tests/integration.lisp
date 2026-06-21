@@ -99,6 +99,82 @@
                   (search "EMBEDDINGS" (princ-to-string c))))
               "error mentions :EMBEDDINGS"))))))
 
+;;; Implicit sync / dirty flag integration tests (issue #44)
+
+(defmacro when-embed-model-available (&body body)
+  `(if *test-embed-model-path*
+       (progn ,@body)
+       (skip "LLAMA_TEST_EMBED_MODEL not set — skipping")))
+
+(deftest embed-clears-compute-pending-p
+  (when-embed-model-available
+    (testing "embed leaves compute-pending-p NIL after a successful call"
+      (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
+                                              :pooling-type 1)
+          (cl-llama-cpp:embed ctx "hello")
+          (ok (not (cl-llama-cpp::llama-context-compute-pending-p ctx))
+              "compute-pending-p is NIL after embed completes"))))))
+
+(deftest embed-result-stable-across-calls
+  (when-embed-model-available
+    (testing "embed returns same vector for same input on consecutive calls (sync is correct)"
+      (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
+                                              :pooling-type 1)
+          (let ((e1 (cl-llama-cpp:embed ctx "hello world"))
+                (e2 (cl-llama-cpp:embed ctx "hello world")))
+            (ok (= (length e1) (length e2))
+                "both calls return same dimension")
+            (ok (every (lambda (a b) (< (abs (- a b)) 1e-5)) e1 e2)
+                "vectors are element-wise equal (sync ensured consistent reads")))))))
+
+(deftest synchronize-clears-pending-flag
+  (when-embed-model-available
+    (testing "explicit synchronize clears compute-pending-p"
+      (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
+                                              :pooling-type 1)
+          ;; Use the batch API to set the flag without triggering auto-sync
+          (let ((tokens (cl-llama-cpp:tokenize model "hello")))
+            (cffi:with-foreign-object (buf '%llama:token (length tokens))
+              (dotimes (i (length tokens))
+                (setf (cffi:mem-aref buf '%llama:token i) (aref tokens i)))
+              (let* ((batch (%llama:batch-get-one buf (length tokens)))
+                     (rc (%llama:encode (cl-llama-cpp:llama-context-pointer ctx) batch)))
+                (declare (ignore rc))
+                (setf (cl-llama-cpp::llama-context-compute-pending-p ctx) t))))
+          (ok (cl-llama-cpp::llama-context-compute-pending-p ctx)
+              "compute-pending-p is T after manually marking dirty")
+          (cl-llama-cpp:synchronize ctx)
+          (ok (not (cl-llama-cpp::llama-context-compute-pending-p ctx))
+              "compute-pending-p is NIL after explicit synchronize"))))))
+
+(deftest batch-encode-sets-pending-flag
+  (when-embed-model-available
+    (testing "batch-encode sets compute-pending-p on the context"
+      (cl-llama-cpp:with-model (model *test-embed-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings 1
+                                              :pooling-type 1)
+          (let ((tokens (cl-llama-cpp:tokenize model "test")))
+            (cl-llama-cpp:with-batch (batch (length tokens))
+              (cl-llama-cpp:batch-add-sequence batch tokens 0)
+              (cl-llama-cpp:batch-encode ctx batch)))
+          (ok (cl-llama-cpp::llama-context-compute-pending-p ctx)
+              "compute-pending-p is T after batch-encode"))))))
+
+(deftest batch-decode-sets-pending-flag
+  (when-model-available
+    (testing "batch-decode sets compute-pending-p on the context"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "hello")))
+            (cl-llama-cpp:with-batch (batch (length tokens))
+              (cl-llama-cpp:batch-add-sequence batch tokens 0 :logits :last)
+              (cl-llama-cpp:batch-decode ctx batch)))
+          (ok (cl-llama-cpp::llama-context-compute-pending-p ctx)
+              "compute-pending-p is T after batch-decode"))))))
+
 (deftest model-chat-template-nil-for-bad-name
   (when-model-available
     (testing "model-chat-template returns NIL for nonexistent template name (null→NIL convention)"

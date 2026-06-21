@@ -345,7 +345,8 @@ All other sampler-related keywords are ignored when :SAMPLER is supplied."
         (let* ((batch (%llama:batch-get-one tok-buf n-prompt))
                (rc (%llama:decode ctx-ptr batch)))
           (unless (zerop rc)
-            (error 'decode-error :code rc))))
+            (error 'decode-error :code rc)))
+        (setf (llama-context-compute-pending-p ctx) t))
       ;; Warn if caller supplied a chain but also passed sampler-building kwargs
       (when (and sampler
                  (or grammar top-k top-p min-p typical-p xtc-probability
@@ -417,7 +418,8 @@ All other sampler-related keywords are ignored when :SAMPLER is supplied."
                        (let* ((batch (%llama:batch-get-one tok-buf 1))
                               (rc (%llama:decode ctx-ptr batch)))
                          (unless (zerop rc)
-                           (error 'decode-error :code rc)))))
+                           (error 'decode-error :code rc)))
+                       (setf (llama-context-compute-pending-p ctx) t)))
           (unless sampler
             (%llama:sampler-free chain-ptr)))
       ;; Convert generated tokens to string
@@ -453,7 +455,12 @@ When NORMALIZE is true (default), L2-normalizes the result."
         (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
                (rc (%llama:encode ctx-ptr batch)))
           (unless (zerop rc)
-            (error 'decode-error :code rc))))
+            (error 'decode-error :code rc)))
+        (setf (llama-context-compute-pending-p ctx) t))
+      ;; Sync before reading — encode may run asynchronously on GPU
+      (when (llama-context-compute-pending-p ctx)
+        (%llama:synchronize ctx-ptr)
+        (setf (llama-context-compute-pending-p ctx) nil))
       ;; Read embeddings (null-pointer → error per NIL↔null convention)
       (let* ((embd-ptr (%llama:get-embeddings-ith ctx-ptr 0)))
         (when (cffi:null-pointer-p embd-ptr)

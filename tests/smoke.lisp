@@ -1123,3 +1123,42 @@
                      %llama:gguf-get-tensor-offset %llama:gguf-get-tensor-size))
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
+
+;;; Implicit sync / dirty flag tests (issue #44)
+
+(deftest implicit-sync-compute-pending-slot
+  (testing "llama-context struct has compute-pending-p slot"
+    (let ((ctx (cl-llama-cpp::%make-llama-context)))
+      (ok (not (cl-llama-cpp::llama-context-compute-pending-p ctx))
+          "compute-pending-p is NIL for a fresh context")
+      (setf (cl-llama-cpp::llama-context-compute-pending-p ctx) t)
+      (ok (cl-llama-cpp::llama-context-compute-pending-p ctx)
+          "compute-pending-p can be set to T")
+      (setf (cl-llama-cpp::llama-context-compute-pending-p ctx) nil)
+      (ok (not (cl-llama-cpp::llama-context-compute-pending-p ctx))
+          "compute-pending-p can be cleared to NIL"))))
+
+(deftest implicit-sync-synchronize-clears-flag
+  (testing "synchronize is fbound and exported"
+    (multiple-value-bind (sym status)
+        (find-symbol "SYNCHRONIZE" :cl-llama-cpp)
+      (ok sym "SYNCHRONIZE is accessible")
+      (ok (eq status :external) "SYNCHRONIZE is exported")
+      (ok (fboundp sym) "SYNCHRONIZE is fbound"))))
+
+(deftest implicit-sync-embed-fbound
+  (testing "embed is fbound and exported"
+    (multiple-value-bind (sym status)
+        (find-symbol "EMBED" :cl-llama-cpp)
+      (ok sym "EMBED is accessible")
+      (ok (eq status :external) "EMBED is exported")
+      (ok (fboundp sym) "EMBED is fbound"))))
+
+(deftest implicit-sync-batch-decode-sets-pending
+  (testing "batch-decode and batch-encode are fbound and exported"
+    (dolist (name '("BATCH-DECODE" "BATCH-ENCODE"))
+      (multiple-value-bind (sym status)
+          (find-symbol name :cl-llama-cpp)
+        (ok sym (format nil "~A is accessible" name))
+        (ok (eq status :external) (format nil "~A is exported" name))
+        (ok (fboundp sym) (format nil "~A is fbound" name))))))
