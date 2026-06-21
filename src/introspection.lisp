@@ -163,6 +163,18 @@ Performance is printed even on non-local exit. Returns the values of BODY."
 
 ;;; Logging
 
+;;; Log callback lock (SBCL built-in; no-op on other implementations).
+;;; Lock ordering rule: *LOG-LOCK* may be acquired while *BACKEND-LOCK* is
+;;; held (backend-init logs during startup), but never the reverse.
+
+#+sbcl
+(defvar *log-lock* (sb-thread:make-mutex :name "cl-llama-cpp-log")
+  "Mutex protecting *LOG-CALLBACK*.")
+
+(defmacro %with-log-lock (&body body)
+  #+sbcl `(sb-thread:with-mutex (*log-lock*) ,@body)
+  #-sbcl `(progn ,@body))
+
 (defvar *log-callback* nil)
 (defvar *last-log-callback-error* nil
   "The last error condition caught inside the log-callback panic boundary, or NIL.")
@@ -175,18 +187,21 @@ Performance is printed even on non-local exit. Returns the values of BODY."
 (cffi:defcallback %log-dispatcher :void
     ((level :int) (text :string) (data :pointer))
   (declare (ignore data))
-  (when *log-callback*
-    (handler-bind ((error (lambda (c)
-                            (log-error-to-safe-buffer c)
-                            (return-from %log-dispatcher))))
-      (funcall *log-callback* level text))))
+  ;; Capture the callback under the lock, then call it without the lock to
+  ;; avoid deadlock if the callback itself calls SET-LOG-CALLBACK.
+  (let ((cb (%with-log-lock *log-callback*)))
+    (when cb
+      (handler-bind ((error (lambda (c)
+                              (log-error-to-safe-buffer c)
+                              (return-from %log-dispatcher))))
+        (funcall cb level text)))))
 
 (defun set-log-callback (fn)
   "Set FN as the Lisp log callback for all llama.cpp log messages.
 FN is called as (fn level text) where LEVEL is an integer (1=debug
 2=info 3=warn 4=error) and TEXT is the message string.
-Pass NIL to restore the default C stderr logger."
-  (setf *log-callback* fn)
+Pass NIL to restore the default C stderr logger. Thread-safe."
+  (%with-log-lock (setf *log-callback* fn))
   (with-llama-compatible-fp-environment
     (%llama:log-set
      (if fn (cffi:callback %log-dispatcher) (cffi:null-pointer))
@@ -195,4 +210,4 @@ Pass NIL to restore the default C stderr logger."
 
 (defun get-log-callback ()
   "Return the current Lisp log callback, or NIL if unset."
-  *log-callback*)
+  (%with-log-lock *log-callback*))

@@ -110,6 +110,7 @@ New wrappers must follow this convention.")
    #:batch-decode
    #:batch-encode
    ;; Backend lifecycle
+   #:ensure-backend
    #:with-backend
    ;; Context runtime configuration
    #:set-n-threads

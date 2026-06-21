@@ -512,8 +512,10 @@
 
 (deftest with-backend-nesting
   (testing "nested with-backend only frees on outermost exit"
-    ;; Rebind to guarantee clean state regardless of prior tests.
+    ;; Rebind all backend state to guarantee clean slate regardless of prior tests.
     (let ((cl-llama-cpp::*backend-initialized* nil)
+          (cl-llama-cpp::*backend-permanent* nil)
+          (cl-llama-cpp::*backend-refcount* 0)
           (init-count 0))
       (cl-llama-cpp:with-backend ()
         (incf init-count)
@@ -521,7 +523,9 @@
           (incf init-count)))
       (ok (= 2 init-count) "body ran twice (nesting works)")
       (ok (not cl-llama-cpp::*backend-initialized*)
-          "*backend-initialized* cleared after outermost exit"))))
+          "*backend-initialized* cleared after outermost exit")
+      (ok (= 0 cl-llama-cpp::*backend-refcount*)
+          "*backend-refcount* is 0 after outermost exit"))))
 
 ;;; Performance, logging, and system info wrapper tests
 
@@ -837,3 +841,62 @@
              (ok (null (cl-llama-cpp:get-log-callback))
                  "get-log-callback returns NIL after clearing"))
         (cl-llama-cpp:set-log-callback prev)))))
+
+;;; Thread-safety internals (issue #52)
+
+(deftest backend-thread-safety-internals
+  (testing "thread-safety state variables are defined"
+    (ok (boundp 'cl-llama-cpp::*backend-refcount*)
+        "*backend-refcount* is defined")
+    (ok (integerp cl-llama-cpp::*backend-refcount*)
+        "*backend-refcount* is an integer")
+    (ok (boundp 'cl-llama-cpp::*backend-permanent*)
+        "*backend-permanent* is defined"))
+  (testing "thread-safety internal functions are fbound"
+    (ok (fboundp 'cl-llama-cpp::%backend-scope-enter)
+        "%backend-scope-enter is fbound")
+    (ok (fboundp 'cl-llama-cpp::%backend-scope-exit)
+        "%backend-scope-exit is fbound")))
+
+(deftest backend-refcount-mid-scope
+  (testing "refcount tracks nesting depth"
+    (let ((cl-llama-cpp::*backend-initialized* nil)
+          (cl-llama-cpp::*backend-permanent* nil)
+          (cl-llama-cpp::*backend-refcount* 0))
+      (cl-llama-cpp:with-backend ()
+        (ok (= 1 cl-llama-cpp::*backend-refcount*)
+            "refcount is 1 inside first with-backend")
+        (cl-llama-cpp:with-backend ()
+          (ok (= 2 cl-llama-cpp::*backend-refcount*)
+              "refcount is 2 inside nested with-backend")))
+      (ok (= 0 cl-llama-cpp::*backend-refcount*)
+          "refcount is 0 after both scopes exit"))))
+
+(deftest backend-permanent-prevents-free
+  (testing "permanent hold prevents backend-free when scope exits"
+    ;; Simulate: ensure-backend was called, then a with-backend scope opened.
+    ;; Exiting the scope should NOT free the backend.
+    (let ((cl-llama-cpp::*backend-initialized* t)
+          (cl-llama-cpp::*backend-permanent* t)
+          (cl-llama-cpp::*backend-refcount* 1))
+      (cl-llama-cpp::%backend-scope-exit)
+      (ok cl-llama-cpp::*backend-initialized*
+          "backend remains initialized when permanent hold is set")
+      (ok (= 0 cl-llama-cpp::*backend-refcount*)
+          "refcount decremented to 0"))))
+
+#+sbcl
+(deftest backend-lock-defined
+  (testing "backend mutex is defined on SBCL"
+    (ok (boundp 'cl-llama-cpp::*backend-lock*)
+        "*backend-lock* is defined")
+    (ok (typep cl-llama-cpp::*backend-lock* 'sb-thread:mutex)
+        "*backend-lock* is an sb-thread:mutex")))
+
+#+sbcl
+(deftest log-lock-defined
+  (testing "log callback mutex is defined on SBCL"
+    (ok (boundp 'cl-llama-cpp::*log-lock*)
+        "*log-lock* is defined")
+    (ok (typep cl-llama-cpp::*log-lock* 'sb-thread:mutex)
+        "*log-lock* is an sb-thread:mutex")))

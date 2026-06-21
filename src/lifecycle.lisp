@@ -1,31 +1,98 @@
 (in-package #:cl-llama-cpp)
 
-(defvar *backend-initialized* nil)
+;;; Threading contract for cl-llama-cpp
+;;;
+;;; llama.cpp threading guarantees (below the FFI line):
+;;;   - Compute parallelism is handled inside ggml's threadpool, exposed via
+;;;     SET-N-THREADS, ATTACH-THREADPOOL, and DETACH-THREADPOOL.
+;;;   - A single LLAMA-CONTEXT must NOT be used from multiple Lisp threads
+;;;     concurrently; there is no internal locking on DECODE.
+;;;   - Independent contexts CAN run in parallel on separate Lisp threads.
+;;;   - Parallel requests within one context use the batched sequence API
+;;;     (GENERATE-PARALLEL) without requiring any Lisp threads.
+;;;   - BACKEND-INIT/BACKEND-FREE and LOG-SET are process-global operations.
+;;;
+;;; What cl-llama-cpp guarantees (library-owned global state):
+;;;   - ENSURE-BACKEND and WITH-BACKEND are internally thread-safe via a mutex
+;;;     and reference count: concurrent calls neither double-initialize nor free
+;;;     the backend while another scope is active.
+;;;   - SET-LOG-CALLBACK and the internal log dispatcher are thread-safe.
+;;;   - Every C entry point is wrapped in WITH-LLAMA-COMPATIBLE-FP-ENVIRONMENT
+;;;     on the calling Lisp thread; FP trap masking is per-thread.
+;;;   - No Lisp concurrency library (bordeaux-threads, lparallel, etc.) is
+;;;     imported or required; users supply their own threading tool.
+
+;;; --- Backend lifecycle lock (SBCL built-in; no-op on other implementations) --
+
+#+sbcl
+(defvar *backend-lock* (sb-thread:make-mutex :name "cl-llama-cpp-backend")
+  "Mutex protecting backend lifecycle state variables.")
+
+(defmacro %with-backend-lock (&body body)
+  #+sbcl `(sb-thread:with-mutex (*backend-lock*) ,@body)
+  #-sbcl `(progn ,@body))
+
+;;; --- Backend state (all protected by *BACKEND-LOCK*) -------------------------
+
+(defvar *backend-initialized* nil
+  "T iff the llama backend is currently initialized.")
+
+(defvar *backend-permanent* nil
+  "T if ENSURE-BACKEND has been called. Prevents WITH-BACKEND from freeing
+the backend when its scope depth reaches zero.")
+
+(defvar *backend-refcount* 0
+  "Count of active WITH-BACKEND scopes. Backend is freed when this reaches
+zero, unless *BACKEND-PERMANENT* is T.")
+
+;;; --- Internal scope helpers --------------------------------------------------
+
+(defun %backend-scope-enter ()
+  "Thread-safe entry into a WITH-BACKEND scope. Initializes the backend if not
+already running, then increments the active scope count."
+  (%with-backend-lock
+    (unless *backend-initialized*
+      (with-llama-compatible-fp-environment (%llama:backend-init))
+      (setf *backend-initialized* t))
+    (incf *backend-refcount*)))
+
+(defun %backend-scope-exit ()
+  "Thread-safe exit from a WITH-BACKEND scope. Frees the backend when the scope
+count reaches zero and ENSURE-BACKEND has not established a permanent hold."
+  (%with-backend-lock
+    (when (zerop (decf *backend-refcount*))
+      (unless *backend-permanent*
+        (with-llama-compatible-fp-environment (%llama:backend-free))
+        (setf *backend-initialized* nil)))))
+
+;;; --- Public lifecycle API ---------------------------------------------------
 
 (defun ensure-backend ()
-  (unless *backend-initialized*
-    (with-llama-compatible-fp-environment
-      (%llama:backend-init))
-    (setf *backend-initialized* t)))
+  "Ensure the llama backend is initialized. Thread-safe; safe to call from any
+thread. Establishes a permanent hold so the backend is not freed when an
+enclosing WITH-BACKEND scope exits. Prefer calling this once from the main
+thread before spawning worker threads."
+  (%with-backend-lock
+    (unless *backend-initialized*
+      (with-llama-compatible-fp-environment (%llama:backend-init))
+      (setf *backend-initialized* t))
+    (setf *backend-permanent* t)))
 
 (defmacro with-backend ((&key numa) &body body)
-  "Initialize the llama backend, execute BODY, then shut it down.
-On non-local exit the backend is always freed. Nesting is safe: only the
-outermost WITH-BACKEND shuts down the backend. When :NUMA is a
-ggml-numa-strategy keyword (:distribute :isolate :numactl :mirror),
-calls llama-numa-init before executing BODY."
-  (let ((outermost (gensym "OUTERMOST")))
-    `(let ((,outermost (not *backend-initialized*)))
-       (unless *backend-initialized*
-         (with-llama-compatible-fp-environment (%llama:backend-init))
-         (setf *backend-initialized* t))
-       ,(when numa
-          `(with-llama-compatible-fp-environment (%llama:numa-init ,numa)))
-       (unwind-protect
-            (progn ,@body)
-         (when ,outermost
-           (with-llama-compatible-fp-environment (%llama:backend-free))
-           (setf *backend-initialized* nil))))))
+  "Initialize the llama backend, execute BODY, then shut it down on exit.
+On non-local exit the backend is always freed. Nesting and concurrent calls
+are both safe: only the first call to find the backend uninitialized initializes
+it; the last active scope to exit frees it. If ENSURE-BACKEND was called first,
+WITH-BACKEND will not free the backend on exit.
+When :NUMA is a ggml-numa-strategy keyword (:distribute :isolate :numactl
+:mirror), llama-numa-init is called after backend initialization."
+  `(progn
+     (%backend-scope-enter)
+     ,@(when numa
+         `((with-llama-compatible-fp-environment (%llama:numa-init ,numa))))
+     (unwind-protect
+          (progn ,@body)
+       (%backend-scope-exit))))
 
 (defun %bool->c (x) (if x 1 0))
 
