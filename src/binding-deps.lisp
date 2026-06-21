@@ -101,7 +101,23 @@
     %llama:ggml-backend-reg-count %llama:ggml-backend-reg-get
     %llama:ggml-backend-reg-name
     %llama:ggml-backend-reg-dev-count %llama:ggml-backend-reg-dev-get
-    %llama:ggml-backend-reg-by-name))
+    %llama:ggml-backend-reg-by-name
+    ;; GGUF file inspection
+    %llama:gguf-init-from-file %llama:gguf-free
+    %llama:gguf-type-name
+    %llama:gguf-get-version %llama:gguf-get-alignment %llama:gguf-get-data-offset
+    %llama:gguf-get-n-kv %llama:gguf-find-key %llama:gguf-get-key
+    %llama:gguf-get-kv-type %llama:gguf-get-arr-type
+    %llama:gguf-get-val-u8 %llama:gguf-get-val-i8
+    %llama:gguf-get-val-u16 %llama:gguf-get-val-i16
+    %llama:gguf-get-val-u32 %llama:gguf-get-val-i32
+    %llama:gguf-get-val-f32
+    %llama:gguf-get-val-u64 %llama:gguf-get-val-i64 %llama:gguf-get-val-f64
+    %llama:gguf-get-val-bool %llama:gguf-get-val-str %llama:gguf-get-val-data
+    %llama:gguf-get-arr-n %llama:gguf-get-arr-data %llama:gguf-get-arr-str
+    %llama:gguf-get-n-tensors %llama:gguf-find-tensor
+    %llama:gguf-get-tensor-name %llama:gguf-get-tensor-type
+    %llama:gguf-get-tensor-offset %llama:gguf-get-tensor-size))
 
 (defun check-binding-deps ()
   "Verify that every symbol in *BINDING-DEPS* is fbound or a known type.

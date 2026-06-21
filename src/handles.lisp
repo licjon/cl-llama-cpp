@@ -14,3 +14,6 @@
 
 (defstruct (ggml-backend-registry (:constructor %make-ggml-backend-registry) (:copier nil))
   (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
+
+(defstruct (gguf-context (:constructor %make-gguf-context) (:copier nil))
+  (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
