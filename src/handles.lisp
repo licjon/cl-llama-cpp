@@ -8,3 +8,9 @@
 
 (defstruct (llama-sampler (:constructor %make-llama-sampler) (:copier nil))
   (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
+
+(defstruct (ggml-backend-device (:constructor %make-ggml-backend-device) (:copier nil))
+  (pointer (cffi:null-pointer) :type cffi:foreign-pointer))
+
+(defstruct (ggml-backend-registry (:constructor %make-ggml-backend-registry) (:copier nil))
+  (pointer (cffi:null-pointer) :type cffi:foreign-pointer))

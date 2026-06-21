@@ -19,6 +19,8 @@ New wrappers must follow this convention.")
    #:llama-model #:llama-model-p #:llama-model-pointer
    #:llama-context #:llama-context-p #:llama-context-pointer
    #:llama-sampler #:llama-sampler-p #:llama-sampler-pointer
+   #:ggml-backend-device #:ggml-backend-device-p #:ggml-backend-device-pointer
+   #:ggml-backend-registry #:ggml-backend-registry-p #:ggml-backend-registry-pointer
    ;; Utility
    #:call-with-llama-compatible-fp-environment
    #:with-llama-compatible-fp-environment
@@ -139,6 +141,26 @@ New wrappers must follow this convention.")
    ;; System queries
    #:time-us
    #:system-capabilities
+   ;; Backend device introspection
+   #:backend-dev-count
+   #:backend-dev-get
+   #:backend-dev-name
+   #:backend-dev-description
+   #:backend-dev-type
+   #:backend-dev-memory
+   #:backend-dev-props
+   #:backend-dev-by-name
+   #:backend-dev-by-type
+   ;; Backend registry introspection
+   #:backend-reg-count
+   #:backend-reg-get
+   #:backend-reg-name
+   #:backend-reg-dev-count
+   #:backend-reg-dev-get
+   #:backend-reg-by-name
+   ;; High-level backend aggregates
+   #:gpu-devices
+   #:detect-free-vram
    ;; Resource planning & configuration validation
    #:estimate-memory
    #:explain-memory-usage

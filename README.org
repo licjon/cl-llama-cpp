@@ -26,6 +26,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - Performance counters (structured timing data, =with-perf= macro)
 - Logging (route llama.cpp log messages to a Lisp callback; thread-safe)
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
+- Backend device & registry introspection (device enumeration, names, types, VRAM, properties; registry enumeration)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
 
 *Not yet wrapped* at the high level (use the =%llama= bindings directly --- see Low-level =%llama= Access):
@@ -129,13 +130,15 @@ incremental decoding that reuses the KV cache.
 
 The high-level API represents resources as *typed handle structs* rather than raw C pointers:
 
-| Handle type   | Predicate       | Pointer accessor      | Created by                                     |
-|---------------+-----------------+-----------------------+------------------------------------------------|
-| =llama-model=   | =llama-model-p=   | =llama-model-pointer=   | =with-model=                                     |
-| =llama-context= | =llama-context-p= | =llama-context-pointer= | =with-context=                                   |
-| =llama-sampler= | =llama-sampler-p= | =llama-sampler-pointer= | =with-sampler-chain=, =make-grammar-sampler=, etc. |
+| Handle type             | Predicate                 | Pointer accessor               | Created by                                               |
+|-------------------------+---------------------------+--------------------------------+----------------------------------------------------------|
+| =llama-model=             | =llama-model-p=             | =llama-model-pointer=            | =with-model=                                               |
+| =llama-context=           | =llama-context-p=           | =llama-context-pointer=          | =with-context=                                             |
+| =llama-sampler=           | =llama-sampler-p=           | =llama-sampler-pointer=          | =with-sampler-chain=, =make-grammar-sampler=, etc.           |
+| =ggml-backend-device=     | =ggml-backend-device-p=     | =ggml-backend-device-pointer=    | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
+| =ggml-backend-registry=   | =ggml-backend-registry-p=   | =ggml-backend-registry-pointer=  | =backend-reg-get=, =backend-reg-by-name=                   |
 
-The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see Low-level =%llama= Access.
+Backend device and registry handles are *borrowed references* — the GGML backend owns the underlying objects and no =free= is needed. The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see Low-level =%llama= Access.
 
 *** Resource Management
 
@@ -336,7 +339,53 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =time-us= --- Return the current wall-clock time in microseconds as an integer.
 
-- =system-capabilities= --- Return a plist of system capability flags: =:mmap= (boolean), =:mlock= (boolean), =:gpu-offload= (boolean), =:rpc= (boolean), =:max-devices= (integer). These reflect build-time and hardware constants.
+- =system-capabilities= --- Return a plist of system capability flags: =:mmap= (boolean), =:mlock= (boolean), =:gpu-offload= (boolean), =:rpc= (boolean), =:max-devices= (integer), =:n-backend-devs= (integer), =:n-backend-regs= (integer), =:has-gpu= (boolean). The last three reflect the live backend device registry.
+
+*** Backend Device & Registry Introspection
+
+Enumerate and query the GGML backend devices and registries. Requires the backend to be initialized (call =ensure-backend= or use =with-backend= first). Functions that return a handle return =NIL= when the device or registry does not exist (null-pointer convention); no =free= is ever needed on these handles.
+
+*Device enumeration:*
+
+- =backend-dev-count= --- Return the total number of registered backend devices as an integer.
+
+- =backend-dev-get index= --- Return the =ggml-backend-device= at =index= (0-based), or =NIL= if the C pointer is null. Signals an error if =index= is out of range.
+
+- =backend-dev-by-name name= --- Return the =ggml-backend-device= whose name matches =name=, or =NIL= if not found.
+
+- =backend-dev-by-type type= --- Return the first =ggml-backend-device= of the given =type= keyword (=:cpu=, =:gpu=, =:igpu=, =:accel=, or =:meta=), or =NIL= if none is registered.
+
+*Device properties:*
+
+- =backend-dev-name device= --- Return the name string of =device=.
+
+- =backend-dev-description device= --- Return the description string of =device=.
+
+- =backend-dev-type device= --- Return the type of =device= as one of: =:cpu=, =:gpu=, =:igpu=, =:accel=, =:meta=.
+
+- =backend-dev-memory device= --- Return =device='s memory as =(values free-bytes total-bytes)=. Both values are non-negative integers. GPU devices report VRAM; the CPU device typically reports system RAM.
+
+- =backend-dev-props device= --- Return all device properties as a plist. Keys: =:name= (string), =:description= (string), =:memory-free= (integer), =:memory-total= (integer), =:type= (keyword), =:device-id= (string), =:async= (boolean), =:host-buffer= (boolean), =:buffer-from-host-ptr= (boolean), =:events= (boolean).
+
+*Registry enumeration:*
+
+- =backend-reg-count= --- Return the total number of registered backend registries.
+
+- =backend-reg-get index= --- Return the =ggml-backend-registry= at =index=, or =NIL= if null. Signals an error if =index= is out of range.
+
+- =backend-reg-by-name name= --- Return the =ggml-backend-registry= named =name=, or =NIL= if not found.
+
+- =backend-reg-name reg= --- Return the name string of registry =reg=.
+
+- =backend-reg-dev-count reg= --- Return the number of devices belonging to registry =reg=.
+
+- =backend-reg-dev-get reg index= --- Return the =ggml-backend-device= at =index= within registry =reg=, or =NIL= if null. Signals an error if =index= is out of range.
+
+*High-level aggregates:*
+
+- =gpu-devices= --- Return a list of =backend-dev-props= plists for all devices of type =:gpu= or =:igpu=. Returns =()= on CPU-only builds.
+
+- =detect-free-vram= --- Return the total free VRAM in bytes across all GPU and IGPU devices, or =NIL= if no GPU devices are registered.
 
 *** Resource Planning & Validation
 
@@ -420,8 +469,10 @@ The accessors are:
 - =llama-model-pointer model= → raw =%llama:model= pointer
 - =llama-context-pointer ctx= → raw =%llama:context= pointer
 - =llama-sampler-pointer sampler= → raw =%llama:sampler= pointer
+- =ggml-backend-device-pointer device= → raw =%llama:ggml-backend-dev-t= pointer
+- =ggml-backend-registry-pointer reg= → raw =%llama:ggml-backend-reg-t= pointer
 
-To test whether a variable holds the right kind of handle, use the predicates =llama-model-p=, =llama-context-p=, =llama-sampler-p= (replacing =cffi:null-pointer-p= on the old raw-pointer API).
+To test whether a variable holds the right kind of handle, use the predicates =llama-model-p=, =llama-context-p=, =llama-sampler-p=, =ggml-backend-device-p=, =ggml-backend-registry-p= (replacing =cffi:null-pointer-p= on the old raw-pointer API).
 
 **** Naming Conventions
 
@@ -797,6 +848,57 @@ See =examples/introspection.lisp= for a formatted report of all introspection da
 #+end_src
 
 See =examples/perf-and-logging.lisp= for a full walkthrough covering log capture, =with-perf=, structured throughput calculation, and sampler timing.
+
+*** Backend Device Introspection
+
+#+begin_src lisp
+;; No model needed — just requires the backend to be initialized.
+(cl-llama-cpp:with-backend ()
+  ;; Quick system overview
+  (let ((caps (cl-llama-cpp:system-capabilities)))
+    (format t "Devices: ~D  Registries: ~D  GPU: ~A~%"
+            (getf caps :n-backend-devs)
+            (getf caps :n-backend-regs)
+            (getf caps :has-gpu)))
+
+  ;; Enumerate all devices
+  (dotimes (i (cl-llama-cpp:backend-dev-count))
+    (let ((dev (cl-llama-cpp:backend-dev-get i)))
+      (multiple-value-bind (free total)
+          (cl-llama-cpp:backend-dev-memory dev)
+        (format t "[~D] ~A (~A)  ~,1F / ~,1F GiB free~%"
+                i
+                (cl-llama-cpp:backend-dev-name dev)
+                (cl-llama-cpp:backend-dev-type dev)
+                (/ free 1073741824.0)
+                (/ total 1073741824.0)))))
+
+  ;; GPU-only summary
+  (let ((gpus (cl-llama-cpp:gpu-devices)))
+    (format t "~D GPU device(s) found~%" (length gpus))
+    (dolist (props gpus)
+      (format t "  ~A: ~,1F GiB free / ~,1F GiB total~%"
+              (getf props :name)
+              (/ (getf props :memory-free) 1073741824.0)
+              (/ (getf props :memory-total) 1073741824.0))))
+
+  ;; Detect total free VRAM for resource planning
+  (let ((vram (cl-llama-cpp:detect-free-vram)))
+    (if vram
+        (format t "Free VRAM: ~,1F GiB~%" (/ vram 1073741824.0))
+        (format t "No GPU devices detected~%")))
+
+  ;; Lookup a device or registry by name
+  (let ((cpu (cl-llama-cpp:backend-dev-by-type :cpu)))
+    (format t "CPU device: ~A~%" (cl-llama-cpp:backend-dev-name cpu)))
+
+  ;; Enumerate registries
+  (dotimes (i (cl-llama-cpp:backend-reg-count))
+    (let ((reg (cl-llama-cpp:backend-reg-get i)))
+      (format t "Registry ~S: ~D device(s)~%"
+              (cl-llama-cpp:backend-reg-name reg)
+              (cl-llama-cpp:backend-reg-dev-count reg)))))
+#+end_src
 
 *** Resource Planning
 

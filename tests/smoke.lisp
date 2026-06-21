@@ -698,6 +698,92 @@
     (let ((sym (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)))
       (ok (boundp sym) "*LAST-LOG-CALLBACK-ERROR* is boundp"))))
 
+;;; Backend device & registry introspection (issue #29)
+
+(deftest backend-device-handle-symbols-exported
+  (testing "ggml-backend-device handle symbols are exported from cl-llama-cpp"
+    (dolist (sym '(ggml-backend-device ggml-backend-device-p ggml-backend-device-pointer
+                   ggml-backend-registry ggml-backend-registry-p ggml-backend-registry-pointer))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym))))))
+  (testing "ggml-backend-device predicates and accessors are fbound"
+    (dolist (sym-name '("GGML-BACKEND-DEVICE-P" "GGML-BACKEND-DEVICE-POINTER"
+                        "GGML-BACKEND-REGISTRY-P" "GGML-BACKEND-REGISTRY-POINTER"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest backend-introspection-symbols-exported
+  (testing "backend device introspection symbols are exported from cl-llama-cpp"
+    (dolist (sym '(backend-dev-count backend-dev-get backend-dev-name
+                   backend-dev-description backend-dev-type
+                   backend-dev-memory backend-dev-props
+                   backend-dev-by-name backend-dev-by-type
+                   backend-reg-count backend-reg-get backend-reg-name
+                   backend-reg-dev-count backend-reg-dev-get backend-reg-by-name
+                   gpu-devices detect-free-vram))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest backend-introspection-functions-fbound
+  (testing "backend introspection functions are fbound"
+    (dolist (sym-name '("BACKEND-DEV-COUNT" "BACKEND-DEV-GET" "BACKEND-DEV-NAME"
+                        "BACKEND-DEV-DESCRIPTION" "BACKEND-DEV-TYPE"
+                        "BACKEND-DEV-MEMORY" "BACKEND-DEV-PROPS"
+                        "BACKEND-DEV-BY-NAME" "BACKEND-DEV-BY-TYPE"
+                        "BACKEND-REG-COUNT" "BACKEND-REG-GET" "BACKEND-REG-NAME"
+                        "BACKEND-REG-DEV-COUNT" "BACKEND-REG-DEV-GET" "BACKEND-REG-BY-NAME"
+                        "GPU-DEVICES" "DETECT-FREE-VRAM"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest backend-introspection-binding-deps
+  (testing "backend introspection bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:ggml-backend-dev-count %llama:ggml-backend-dev-get
+                     %llama:ggml-backend-dev-name %llama:ggml-backend-dev-description
+                     %llama:ggml-backend-dev-type %llama:ggml-backend-dev-memory
+                     %llama:ggml-backend-dev-get-props
+                     %llama:ggml-backend-dev-by-name %llama:ggml-backend-dev-by-type
+                     %llama:ggml-backend-reg-count %llama:ggml-backend-reg-get
+                     %llama:ggml-backend-reg-name
+                     %llama:ggml-backend-reg-dev-count %llama:ggml-backend-reg-dev-get
+                     %llama:ggml-backend-reg-by-name))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
+
+(deftest backend-dev-count-no-model
+  (testing "backend-dev-count returns a non-negative integer without a model"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((count (cl-llama-cpp:backend-dev-count)))
+        (ok (integerp count) "backend-dev-count returned an integer")
+        (ok (>= count 0) "backend-dev-count is non-negative")))))
+
+(deftest system-capabilities-extended-keys
+  (testing "system-capabilities now includes backend device keys"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((caps (cl-llama-cpp:system-capabilities)))
+        (ok (member :n-backend-devs caps) ":n-backend-devs key present")
+        (ok (member :n-backend-regs caps) ":n-backend-regs key present")
+        (ok (member :has-gpu caps) ":has-gpu key present")
+        (ok (integerp (getf caps :n-backend-devs))
+            ":n-backend-devs is an integer")
+        (ok (integerp (getf caps :n-backend-regs))
+            ":n-backend-regs is an integer")
+        (ok (typep (getf caps :has-gpu) 'boolean)
+            ":has-gpu is a boolean")))))
+
 ;;; Typed opaque handles (issue #41)
 
 (deftest handle-symbols-exported
