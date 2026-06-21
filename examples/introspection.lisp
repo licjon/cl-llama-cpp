@@ -96,11 +96,11 @@
                                        :key (lambda (info) (length (getf info :name)))
                                        :initial-value 8))))
       (format t "  ~D tensor~:P total~2%" n)
-      (format t "  ~VA  ~-14A  ~A~%  ~A~%"
+      (format t "  ~VA  ~14A  ~A~%  ~A~%"
               name-width "Name" "Type" "Size"
               (make-string (+ name-width 30) :initial-element #\─))
       (dolist (info infos)
-        (format t "  ~VA  ~-14A  ~A~%"
+        (format t "  ~VA  ~14A  ~A~%"
                 name-width
                 (getf info :name)
                 (getf info :type)
