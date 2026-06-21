@@ -900,12 +900,14 @@ See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tun
       (format t "Context: ~D tokens, ~D threads~%"
               (getf info :n-ctx) (getf info :n-threads)))
 
-    ;; GGUF metadata
+    ;; String-valued GGUF metadata via the llama.cpp meta API
     (dolist (entry (cl-llama-cpp:model-metadata model))
       (format t "  ~A = ~A~%" (car entry) (cdr entry)))))
 #+end_src
 
-See =examples/introspection.lisp= for a formatted report of all introspection data.
+For typed KV metadata (integers, floats, booleans, arrays) and tensor info, use =with-gguf= — no model load required. See the GGUF File Inspection section below.
+
+See =examples/introspection.lisp= for a formatted report covering GGUF file info, typed metadata, tensor listing, model properties, and system info.
 
 *** GGUF File Inspection
 
