@@ -1214,3 +1214,76 @@
         (ok sym (format nil "~A is accessible" name))
         (ok (eq status :external) (format nil "~A is exported" name))
         (ok (fboundp sym) (format nil "~A is fbound" name))))))
+
+;;; GC finalizer / standalone constructor tests (issue #46)
+
+(deftest finalizer-symbols-exported
+  (testing "make-model, free-model, make-context, free-context are exported"
+    (dolist (sym '(make-model free-model make-context free-context))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest finalizer-functions-fbound
+  (testing "make-model, free-model, make-context, free-context are fbound"
+    (dolist (sym-name '("MAKE-MODEL" "FREE-MODEL" "MAKE-CONTEXT" "FREE-CONTEXT"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name)))))
+
+  (testing "internal finalizer helpers are fbound"
+    (dolist (sym-name '("%TRY-CLAIM-FOR-FREE"
+                        "%REGISTER-MODEL-FINALIZER"
+                        "%REGISTER-CONTEXT-FINALIZER"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest freed-cell-slot-exists
+  (testing "llama-model and llama-context have freed-cell slots"
+    (let ((model (cl-llama-cpp::%make-llama-model))
+          (ctx (cl-llama-cpp::%make-llama-context)))
+      (ok (consp (cl-llama-cpp::llama-model-freed-cell model))
+          "llama-model has a freed-cell cons")
+      (ok (null (car (cl-llama-cpp::llama-model-freed-cell model)))
+          "fresh model freed-cell starts NIL")
+      (ok (consp (cl-llama-cpp::llama-context-freed-cell ctx))
+          "llama-context has a freed-cell cons")
+      (ok (null (car (cl-llama-cpp::llama-context-freed-cell ctx)))
+          "fresh context freed-cell starts NIL"))))
+
+(deftest try-claim-for-free-semantics
+  (testing "%try-claim-for-free transitions NIL→T exactly once"
+    (let ((cell (list nil)))
+      (ok (cl-llama-cpp::%try-claim-for-free cell)
+          "first claim returns T")
+      (ok (car cell) "cell is now T")
+      (ok (not (cl-llama-cpp::%try-claim-for-free cell))
+          "second claim returns NIL (already claimed)"))))
+
+(deftest free-model-idempotent-on-dummy
+  (testing "free-model is idempotent on a never-allocated model"
+    (let ((model (cl-llama-cpp::%make-llama-model)))
+      (setf (car (cl-llama-cpp::llama-model-freed-cell model)) t)
+      (ok (null (cl-llama-cpp:free-model model))
+          "free-model returns NIL on already-freed model"))))
+
+(deftest free-context-idempotent-on-dummy
+  (testing "free-context is idempotent on a never-allocated context"
+    (let ((ctx (cl-llama-cpp::%make-llama-context)))
+      (setf (car (cl-llama-cpp::llama-context-freed-cell ctx)) t)
+      (ok (null (cl-llama-cpp:free-context ctx))
+          "free-context returns NIL on already-freed context"))))
+
+(deftest make-model-bad-path
+  (testing "make-model signals model-load-error on nonexistent path"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (ok (handler-case
+              (cl-llama-cpp:make-model "/nonexistent/path/to/model.gguf")
+            (cl-llama-cpp:model-load-error (c)
+              (cl-llama-cpp:model-load-error-path c)))
+          "model-load-error was signaled for bad path"))))

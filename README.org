@@ -30,6 +30,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
 - Backend device & registry introspection (device enumeration, names, types, VRAM, properties; registry enumeration)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
+- GC finalizers as a safety net for model/context handles (=trivial-garbage=; standalone =make-model=/=make-context= constructors with =free-model=/=free-context= destructors)
 
 *Not yet wrapped* at the high level (use the =%llama= bindings directly --- see Low-level =%llama= Access):
 
@@ -55,6 +56,7 @@ These features provide functionality above what the llama.cpp C API offers direc
 - *SBCL* (Recommended --- llama.cpp triggers floating-point exceptions that must be masked. This is handled automatically on SBCL; other implementations are supported via the configurable **llama-fp-wrapper**, though they may require implementation-specific trap masking to prevent crashes.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
+- [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
 
 *Platform notes:* Tested on Linux. macOS should work (the library loader handles =.dylib=). Windows is untested and would require building llama.cpp as a DLL.
 
@@ -134,8 +136,8 @@ The high-level API represents resources as *typed handle structs* rather than ra
 
 | Handle type             | Predicate                 | Pointer accessor               | Created by                                               |
 |-------------------------+---------------------------+--------------------------------+----------------------------------------------------------|
-| =llama-model=             | =llama-model-p=             | =llama-model-pointer=            | =with-model=                                               |
-| =llama-context=           | =llama-context-p=           | =llama-context-pointer=          | =with-context=                                             |
+| =llama-model=             | =llama-model-p=             | =llama-model-pointer=            | =with-model=, =make-model=                                    |
+| =llama-context=           | =llama-context-p=           | =llama-context-pointer=          | =with-context=, =make-context=                                |
 | =llama-sampler=           | =llama-sampler-p=           | =llama-sampler-pointer=          | =with-sampler-chain=, =make-grammar-sampler=, etc.           |
 | =gguf-context=            | =gguf-context-p=            | =gguf-context-pointer=           | =with-gguf=                                                |
 | =ggml-backend-device=     | =ggml-backend-device-p=     | =ggml-backend-device-pointer=    | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
@@ -145,9 +147,17 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 *** Resource Management
 
-- =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var= as a =llama-model= handle, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
+- =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var= as a =llama-model= handle, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure. Delegates to =make-model=/=free-model= internally.
 
-- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see Resource Planning & Validation): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
+- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see Resource Planning & Validation): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts. Delegates to =make-context=/=free-context= internally.
+
+- =make-model path &rest params= --- Standalone model constructor. Same parameters as =with-model=. Returns a =llama-model= handle with a GC finalizer registered via =trivial-garbage=: if the handle is garbage-collected without being freed, the finalizer calls =llama_model_free= as a safety net. The caller owns the handle and should eventually call =free-model=. Signals =model-load-error= on failure.
+
+- =free-model model= --- Free the foreign memory held by =model= and cancel its GC finalizer. Idempotent — calling on an already-freed model is a no-op. Returns =NIL=.
+
+- =make-context model &rest params= --- Standalone context constructor. Same parameters as =with-context=. Returns a =llama-context= handle with a GC finalizer. The caller owns the handle and should eventually call =free-context=. Signals =context-creation-error= on failure.
+
+- =free-context ctx= --- Free the foreign memory held by =ctx=, cancel its GC finalizer, and clean up any registered abort callback. Idempotent. Returns =NIL=.
 
 - =with-gguf (var path &key no-alloc) &body body= --- Open a GGUF file at =path=, bind the context to =var= as a =gguf-context= handle, execute =body=, free on exit (including non-local exit). =:no-alloc t= skips ggml tensor allocation, which is faster for metadata-only reads and avoids needing a loaded backend. Signals =gguf-load-error= on failure. Does not require the llama backend to be initialized.
 
@@ -892,6 +902,28 @@ This example uses =sb-thread= directly; adapt =make-thread= / =join-thread= to b
 #+end_src
 
 See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tuning, mode toggles, synchronize, and time-limited generation.
+
+*** Long-lived Handles (GC Finalizers)
+
+=make-model= and =make-context= create handles that outlive a dynamic extent. A GC finalizer ensures the foreign memory is freed even if the handle escapes and is later garbage-collected. Prefer =with-model=/=with-context= when possible; use the standalone constructors for global models, caches, or server-style lifetimes.
+
+#+begin_src lisp
+;; Store a model globally for a server-style application
+(defvar *model* (cl-llama-cpp:make-model "/path/to/model.gguf" :n-gpu-layers 99))
+
+;; Create contexts on demand, free explicitly when done
+(let ((ctx (cl-llama-cpp:make-context *model* :n-ctx 2048)))
+  (unwind-protect
+       (cl-llama-cpp:generate ctx "Hello" :max-tokens 32)
+    (cl-llama-cpp:free-context ctx)))
+
+;; Explicit cleanup — cancels the GC finalizer
+(cl-llama-cpp:free-model *model*)
+
+;; If you forget free-model, the finalizer frees the foreign memory
+;; when the Lisp object is garbage-collected. This is a safety net,
+;; not a substitute for explicit cleanup.
+#+end_src
 
 *** Model Introspection
 
