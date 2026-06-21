@@ -28,14 +28,14 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
 
-*Not yet wrapped* at the high level (use the =%llama= bindings directly --- see [[*Low-level =%llama= Access (Escape Hatch)][Low-level =%llama= Access]]):
+*Not yet wrapped* at the high level (use the =%llama= bindings directly --- see [[#escape-hatch][Low-level =%llama= Access]]):
 
 - Model quantization
 - Speculative decoding
 - Multimodal inputs (vision, audio)
 - Fine-grained sequence control
 
-The generated =%llama= layer covers 100% of the public C API surface (881 functions, 38 enums, 59 structs), so a missing high-level wrapper is never a blocker. See the [[*Low-level =%llama= Access (Escape Hatch)][escape hatch documentation]] for naming conventions and usage.
+The generated =%llama= layer covers 100% of the public C API surface (881 functions, 38 enums, 59 structs), so a missing high-level wrapper is never a blocker. See the [[#escape-hatch][escape hatch documentation]] for naming conventions and usage.
 
 The API is unstable and will change without notice.
 
@@ -135,7 +135,7 @@ The high-level API represents resources as *typed handle structs* rather than ra
 | =llama-context= | =llama-context-p= | =llama-context-pointer= | =with-context=                                   |
 | =llama-sampler= | =llama-sampler-p= | =llama-sampler-pointer= | =with-sampler-chain=, =make-grammar-sampler=, etc. |
 
-The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see [[*Low-level =%llama= Access (Escape Hatch)][Low-level =%llama= Access]].
+The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see [[#escape-hatch][Low-level =%llama= Access]].
 
 *** Resource Management
 
@@ -397,6 +397,9 @@ All conditions inherit from =llama-error=.
 =configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
 
 *** Low-level =%llama= Access (Escape Hatch)
+:PROPERTIES:
+:CUSTOM_ID: escape-hatch
+:END:
 
 The =%llama= package is a *supported, first-class escape hatch*. It exposes the complete public C API of llama.cpp and the bundled ggml and gguf libraries as CFFI bindings --- 881 functions, 38 enums, and 59 structs auto-generated from the upstream headers via [[https://github.com/borodust/claw][CLAW]]. If a high-level wrapper doesn't exist yet for something llama.cpp can do, drop down to =%llama:= and call the C function directly. A missing wrapper is never a blocker.
 
