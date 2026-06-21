@@ -52,14 +52,9 @@ alternative continuations from the same point."
         ;; Tokenize and decode the prompt into the KV cache
         (let ((tokens (tokenize model prompt :parse-special t)))
           (format t "Tokenized to ~D tokens.~%" (length tokens))
-          (with-llama-compatible-fp-environment
-            (let ((ctx-ptr (llama-context-pointer ctx)))
-              (cffi:with-foreign-object (tok-buf '%llama:token (length tokens))
-                (dotimes (i (length tokens))
-                  (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
-                (let ((rc (%llama:decode ctx-ptr (%llama:batch-get-one
-                                                   tok-buf (length tokens)))))
-                  (assert (zerop rc) () "decode failed: ~D" rc)))))
+          (with-batch (batch (length tokens))
+            (batch-add-sequence batch tokens 0 :logits :last)
+            (batch-decode ctx batch))
           (format t "Decoded into KV cache.~%")
 
           ;; Snapshot the context state to memory

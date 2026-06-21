@@ -49,11 +49,10 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
            (generated (make-array 0 :element-type 'fixnum
                                     :adjustable t :fill-pointer 0))
            (emitted-len 0))
-      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
-      (cffi:with-foreign-object (buf '%llama:token n)
-        (dotimes (i n)
-          (setf (cffi:mem-aref buf '%llama:token i) (aref tokens i)))
-        (%llama:decode ctx-ptr (%llama:batch-get-one buf n)))
+      (clear-kv-cache ctx)
+      (with-batch (batch n)
+        (batch-add-sequence batch tokens 0 :logits :last)
+        (batch-decode ctx batch))
       ;; sampler-sample calls sampler-accept internally — do NOT accept again
       (loop for i from 0 below max-tokens
             for tok = (%llama:sampler-sample sampler-ptr ctx-ptr -1)
@@ -66,9 +65,9 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
                      (write-string new-text)
                      (force-output)
                      (setf emitted-len (length full)))))
-               (cffi:with-foreign-object (buf '%llama:token 1)
-                 (setf (cffi:mem-aref buf '%llama:token 0) tok)
-                 (%llama:decode ctx-ptr (%llama:batch-get-one buf 1))))
+               (with-batch (b 1)
+                 (batch-add-token b tok (+ n i) 0 :logits t)
+                 (batch-decode ctx b)))
       (terpri)
       (if (zerop (length generated))
           ""
@@ -155,12 +154,15 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
   (format t "when the grammar is empty or the C library rejects it.~2%")
 
   (format t "Test 1: Empty grammar string~%")
-  (handler-case
-      (make-grammar-sampler model "")
-    (grammar-error (c)
-      (format t "  Caught: ~A~%" c)
-      (format t "  Type:   ~A~%" (type-of c))
-      (format t "  Slot:   ~S~2%" (grammar-error-grammar c))))
+  (let ((caught nil))
+    (handler-case
+        (make-grammar-sampler model "")
+      (grammar-error (c)
+        (setf caught t)
+        (format t "  Caught: ~A~%" c)
+        (format t "  Type:   ~A~%" (type-of c))
+        (format t "  Slot:   ~S~2%" (grammar-error-grammar c))))
+    (assert caught () "Expected grammar-error for empty grammar string"))
 
   (format t "Test 2: Invalid GBNF syntax~%")
   (handler-case
