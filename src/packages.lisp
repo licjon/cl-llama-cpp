@@ -21,6 +21,7 @@ New wrappers must follow this convention.")
    #:llama-sampler #:llama-sampler-p #:llama-sampler-pointer
    #:ggml-backend-device #:ggml-backend-device-p #:ggml-backend-device-pointer
    #:ggml-backend-registry #:ggml-backend-registry-p #:ggml-backend-registry-pointer
+   #:gguf-context #:gguf-context-p #:gguf-context-pointer
    ;; Utility
    #:call-with-llama-compatible-fp-environment
    #:with-llama-compatible-fp-environment
@@ -35,10 +36,36 @@ New wrappers must follow this convention.")
    #:tokenization-error-text
    #:decode-error
    #:decode-error-code
+   #:gguf-load-error
+   #:gguf-load-error-path
    ;; Resource management
    #:with-model
    #:with-context
    #:with-sampler-chain
+   #:with-gguf
+   ;; GGUF file inspection
+   #:gguf-version
+   #:gguf-alignment
+   #:gguf-data-offset
+   #:gguf-n-kv
+   #:gguf-find-key
+   #:gguf-key
+   #:gguf-kv-type
+   #:gguf-val
+   #:gguf-arr-type
+   #:gguf-arr-n
+   #:gguf-arr-data
+   #:gguf-arr-str
+   #:gguf-type-name
+   #:gguf-metadata
+   #:gguf-n-tensors
+   #:gguf-find-tensor
+   #:gguf-tensor-name
+   #:gguf-tensor-type
+   #:gguf-tensor-offset
+   #:gguf-tensor-size
+   #:gguf-tensor-info
+   #:gguf-tensors
    ;; Operations
    #:tokenize
    #:detokenize

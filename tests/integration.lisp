@@ -6,6 +6,8 @@
 (defvar *test-model-path* (uiop:getenv "LLAMA_TEST_MODEL"))
 (defvar *test-embed-model-path* (uiop:getenv "LLAMA_TEST_EMBED_MODEL"))
 (defvar *test-lora-path* (uiop:getenv "LLAMA_TEST_LORA"))
+(defvar *test-gguf-path* (or (uiop:getenv "LLAMA_TEST_MODEL")
+                             (uiop:getenv "LLAMA_TEST_EMBED_MODEL")))
 
 (defmacro when-model-available (&body body)
   `(if *test-model-path*
@@ -2052,3 +2054,173 @@ ws     ::= [ \\t\\n]*")
           (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer s)))
               "grammar sampler pointer is non-null")
           (%llama:sampler-free (cl-llama-cpp:llama-sampler-pointer s)))))))
+
+;;; GGUF file inspection integration tests
+
+(defmacro when-gguf-available (&body body)
+  `(if *test-gguf-path*
+       (progn ,@body)
+       (skip "No GGUF model available (set LLAMA_TEST_MODEL or LLAMA_TEST_EMBED_MODEL)")))
+
+(deftest with-gguf-bad-path
+  (testing "with-gguf signals gguf-load-error for nonexistent file"
+    (ok (handler-case
+            (cl-llama-cpp:with-gguf (g "/nonexistent/model.gguf") g)
+          (cl-llama-cpp:gguf-load-error (c)
+            (string= "/nonexistent/model.gguf" (cl-llama-cpp:gguf-load-error-path c))))
+        "gguf-load-error signaled with correct path")))
+
+(deftest with-gguf-opens-file
+  (when-gguf-available
+    (testing "with-gguf opens a real GGUF file and returns a handle"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (ok (cl-llama-cpp:gguf-context-p g) "result is a gguf-context")
+        (ok (cffi:pointerp (cl-llama-cpp:gguf-context-pointer g))
+            "gguf-context-pointer returns a CFFI pointer")
+        (ok (not (cffi:null-pointer-p (cl-llama-cpp:gguf-context-pointer g)))
+            "pointer is non-null")))))
+
+(deftest gguf-file-level
+  (when-gguf-available
+    (testing "gguf-version, gguf-alignment, gguf-data-offset return plausible integers"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((ver (cl-llama-cpp:gguf-version g))
+              (align (cl-llama-cpp:gguf-alignment g))
+              (offset (cl-llama-cpp:gguf-data-offset g)))
+          (ok (and (integerp ver) (>= ver 1))
+              (format nil "version is a positive integer: ~D" ver))
+          (ok (and (integerp align) (> align 0))
+              (format nil "alignment is a positive integer: ~D" align))
+          (ok (and (integerp offset) (> offset 0))
+              (format nil "data-offset is a positive integer: ~D" offset)))))))
+
+(deftest gguf-kv-count
+  (when-gguf-available
+    (testing "gguf-n-kv returns a positive integer"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((n (cl-llama-cpp:gguf-n-kv g)))
+          (ok (and (integerp n) (> n 0))
+              (format nil "n-kv = ~D (positive)" n)))))))
+
+(deftest gguf-find-key-missing
+  (when-gguf-available
+    (testing "gguf-find-key returns NIL for an absent key"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (ok (null (cl-llama-cpp:gguf-find-key g "cl.llama.cpp.no.such.key"))
+            "absent key returns NIL")))))
+
+(deftest gguf-key-iteration
+  (when-gguf-available
+    (testing "gguf-key returns strings for all KV indices"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((n (cl-llama-cpp:gguf-n-kv g)))
+          (loop for i from 0 below (min n 5)
+                do (let ((k (cl-llama-cpp:gguf-key g i)))
+                     (ok (stringp k)
+                         (format nil "key ~D is a string: ~S" i k)))))))))
+
+(deftest gguf-find-key-roundtrip
+  (when-gguf-available
+    (testing "gguf-find-key round-trips through gguf-key"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let* ((key (cl-llama-cpp:gguf-key g 0))
+               (found (cl-llama-cpp:gguf-find-key g key)))
+          (ok (eql found 0)
+              (format nil "gguf-find-key ~S returned index 0" key)))))))
+
+(deftest gguf-kv-type-keywords
+  (when-gguf-available
+    (testing "gguf-kv-type returns a keyword for every KV entry"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let* ((n (cl-llama-cpp:gguf-n-kv g))
+               (valid-types '(:uint8 :int8 :uint16 :int16 :uint32 :int32
+                              :float32 :bool :string :array :uint64 :int64 :float64)))
+          (loop for i from 0 below n
+                do (let ((ty (cl-llama-cpp:gguf-kv-type g i)))
+                     (ok (member ty valid-types)
+                         (format nil "kv-type at ~D is a valid keyword: ~S" i ty)))))))))
+
+(deftest gguf-val-scalars
+  (when-gguf-available
+    (testing "gguf-val returns CL values for scalar KV entries"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((n (cl-llama-cpp:gguf-n-kv g)))
+          (loop for i from 0 below n
+                for ty = (cl-llama-cpp:gguf-kv-type g i)
+                when (not (eq ty :array))
+                do (let ((v (cl-llama-cpp:gguf-val g i)))
+                     (ok (or (integerp v) (floatp v)
+                             (stringp v) (eq v t) (eq v nil)
+                             (eq v :count))
+                         (format nil "gguf-val at ~D (~S) returned a CL value: ~S"
+                                 i ty v)))))))))
+
+(deftest gguf-metadata-alist
+  (when-gguf-available
+    (testing "gguf-metadata returns an alist with string keys"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((meta (cl-llama-cpp:gguf-metadata g)))
+          (ok (listp meta) "metadata is a list")
+          (ok (> (length meta) 0) "metadata is non-empty")
+          (ok (every (lambda (pair)
+                       (and (consp pair) (stringp (car pair))))
+                     meta)
+              "every entry is (string . value)"))))))
+
+(deftest gguf-tensor-count
+  (when-gguf-available
+    (testing "gguf-n-tensors returns a positive integer"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((n (cl-llama-cpp:gguf-n-tensors g)))
+          (ok (and (integerp n) (> n 0))
+              (format nil "n-tensors = ~D (positive)" n)))))))
+
+(deftest gguf-find-tensor-missing
+  (when-gguf-available
+    (testing "gguf-find-tensor returns NIL for an absent tensor"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (ok (null (cl-llama-cpp:gguf-find-tensor g "cl.llama.cpp.no.such.tensor"))
+            "absent tensor returns NIL")))))
+
+(deftest gguf-tensor-info-plist
+  (when-gguf-available
+    (testing "gguf-tensor-info returns a plist with expected keys"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let ((info (cl-llama-cpp:gguf-tensor-info g 0)))
+          (ok (listp info) "tensor-info is a list")
+          (ok (stringp (getf info :name))
+              (format nil "tensor name is a string: ~S" (getf info :name)))
+          (ok (keywordp (getf info :type))
+              (format nil "tensor type is a keyword: ~S" (getf info :type)))
+          (ok (integerp (getf info :offset))
+              (format nil "tensor offset is an integer: ~D" (getf info :offset)))
+          (ok (and (integerp (getf info :size)) (> (getf info :size) 0))
+              (format nil "tensor size is a positive integer: ~D" (getf info :size))))))))
+
+(deftest gguf-tensors-list
+  (when-gguf-available
+    (testing "gguf-tensors returns one plist per tensor"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let* ((n (cl-llama-cpp:gguf-n-tensors g))
+               (tensors (cl-llama-cpp:gguf-tensors g)))
+          (ok (= (length tensors) n)
+              (format nil "gguf-tensors length ~D matches gguf-n-tensors ~D"
+                      (length tensors) n)))))))
+
+(deftest gguf-find-tensor-roundtrip
+  (when-gguf-available
+    (testing "gguf-find-tensor round-trips through gguf-tensor-name"
+      (cl-llama-cpp:with-gguf (g *test-gguf-path* :no-alloc t)
+        (let* ((name (cl-llama-cpp:gguf-tensor-name g 0))
+               (found (cl-llama-cpp:gguf-find-tensor g name)))
+          (ok (eql found 0)
+              (format nil "gguf-find-tensor ~S returned index 0" name)))))))
+
+(deftest gguf-type-name-returns-string
+  (testing "gguf-type-name returns a non-empty string for known types"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (dolist (ty '(:uint8 :int8 :uint32 :float32 :bool :string :array))
+        (let ((name (cl-llama-cpp:gguf-type-name ty)))
+          (ok (and (stringp name) (> (length name) 0))
+              (format nil "gguf-type-name ~S => ~S" ty name)))))))

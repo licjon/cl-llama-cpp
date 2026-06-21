@@ -24,7 +24,8 @@
 		 (:file "batch")
 		 (:file "kv-cache")
 		 (:file "session")
-		 (:file "lora")))))
+		 (:file "lora")
+		 (:file "gguf")))))
 
 (defsystem "cl-llama-cpp/examples"
   :description "Example programs for cl-llama-cpp"

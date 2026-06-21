@@ -18,6 +18,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - KV cache management (clear, copy, shift, divide, query)
 - Session state save/load (file-based and in-memory persistence)
 - Model & context introspection (description, metadata, properties, system info)
+- GGUF file inspection (metadata key/value access, tensor index, version/alignment/offsets; =with-gguf= lifecycle macro)
 - Grammar / constrained generation (GBNF grammars, lazy grammars)
 - Infill generation
 - Batch API and parallel decoding
@@ -135,6 +136,7 @@ The high-level API represents resources as *typed handle structs* rather than ra
 | =llama-model=             | =llama-model-p=             | =llama-model-pointer=            | =with-model=                                               |
 | =llama-context=           | =llama-context-p=           | =llama-context-pointer=          | =with-context=                                             |
 | =llama-sampler=           | =llama-sampler-p=           | =llama-sampler-pointer=          | =with-sampler-chain=, =make-grammar-sampler=, etc.           |
+| =gguf-context=            | =gguf-context-p=            | =gguf-context-pointer=           | =with-gguf=                                                |
 | =ggml-backend-device=     | =ggml-backend-device-p=     | =ggml-backend-device-pointer=    | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
 | =ggml-backend-registry=   | =ggml-backend-registry-p=   | =ggml-backend-registry-pointer=  | =backend-reg-get=, =backend-reg-by-name=                   |
 
@@ -145,6 +147,8 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 - =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var= as a =llama-model= handle, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
 
 - =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see Resource Planning & Validation): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
+
+- =with-gguf (var path &key no-alloc) &body body= --- Open a GGUF file at =path=, bind the context to =var= as a =gguf-context= handle, execute =body=, free on exit (including non-local exit). =:no-alloc t= skips ggml tensor allocation, which is faster for metadata-only reads and avoids needing a loaded backend. Signals =gguf-load-error= on failure. Does not require the llama backend to be initialized.
 
 - =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. With *no keyword arguments*, allocates an empty chain — populate it inside =body= using =sampler-chain-add=. With keyword arguments, pre-builds the chain with the same options as =generate= (see Extended Sampler Keywords). Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
 
@@ -311,6 +315,68 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =system-info= --- Return a string describing the llama.cpp build and CPU capabilities.
 
+*** GGUF File Inspection
+
+Inspect GGUF files without loading a model or initializing the backend. Useful for reading metadata, enumerating tensors, or checking model properties before committing to a full load.
+
+*Lifecycle:*
+
+- =with-gguf (var path &key no-alloc) &body body= --- See Resource Management above.
+
+*File-level:*
+
+- =gguf-version gguf= --- Return the GGUF format version as an integer (typically 3).
+
+- =gguf-alignment gguf= --- Return the tensor alignment value (bytes) stored in the file.
+
+- =gguf-data-offset gguf= --- Return the byte offset of the tensor data section within the file.
+
+*KV metadata — discovery:*
+
+- =gguf-n-kv gguf= --- Return the number of key/value metadata entries.
+
+- =gguf-find-key gguf key= --- Return the integer index of metadata key =key=, or =NIL= if not present.
+
+- =gguf-key gguf key-id= --- Return the key name string at index =key-id=.
+
+- =gguf-kv-type gguf key-id= --- Return the gguf-type keyword for entry =key-id=: =:uint8=, =:int8=, =:uint16=, =:int16=, =:uint32=, =:int32=, =:float32=, =:bool=, =:string=, =:array=, =:uint64=, =:int64=, =:float64=.
+
+*KV metadata — value access:*
+
+- =gguf-val gguf key-id= --- Return the CL value for a scalar KV entry. Dispatches on =gguf-kv-type=: integer types → integers, =:float32= → =single-float=, =:float64= → =double-float=, =:bool= → =T=/=NIL=, =:string= → string. Returns keyword =:ARRAY= for array entries; use the array accessors below for those.
+
+- =gguf-type-name type= --- Return a human-readable string for a gguf-type keyword.
+
+- =gguf-metadata gguf= --- Return all KV metadata as an alist of =(key . value)= pairs. Scalar values are resolved to CL types. Array entries appear as =(key . (:array . N))= where =N= is the element count.
+
+*KV metadata — array access:*
+
+- =gguf-arr-type gguf key-id= --- Return the element type keyword for an array KV entry.
+
+- =gguf-arr-n gguf key-id= --- Return the element count of an array KV entry.
+
+- =gguf-arr-data gguf key-id= --- Return =(values foreign-pointer cffi-element-type count)= for a numeric array entry. =cffi-element-type= is a CFFI primitive keyword (e.g. =:float=, =:unsigned-int=) ready for =cffi:mem-aref=. Not valid for =:string= arrays; use =gguf-arr-str=.
+
+- =gguf-arr-str gguf key-id index= --- Return the string at =index= within a string array KV entry.
+
+*Tensor info:*
+
+- =gguf-n-tensors gguf= --- Return the number of tensors described in the file.
+
+- =gguf-find-tensor gguf name= --- Return the integer index of tensor =name=, or =NIL= if not present.
+
+- =gguf-tensor-name gguf tensor-id= --- Return the tensor's name string.
+
+- =gguf-tensor-type gguf tensor-id= --- Return the tensor's =ggml-type= keyword (e.g. =:f32=, =:q4-0=, =:bf16=).
+
+- =gguf-tensor-offset gguf tensor-id= --- Return the byte offset of the tensor within the data section.
+
+- =gguf-tensor-size gguf tensor-id= --- Return the tensor's byte size.
+
+- =gguf-tensor-info gguf tensor-id= --- Return a plist =(:name … :type … :offset … :size …)= for one tensor.
+
+- =gguf-tensors gguf= --- Return a list of =gguf-tensor-info= plists, one per tensor.
+
 *** Performance Counters
 
 - =context-perf ctx= --- Return context performance data as a plist with keys: =:t-start-ms=, =:t-load-ms=, =:t-p-eval-ms=, =:t-eval-ms=, =:n-p-eval=, =:n-eval=, =:n-reused=. Timing values are doubles in milliseconds; counts are integers.
@@ -434,6 +500,7 @@ All conditions inherit from =llama-error=.
 | Condition                  | Slot                  | When                                                      |
 |----------------------------+-----------------------+-----------------------------------------------------------|
 | =model-load-error=           | =path=                  | Model file cannot be loaded                               |
+| =gguf-load-error=            | =path=                  | GGUF file cannot be opened (=with-gguf=)                    |
 | =context-creation-error=     |                       | Context allocation fails                                  |
 | =tokenization-error=         | =text=                  | Tokenization fails                                        |
 | =decode-error=               | =code=                  | =llama_decode= returns non-zero                             |
@@ -839,6 +906,45 @@ See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tun
 #+end_src
 
 See =examples/introspection.lisp= for a formatted report of all introspection data.
+
+*** GGUF File Inspection
+
+=with-gguf= opens a GGUF file without initializing the llama backend or loading model weights. =:no-alloc t= is suitable for metadata-only reads.
+
+#+begin_src lisp
+(cl-llama-cpp:with-gguf (g "/path/to/model.gguf" :no-alloc t)
+  ;; File-level info
+  (format t "GGUF version: ~D, alignment: ~D~%"
+          (cl-llama-cpp:gguf-version g)
+          (cl-llama-cpp:gguf-alignment g))
+
+  ;; All KV metadata as an alist — arrays appear as (:array . N)
+  (dolist (entry (cl-llama-cpp:gguf-metadata g))
+    (format t "  ~A = ~S~%" (car entry) (cdr entry)))
+
+  ;; Look up a specific key
+  (let ((id (cl-llama-cpp:gguf-find-key g "general.architecture")))
+    (when id
+      (format t "Architecture: ~A~%" (cl-llama-cpp:gguf-val g id))))
+
+  ;; Tensor summary
+  (format t "~D tensors, data at offset ~D~%"
+          (cl-llama-cpp:gguf-n-tensors g)
+          (cl-llama-cpp:gguf-data-offset g))
+  (dolist (tensor (cl-llama-cpp:gguf-tensors g))
+    (format t "  ~A  ~A  ~D bytes~%"
+            (getf tensor :name)
+            (getf tensor :type)
+            (getf tensor :size)))
+
+  ;; Access a numeric array (e.g. quantization block counts)
+  (let ((id (cl-llama-cpp:gguf-find-key g "tokenizer.ggml.scores")))
+    (when id
+      (multiple-value-bind (ptr cffi-type n)
+          (cl-llama-cpp:gguf-arr-data g id)
+        (format t "First score: ~F  (~D elements)~%"
+                (cffi:mem-aref ptr cffi-type 0) n)))))
+#+end_src
 
 *** Performance and Logging
 

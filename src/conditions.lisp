@@ -82,6 +82,11 @@
              (format s "Configuration may be unsafe: ~A"
                      (configuration-unsafe-warning-reason c)))))
 
+(define-condition gguf-load-error (llama-error)
+  ((path :initarg :path :reader gguf-load-error-path))
+  (:report (lambda (c s)
+             (format s "Failed to load GGUF file from ~S" (gguf-load-error-path c)))))
+
 (define-condition configuration-unsafe-error (llama-error)
   ((reason :initarg :reason :reader configuration-unsafe-error-reason))
   (:report (lambda (c s)

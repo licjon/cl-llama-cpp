@@ -1005,3 +1005,83 @@
         "*log-lock* is defined")
     (ok (typep cl-llama-cpp::*log-lock* 'sb-thread:mutex)
         "*log-lock* is an sb-thread:mutex")))
+
+;;; GGUF API wrapper tests
+
+(deftest gguf-handle-exported
+  (testing "gguf-context handle accessors are exported"
+    (dolist (sym '(gguf-context gguf-context-p gguf-context-pointer))
+      (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (declare (ignore s))
+        (ok (eq status :external)
+            (format nil "~A is exported" sym))))))
+
+(deftest gguf-condition-hierarchy
+  (testing "gguf-load-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:gguf-load-error 'cl-llama-cpp:llama-error)
+        "gguf-load-error is a llama-error")))
+
+(deftest gguf-condition-signaling
+  (testing "gguf-load-error can be signaled and caught with path slot"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:gguf-load-error :path "/bad/model.gguf")
+                    (cl-llama-cpp:gguf-load-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:gguf-load-error)
+          "gguf-load-error is catchable")
+      (ok (string= "/bad/model.gguf" (cl-llama-cpp:gguf-load-error-path caught))
+          "gguf-load-error-path accessor works"))))
+
+(deftest gguf-symbols-exported
+  (testing "GGUF wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(with-gguf
+                   gguf-version gguf-alignment gguf-data-offset
+                   gguf-n-kv gguf-find-key gguf-key gguf-kv-type
+                   gguf-val gguf-arr-type gguf-arr-n gguf-arr-data gguf-arr-str
+                   gguf-type-name gguf-metadata
+                   gguf-n-tensors gguf-find-tensor
+                   gguf-tensor-name gguf-tensor-type gguf-tensor-offset
+                   gguf-tensor-size gguf-tensor-info gguf-tensors))
+      (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (declare (ignore s))
+        (ok (eq status :external)
+            (format nil "~A is exported" sym))))))
+
+(deftest gguf-functions-fbound
+  (testing "GGUF wrapper functions are fbound"
+    (dolist (sym-name '("GGUF-VERSION" "GGUF-ALIGNMENT" "GGUF-DATA-OFFSET"
+                        "GGUF-N-KV" "GGUF-FIND-KEY" "GGUF-KEY" "GGUF-KV-TYPE"
+                        "GGUF-VAL" "GGUF-ARR-TYPE" "GGUF-ARR-N"
+                        "GGUF-ARR-DATA" "GGUF-ARR-STR"
+                        "GGUF-TYPE-NAME" "GGUF-METADATA"
+                        "GGUF-N-TENSORS" "GGUF-FIND-TENSOR"
+                        "GGUF-TENSOR-NAME" "GGUF-TENSOR-TYPE"
+                        "GGUF-TENSOR-OFFSET" "GGUF-TENSOR-SIZE"
+                        "GGUF-TENSOR-INFO" "GGUF-TENSORS"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest gguf-binding-deps
+  (testing "GGUF bindings are tracked in *binding-deps*"
+    (let ((deps cl-llama-cpp:*binding-deps*))
+      (dolist (sym '(%llama:gguf-init-from-file %llama:gguf-free
+                     %llama:gguf-type-name
+                     %llama:gguf-get-version %llama:gguf-get-alignment
+                     %llama:gguf-get-data-offset
+                     %llama:gguf-get-n-kv %llama:gguf-find-key %llama:gguf-get-key
+                     %llama:gguf-get-kv-type %llama:gguf-get-arr-type
+                     %llama:gguf-get-val-u8 %llama:gguf-get-val-i8
+                     %llama:gguf-get-val-u16 %llama:gguf-get-val-i16
+                     %llama:gguf-get-val-u32 %llama:gguf-get-val-i32
+                     %llama:gguf-get-val-f32
+                     %llama:gguf-get-val-u64 %llama:gguf-get-val-i64
+                     %llama:gguf-get-val-f64
+                     %llama:gguf-get-val-bool %llama:gguf-get-val-str
+                     %llama:gguf-get-val-data
+                     %llama:gguf-get-arr-n %llama:gguf-get-arr-data
+                     %llama:gguf-get-arr-str
+                     %llama:gguf-get-n-tensors %llama:gguf-find-tensor
+                     %llama:gguf-get-tensor-name %llama:gguf-get-tensor-type
+                     %llama:gguf-get-tensor-offset %llama:gguf-get-tensor-size))
+        (ok (member sym deps)
+            (format nil "~S is in *binding-deps*" sym))))))
