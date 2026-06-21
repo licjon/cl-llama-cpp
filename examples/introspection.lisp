@@ -1,5 +1,8 @@
-;;; Model & context introspection example — loads a model and prints a
-;;; formatted report of all properties, metadata, and system capabilities.
+;;; Model & context introspection example — prints a formatted report of all
+;;; GGUF file-level info, model properties, metadata, and system capabilities.
+;;;
+;;; The GGUF sections run before loading the model (no backend needed).
+;;; The model sections require a full load.
 ;;;
 ;;; Setup:
 ;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
@@ -40,21 +43,81 @@
         ((>= n 1000)       (format nil "~,1FK" (/ n 1.0e3)))
         (t                 (format nil "~D" n))))
 
+(defun format-gguf-val (val)
+  "Format a gguf-metadata value for display."
+  (cond ((and (consp val) (eq (car val) :array))
+         (format nil "[array, ~D element~:P]" (cdr val)))
+        ((eq val t)   "true")
+        ((eq val nil) "false")
+        ((floatp val) (format nil "~F" val))
+        ((stringp val)
+         (if (> (length val) 72)
+             (concatenate 'string (subseq val 0 69) "...")
+             val))
+        (t (format nil "~A" val))))
+
 ;;; ── Main ─────────────────────────────────────────────────────────────
 
 (defun run ()
-  "Load a model and print a full introspection report."
+  "Inspect a GGUF file and print a full introspection report."
   (unless *model-path*
     (error "Set *model-path* or export LLAMA_MODEL before calling run."))
-  (format t "~&Loading model: ~A~%" *model-path*)
+  (format t "~&File: ~A~%" *model-path*)
+
+  ;; ── GGUF sections (no backend or model load needed) ───────────────
+  (with-gguf (g *model-path* :no-alloc t)
+
+    ;; ── File-level info ─────────────────────────────────────────────
+    (banner "GGUF File Info")
+    (format t "  GGUF version:      ~D~%"   (gguf-version g))
+    (format t "  Alignment:         ~D bytes~%" (gguf-alignment g))
+    (format t "  Data offset:       ~A~%"   (format-bytes (gguf-data-offset g)))
+    (format t "  KV entries:        ~D~%"   (gguf-n-kv g))
+    (format t "  Tensors:           ~D~%"   (gguf-n-tensors g))
+
+    ;; ── Typed KV metadata ───────────────────────────────────────────
+    (banner "GGUF Metadata (typed)")
+    (let* ((meta (gguf-metadata g))
+           (max-key-len (reduce #'max meta
+                                :key (lambda (e) (length (car e)))
+                                :initial-value 0)))
+      (format t "  ~D entries:~2%" (length meta))
+      (dolist (entry meta)
+        (format t "  ~VA  ~A~%"
+                (+ max-key-len 2) (car entry)
+                (format-gguf-val (cdr entry)))))
+
+    ;; ── Tensor listing ───────────────────────────────────────────────
+    (banner "Tensors")
+    (let* ((n     (gguf-n-tensors g))
+           (show  (min n 16))
+           (infos (loop for i from 0 below show collect (gguf-tensor-info g i)))
+           (name-width (min 48 (reduce #'max infos
+                                       :key (lambda (info) (length (getf info :name)))
+                                       :initial-value 8))))
+      (format t "  ~D tensor~:P total~2%" n)
+      (format t "  ~VA  ~-14A  ~A~%  ~A~%"
+              name-width "Name" "Type" "Size"
+              (make-string (+ name-width 30) :initial-element #\─))
+      (dolist (info infos)
+        (format t "  ~VA  ~-14A  ~A~%"
+                name-width
+                (getf info :name)
+                (getf info :type)
+                (format-bytes (getf info :size))))
+      (when (> n show)
+        (format t "  ... (~D more)~%" (- n show)))))
+
+  ;; ── Model sections (requires full load) ───────────────────────────
+  (format t "~&~%Loading model weights...~%")
   (with-model (model *model-path*)
     (with-context (ctx model :n-ctx 2048)
 
-      ;; ── Model description ──────────────────────────────────────────
+      ;; ── Model description ────────────────────────────────────────
       (banner "Model Description")
       (format t "  ~A~%" (model-description model))
 
-      ;; ── Model properties ───────────────────────────────────────────
+      ;; ── Model properties ─────────────────────────────────────────
       (banner "Model Properties")
       (let ((info (model-info model)))
         (format t "  Parameters:        ~A (~D)~%"
@@ -78,7 +141,7 @@
         (format t "    Hybrid:          ~:[no~;yes~]~%" (getf info :hybrid-p))
         (format t "    Diffusion:       ~:[no~;yes~]~%" (getf info :diffusion-p)))
 
-      ;; ── Context configuration ──────────────────────────────────────
+      ;; ── Context configuration ────────────────────────────────────
       (banner "Context Configuration")
       (let ((info (context-info ctx)))
         (format t "  Context size:      ~D tokens~%" (getf info :n-ctx))
@@ -89,8 +152,8 @@
         (format t "  Threads (batch):   ~D~%" (getf info :n-threads-batch))
         (format t "  Pooling type:      ~A~%" (getf info :pooling-type)))
 
-      ;; ── Model metadata ─────────────────────────────────────────────
-      (banner "Model Metadata")
+      ;; ── Model metadata (string view via llama.cpp meta API) ──────
+      (banner "Model Metadata (string view)")
       (let ((metadata (model-metadata model)))
         (format t "  ~D entries:~2%" (length metadata))
         (let ((max-key-len (reduce #'max metadata
@@ -104,7 +167,7 @@
                           (concatenate 'string (subseq val 0 69) "...")
                           val))))))
 
-      ;; ── System info ────────────────────────────────────────────────
+      ;; ── System info ──────────────────────────────────────────────
       (banner "System / Build Info")
       (format t "  ~A~%" (system-info))))
 
