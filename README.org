@@ -125,13 +125,25 @@ incremental decoding that reuses the KV cache.
 
 *Boolean convention:* Parameters that are semantically boolean in the C API (=:embeddings=, =:vocab-only=, =:offload-kqv=, =:no-perf=, etc.) accept both idiomatic Lisp booleans (=T= / =NIL=) and raw C integers (=1= / =0=). Integers pass through unchanged for backward compatibility; =T= becomes =1= and =NIL= becomes =0=. Other types signal a =type-error=. This applies to all =:char=-typed boolean fields in =llama_model_params= and =llama_context_params= when passed as keyword overrides to =with-model= and =with-context=.
 
+*** Handle Types
+
+The high-level API represents resources as *typed handle structs* rather than raw C pointers:
+
+| Handle type   | Predicate       | Pointer accessor      | Created by                                     |
+|---------------+-----------------+-----------------------+------------------------------------------------|
+| =llama-model=   | =llama-model-p=   | =llama-model-pointer=   | =with-model=                                     |
+| =llama-context= | =llama-context-p= | =llama-context-pointer= | =with-context=                                   |
+| =llama-sampler= | =llama-sampler-p= | =llama-sampler-pointer= | =with-sampler-chain=, =make-grammar-sampler=, etc. |
+
+The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see [[*Low-level =%llama= Access (Escape Hatch)][Low-level =%llama= Access]].
+
 *** Resource Management
 
-- =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var=, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
+- =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var= as a =llama-model= handle, free on exit. Keyword params override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals =model-load-error= on failure.
 
-- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var=, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see [[*Resource Planning & Validation][Resource Planning & Validation]]): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
+- =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see [[*Resource Planning & Validation][Resource Planning & Validation]]): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
 
-- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var=, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
 
 *** Backend Lifecycle
 
@@ -230,11 +242,11 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 *** Grammar / Constrained Generation
 
-- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a GBNF =grammar= string and =root= rule (default ="root"=). Returns a sampler pointer; caller must free or add to a chain. Signals =grammar-error= if the grammar is empty or invalid.
+- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a GBNF =grammar= string and =root= rule (default ="root"=). Returns a =llama-sampler= handle; caller must free (via =llama-sampler-pointer= + =%llama:sampler-free=) or add to a chain (extracting the pointer first; the chain takes ownership). Signals =grammar-error= if the grammar is empty or invalid.
 
-- =make-grammar-sampler-lazy model grammar &key root trigger-words= --- Create a lazy grammar sampler that stays inactive until a trigger word appears in the output. =trigger-words= is a list of strings (e.g. ='("{")=).
+- =make-grammar-sampler-lazy model grammar &key root trigger-words= --- Create a lazy grammar sampler that stays inactive until a trigger word appears in the output. =trigger-words= is a list of strings (e.g. ='("{")=). Returns a =llama-sampler= handle.
 
-- =make-infill-sampler model= --- Create an infill sampler for fill-in-the-middle generation.
+- =make-infill-sampler model= --- Create an infill sampler for fill-in-the-middle generation. Returns a =llama-sampler= handle.
 
 - =with-grammar-sampler (var model grammar &key root) &body body= --- Create a grammar sampler, bind to =var=, free on exit.
 
@@ -387,6 +399,27 @@ All conditions inherit from =llama-error=.
 The =%llama= package is a *supported, first-class escape hatch*. It exposes the complete public C API of llama.cpp and the bundled ggml and gguf libraries as CFFI bindings --- 881 functions, 38 enums, and 59 structs auto-generated from the upstream headers via [[https://github.com/borodust/claw][CLAW]]. If a high-level wrapper doesn't exist yet for something llama.cpp can do, drop down to =%llama:= and call the C function directly. A missing wrapper is never a blocker.
 
 The high-level =cl-llama-cpp= API is an ergonomic convenience layer built on top of =%llama=. Both layers are equally supported; =%llama= is not an implementation detail.
+
+**** Extracting Raw Pointers from Handles
+
+The high-level macros bind *typed handles* (=llama-model=, =llama-context=, =llama-sampler=), not raw CFFI pointers. When you need to call a =%llama:= function directly, extract the raw pointer first:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf")
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+    (cl-llama-cpp:with-llama-compatible-fp-environment ()
+      (let ((ctx-ptr (cl-llama-cpp:llama-context-pointer ctx))
+            (model-ptr (cl-llama-cpp:llama-model-pointer model)))
+        ;; ctx-ptr / model-ptr are raw CFFI :pointer values for %llama: calls
+        (%llama:decode ctx-ptr batch)))))
+#+end_src
+
+The accessors are:
+- =llama-model-pointer model= → raw =%llama:model= pointer
+- =llama-context-pointer ctx= → raw =%llama:context= pointer
+- =llama-sampler-pointer sampler= → raw =%llama:sampler= pointer
+
+To test whether a variable holds the right kind of handle, use the predicates =llama-model-p=, =llama-context-p=, =llama-sampler-p= (replacing =cffi:null-pointer-p= on the old raw-pointer API).
 
 **** Naming Conventions
 

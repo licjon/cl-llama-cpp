@@ -10,7 +10,8 @@
        (ensure-backend)
        (with-llama-compatible-fp-environment
          (let* ((,path-val ,path)
-                (,adapter-ptr (%llama:adapter-lora-init ,model ,path-val)))
+                (,adapter-ptr (%llama:adapter-lora-init
+                               (llama-model-pointer ,model) ,path-val)))
            (when (cffi:null-pointer-p ,adapter-ptr)
              (error 'lora-load-error :path ,path-val))
            (let ((,var ,adapter-ptr))
@@ -31,7 +32,7 @@ Returns NIL on success, signals LORA-APPLY-ERROR on failure."
                                   (scales-buf :float 1))
         (setf (cffi:mem-aref adapters-buf :pointer 0) adapter)
         (setf (cffi:mem-aref scales-buf :float 0) scale-f)
-        (let ((rc (%llama:set-adapters-lora ctx adapters-buf 1 scales-buf)))
+        (let ((rc (%llama:set-adapters-lora (llama-context-pointer ctx) adapters-buf 1 scales-buf)))
           (unless (zerop rc)
             (error 'lora-apply-error :code rc))
           nil)))))

@@ -6,8 +6,8 @@ If NAME is given, look up a specific named template."
   (with-llama-compatible-fp-environment
     (let ((res-ptr (if name
                        (cffi:with-foreign-string (name-ptr name)
-                         (%llama:model-chat-template model name-ptr))
-                       (%llama:model-chat-template model (cffi:null-pointer)))))
+                         (%llama:model-chat-template (llama-model-pointer model) name-ptr))
+                       (%llama:model-chat-template (llama-model-pointer model) (cffi:null-pointer)))))
       (unless (cffi:null-pointer-p res-ptr)
         (cffi:foreign-string-to-lisp res-ptr)))))
 
@@ -69,7 +69,7 @@ on subsequent turns. Returns a token vector suitable for GENERATE's :prompt-toke
   (let* ((formatted (format-chat model messages
                       :template template
                       :add-assistant-prefix add-assistant-prefix))
-         (vocab (%llama:model-get-vocab model))
+         (vocab (%llama:model-get-vocab (llama-model-pointer model)))
          (bos (%llama:token-bos vocab))
          (all-tokens (make-array 0 :element-type 'fixnum
                                    :adjustable t :fill-pointer 0))

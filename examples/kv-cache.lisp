@@ -42,7 +42,8 @@ START-POS. Uses batch-init to target a specific sequence, since the
 simpler batch-get-one always targets seq 0.
 Returns the number of tokens decoded."
   (let* ((tokens (tokenize model text :add-special nil))
-         (n (length tokens)))
+         (n (length tokens))
+         (ctx-ptr (llama-context-pointer ctx)))
     (with-llama-compatible-fp-environment
       ;; batch-init allocates arrays for n tokens, 0 embedding dims, 1 seq per token
       (let ((batch (%llama:batch-init n 0 1)))
@@ -68,7 +69,7 @@ Returns the number of tokens decoded."
                   ;; Request logits only for the last token
                   (setf (cffi:mem-aref logit-ptr :char i)
                         (if (= i (1- n)) 1 0))))
-              (let ((rc (%llama:decode ctx batch)))
+              (let ((rc (%llama:decode ctx-ptr batch)))
                 (assert (zerop rc) ()
                         "decode failed with code ~D for seq ~D" rc seq-id)))
           (%llama:batch-free batch))))
