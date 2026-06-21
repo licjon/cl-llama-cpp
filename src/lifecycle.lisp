@@ -171,7 +171,9 @@ control pre-creation resource validation."
            (let ((,var (%make-llama-context :pointer ,ctx-ptr)))
              (unwind-protect
                   (progn ,@body)
-               (%llama:free ,ctx-ptr))))))))
+               (%llama:free ,ctx-ptr)
+               (%with-abort-lock
+                 (remhash (cffi:pointer-address ,ctx-ptr) *abort-callbacks*)))))))))
 
 ;;; Context runtime configuration
 
@@ -212,16 +214,71 @@ context leaves internal C state inconsistent."
   (setf (llama-context-compute-pending-p ctx) nil)
   nil)
 
-(defun set-abort-callback (ctx callback &optional data)
-  "Register an abort callback on CTX. CALLBACK must be a foreign function
-pointer obtained via CFFI:CALLBACK, or NIL to clear the callback.
-DATA is an optional opaque data pointer passed to the callback."
-  (with-llama-compatible-fp-environment
-    (%llama:set-abort-callback
-     (llama-context-pointer ctx)
-     (or callback (cffi:null-pointer))
-     (or data (cffi:null-pointer))))
+;;; --- Abort-callback safe dispatcher -------------------------------------------
+
+#+sbcl
+(defvar *abort-callback-lock* (sb-thread:make-mutex :name "cl-llama-cpp-abort")
+  "Mutex protecting *ABORT-CALLBACKS*.")
+
+(defmacro %with-abort-lock (&body body)
+  #+sbcl `(sb-thread:with-mutex (*abort-callback-lock*) ,@body)
+  #-sbcl `(progn ,@body))
+
+(defvar *abort-callbacks* (make-hash-table)
+  "Maps ctx-pointer addresses (integers) to registered Lisp abort callbacks.")
+
+(defvar *last-abort-callback-error* nil
+  "The last error condition caught inside the abort-callback panic boundary, or NIL.")
+
+(defun %abort-error-to-safe-buffer (condition)
+  (setf *last-abort-callback-error* condition)
+  (ignore-errors
+    (format *debug-io* "~&[cl-llama-cpp] abort callback error: ~A~%" condition)))
+
+(cffi:defcallback %abort-dispatcher :bool ((data :pointer))
+  ;; Called from a ggml worker thread. Never unwind past this boundary.
+  ;; DATA is the ctx raw pointer, used as a key into *abort-callbacks*.
+  (let ((fn (%with-abort-lock
+              (gethash (cffi:pointer-address data) *abort-callbacks*))))
+    (when fn
+      (handler-bind ((error (lambda (c)
+                              (%abort-error-to-safe-buffer c)
+                              (return-from %abort-dispatcher nil))))
+        (not (null (funcall fn)))))))
+
+(defun set-abort-callback (ctx fn)
+  "Register FN as the abort callback on CTX. FN is a Lisp function of no
+arguments that returns T to abort generation or NIL to continue.
+Pass NIL to clear a previously registered callback.
+
+Thread-safety contract: FN runs on a ggml worker thread. Dynamic bindings
+established on the calling thread are NOT visible inside FN. Do the bare
+minimum — read an atomic flag, etc. — and use a thread-safe primitive to
+communicate results back to the main thread. Never signal Lisp conditions
+or do heavy work inside FN.
+
+Errors inside FN are caught, stored in *LAST-ABORT-CALLBACK-ERROR*, and
+generation continues (returns NIL); they never propagate across the FFI
+boundary."
+  (check-type fn (or null function))
+  (let* ((ptr (llama-context-pointer ctx))
+         (key (cffi:pointer-address ptr)))
+    (%with-abort-lock
+      (if fn
+          (setf (gethash key *abort-callbacks*) fn)
+          (remhash key *abort-callbacks*)))
+    (with-llama-compatible-fp-environment
+      (%llama:set-abort-callback
+       ptr
+       (if fn (cffi:callback %abort-dispatcher) (cffi:null-pointer))
+       (if fn ptr (cffi:null-pointer)))))
   nil)
+
+(defun get-abort-callback (ctx)
+  "Return the Lisp abort callback registered on CTX, or NIL if none is set.
+Thread-safe."
+  (%with-abort-lock
+    (gethash (cffi:pointer-address (llama-context-pointer ctx)) *abort-callbacks*)))
 
 ;;; Threadpool management
 

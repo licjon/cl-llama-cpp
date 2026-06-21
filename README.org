@@ -124,7 +124,7 @@ incremental decoding that reuses the KV cache.
 
 ** API Reference
 
-*Nullability convention:* Every high-level wrapper translates between Lisp =NIL= and C null pointers automatically. Pass =NIL= for optional pointer arguments (e.g. =set-abort-callback= callback, =attach-threadpool= batch threadpool); receive =NIL= for nullable returns (e.g. =model-chat-template= when no template exists). Allocation failures (null pointer from =llama_model_load_from_file=, etc.) signal a condition rather than returning =NIL=. Users never need to call =cffi:null-pointer= or =cffi:null-pointer-p=.
+*Nullability convention:* Every high-level wrapper translates between Lisp =NIL= and C null pointers automatically. Pass =NIL= for optional pointer arguments (e.g. =set-abort-callback= fn, =attach-threadpool= batch threadpool); receive =NIL= for nullable returns (e.g. =model-chat-template= when no template exists). Allocation failures (null pointer from =llama_model_load_from_file=, etc.) signal a condition rather than returning =NIL=. Users never need to call =cffi:null-pointer= or =cffi:null-pointer-p=.
 
 *Boolean convention:* Parameters that are semantically boolean in the C API (=:embeddings=, =:vocab-only=, =:offload-kqv=, =:no-perf=, etc.) accept both idiomatic Lisp booleans (=T= / =NIL=) and raw C integers (=1= / =0=). Integers pass through unchanged for backward compatibility; =T= becomes =1= and =NIL= becomes =0=. Other types signal a =type-error=. This applies to all =:char=-typed boolean fields in =llama_model_params= and =llama_context_params= when passed as keyword overrides to =with-model= and =with-context=.
 
@@ -169,7 +169,11 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =synchronize ctx= --- Block until all pending async compute on =ctx= is complete. High-level accessors (e.g. =embed=) call this automatically before reading results; use it explicitly in batched pipelines that need finer-grained control over when the barrier occurs.
 
-- =set-abort-callback ctx callback &optional data= --- Register a foreign function as an abort callback on =ctx=. =callback= must be a foreign pointer obtained from =cffi:callback=, or =nil= to clear the callback. =data= is an optional opaque pointer passed through to each callback invocation. The callback is invoked from ggml worker threads, so it must only touch foreign memory --- CL dynamic bindings are not visible there. Returns non-zero from the callback to abort the current =llama-decode= call.
+- =set-abort-callback ctx fn= --- Register a Lisp function as the abort callback on =ctx=. =fn= is called with no arguments and should return =T= to abort the current decode or =NIL= to continue. Pass =NIL= to clear a previously registered callback. The callback runs on a ggml worker thread: lexical variables captured in a closure are visible there, but Lisp dynamic (special) bindings established on other threads are not. Errors in =fn= are caught, stored in =*last-abort-callback-error*=, and generation continues (callback returns =NIL=); they never propagate across the FFI boundary. Returns =NIL=.
+
+- =get-abort-callback ctx= --- Return the Lisp abort callback registered on =ctx=, or =NIL= if none is set. Thread-safe.
+
+- =*last-abort-callback-error*= --- The last error condition caught inside the abort-callback panic boundary, or =NIL=.
 
 - =attach-threadpool ctx threadpool &optional threadpool-batch= --- Attach an external =ggml-threadpool= to =ctx=. =threadpool-batch= optionally specifies a separate threadpool for batch operations; when omitted =threadpool= is used for both. The caller retains ownership; =detach-threadpool= does not free it.
 
@@ -870,29 +874,21 @@ This example uses =sb-thread= directly; adapt =make-thread= / =join-thread= to b
       (cl-llama-cpp:set-n-threads ctx 4 4)
 
       ;; Time-limited generation via abort callback.
-      ;; The callback must only touch foreign memory — CL dynamic
-      ;; bindings are not visible from ggml worker threads.
-      (cffi:defcallback my-abort :bool ((flag :pointer))
-        (not (zerop (cffi:mem-ref flag :uint8))))
-
-      (let ((abort-flag (cffi:foreign-alloc :uint8 :initial-element 0)))
-        (unwind-protect
-            (progn
-              (cl-llama-cpp:set-abort-callback
-               ctx (cffi:callback my-abort) abort-flag)
-              ;; Arm via a timer; cancel it if generate returns early.
-              (let ((timer (sb-ext:make-timer
-                             (lambda ()
-                               (setf (cffi:mem-ref abort-flag :uint8) 1)))))
-                (sb-ext:schedule-timer timer 2.0)
-                (unwind-protect
-                    (handler-case
-                        (cl-llama-cpp:generate ctx "Count from one:"
-                                               :max-tokens 512 :temp 0.1)
-                      (cl-llama-cpp:decode-error () "aborted"))
-                  (sb-ext:unschedule-timer timer)))
-              (cl-llama-cpp:set-abort-callback ctx nil))
-          (cffi:foreign-free abort-flag))))))
+      ;; Pass a plain Lisp function — no CFFI needed.
+      ;; Lexical variables captured by a closure ARE visible from ggml
+      ;; worker threads; Lisp dynamic bindings are NOT.
+      (let ((abort-flag nil))
+        (cl-llama-cpp:set-abort-callback ctx (lambda () abort-flag))
+        ;; Arm via a timer; cancel it if generate returns early.
+        (let ((timer (sb-ext:make-timer (lambda () (setf abort-flag t)))))
+          (sb-ext:schedule-timer timer 2.0)
+          (unwind-protect
+              (handler-case
+                  (cl-llama-cpp:generate ctx "Count from one:"
+                                         :max-tokens 512 :temp 0.1)
+                (cl-llama-cpp:decode-error () "aborted"))
+            (sb-ext:unschedule-timer timer)))
+        (cl-llama-cpp:set-abort-callback ctx nil)))))
 #+end_src
 
 See =examples/backend-lifecycle.lisp= for a full walkthrough covering thread tuning, mode toggles, synchronize, and time-limited generation.
