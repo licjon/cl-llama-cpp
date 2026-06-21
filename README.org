@@ -167,7 +167,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =set-embeddings ctx embeddings-p= --- Set the embedding-output flag on =ctx=. Must match the mode the context was created with: enable only on contexts created with =:embeddings= non-nil, disable only on contexts created without it.
 
-- =synchronize ctx= --- Block until all pending async compute on =ctx= is complete. Call before reading logits or embeddings after non-blocking work.
+- =synchronize ctx= --- Block until all pending async compute on =ctx= is complete. High-level accessors (e.g. =embed=) call this automatically before reading results; use it explicitly in batched pipelines that need finer-grained control over when the barrier occurs.
 
 - =set-abort-callback ctx callback &optional data= --- Register a foreign function as an abort callback on =ctx=. =callback= must be a foreign pointer obtained from =cffi:callback=, or =nil= to clear the callback. =data= is an optional opaque pointer passed through to each callback invocation. The callback is invoked from ggml worker threads, so it must only touch foreign memory --- CL dynamic bindings are not visible there. Returns non-zero from the callback to abort the current =llama-decode= call.
 
@@ -185,7 +185,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
-- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings t= (or =1=).
+- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings t= (or =1=). Automatically synchronizes pending async compute before reading from the GPU to ensure correct results.
 
 *** Chat Templates
 
