@@ -36,42 +36,19 @@ ws      ::= [ ]*")
   (format t "  ~A~%" title)
   (format t "~A~2%" (make-string 64 :initial-element #\═)))
 
-(defun sample-loop (ctx sampler-ptr model prompt &key (max-tokens 128))
-  "Decode PROMPT into CTX, then sample up to MAX-TOKENS using SAMPLER-PTR
-(a raw %llama sampler pointer), streaming each token to stdout.
-CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
-  (with-llama-compatible-fp-environment
-    (let* ((ctx-ptr (llama-context-pointer ctx))
-           (model-ptr (llama-model-pointer model))
-           (vocab (%llama:model-get-vocab model-ptr))
-           (tokens (tokenize model prompt :parse-special t))
-           (n (length tokens))
-           (generated (make-array 0 :element-type 'fixnum
-                                    :adjustable t :fill-pointer 0))
-           (emitted-len 0))
-      (clear-kv-cache ctx)
-      (with-batch (batch n)
-        (batch-add-sequence batch tokens 0 :logits :last)
-        (batch-decode ctx batch))
-      ;; sampler-sample calls sampler-accept internally — do NOT accept again
-      (loop for i from 0 below max-tokens
-            for tok = (%llama:sampler-sample sampler-ptr ctx-ptr -1)
-            until (not (zerop (%llama:token-is-eog vocab tok)))
-            do (vector-push-extend tok generated)
-               (ignore-errors
-                 (let* ((full (detokenize model generated :remove-special t))
-                        (new-text (subseq full emitted-len)))
-                   (when (plusp (length new-text))
-                     (write-string new-text)
-                     (force-output)
-                     (setf emitted-len (length full)))))
-               (with-batch (b 1)
-                 (batch-add-token b tok (+ n i) 0 :logits t)
-                 (batch-decode ctx b)))
-      (terpri)
-      (if (zerop (length generated))
-          ""
-          (detokenize model generated :remove-special t)))))
+(defun stream-generate (ctx prompt &key sampler (max-tokens 128))
+  "Call GENERATE with SAMPLER and a streaming token-callback, printing each
+token to stdout as it arrives.  Returns the generated text."
+  (multiple-value-bind (text stop-reason)
+      (generate ctx prompt
+                :max-tokens max-tokens
+                :sampler sampler
+                :token-callback (lambda (tok)
+                                  (write-string tok)
+                                  (force-output)
+                                  t))
+    (terpri)
+    (values text stop-reason)))
 
 ;;; ── Demo 1: Strict grammar ─────────────────────────────────────────
 
@@ -99,17 +76,18 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
   ;; 1b — Lower-level: make-grammar-sampler + manual chain
   (format t "── 1b: make-grammar-sampler + manual chain ──~2%")
   (format t "with-sampler-chain (no keyword args) allocates an empty chain.~%")
-  (format t "sampler-chain-add accepts typed handles or raw %llama pointers.~%")
-  (format t "The chain takes ownership — freeing the chain frees all its samplers.~2%")
+  (format t "sampler-chain-add accepts any typed LLAMA-SAMPLER handle.~%")
+  (format t "make-temp-sampler / make-dist-sampler return typed handles.~%")
+  (format t "The chain takes ownership — freeing the chain frees all its samplers.~%")
+  (format t "generate :sampler borrows the chain without freeing it.~2%")
   (format t "Prompt: \"Output a JSON object describing a dog.\"~2%")
   (let ((gs (make-grammar-sampler model *json-grammar*)))
     (with-sampler-chain (chain)
-      (sampler-chain-add chain gs)                             ; typed handle
-      (sampler-chain-add chain (%llama:sampler-init-temp 0.3)) ; raw pointer
-      (sampler-chain-add chain (%llama:sampler-init-dist 42))
-      (sample-loop ctx (llama-sampler-pointer chain) model
-                   "Output a JSON object describing a dog."
-                   :max-tokens 128)))
+      (sampler-chain-add chain gs)
+      (sampler-chain-add chain (make-temp-sampler 0.3))
+      (sampler-chain-add chain (make-dist-sampler 42))
+      (stream-generate ctx "Output a JSON object describing a dog."
+                       :sampler chain :max-tokens 128)))
 
   ;; 1c — with-grammar-sampler resource macro
   (format t "~%── 1c: with-grammar-sampler (resource macro) ──~2%")
@@ -140,9 +118,8 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
                              :grammar-lazy t
                              :grammar-trigger-words '("{")
                              :temp 0.3)
-    (sample-loop ctx (llama-sampler-pointer chain) model
-                 "Describe a dog in one sentence, then output traits as JSON:"
-                 :max-tokens 256))
+    (stream-generate ctx "Describe a dog in one sentence, then output traits as JSON:"
+                     :sampler chain :max-tokens 256))
   (format t "~%The grammar activated when \"{\" appeared, ensuring valid JSON.~%"))
 
 ;;; ── Demo 3: Error handling ─────────────────────────────────────────
@@ -168,9 +145,8 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
   (handler-case
       (let ((sampler (make-grammar-sampler model "%%%not-valid-gbnf%%%")))
         (format t "  C library accepted the string (returned non-null sampler).~%")
-        (format t "  Freeing sampler.~2%")
-        (with-llama-compatible-fp-environment
-          (%llama:sampler-free (llama-sampler-pointer sampler))))
+        (format t "  Freeing sampler with free-sampler.~2%")
+        (free-sampler sampler))
     (grammar-error (c)
       (format t "  Caught: ~A~2%" c)))
 

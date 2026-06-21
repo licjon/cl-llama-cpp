@@ -219,6 +219,84 @@ samplers."
   (with-llama-compatible-fp-environment
     (%llama:sampler-get-seed (llama-sampler-pointer sampler))))
 
+;;; Individual sampler constructors
+;;; Each returns a LLAMA-SAMPLER handle. The caller owns it and must either
+;;; free it with FREE-SAMPLER or add it to a chain (which then owns it).
+
+(defun make-greedy-sampler ()
+  "Create a greedy sampler that always picks the highest-probability token."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-greedy))))
+
+(defun make-dist-sampler (&optional (seed 42))
+  "Create a distribution sampler (random sampling weighted by probabilities).
+SEED is a uint32 random seed."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-dist seed))))
+
+(defun make-top-k-sampler (k)
+  "Create a top-k sampler restricting candidates to the K highest-probability tokens."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-top-k k))))
+
+(defun make-top-p-sampler (p &optional (min-keep 1))
+  "Create a top-p (nucleus) sampler keeping tokens until cumulative probability >= P."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-top-p (coerce p 'single-float) min-keep))))
+
+(defun make-min-p-sampler (p &optional (min-keep 1))
+  "Create a min-p sampler removing tokens with probability < P * max-prob."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-min-p (coerce p 'single-float) min-keep))))
+
+(defun make-typical-sampler (p &optional (min-keep 1))
+  "Create a locally typical sampler with probability mass P."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-typical (coerce p 'single-float) min-keep))))
+
+(defun make-temp-sampler (temp)
+  "Create a temperature sampler scaling logits by TEMP before softmax."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-temp (coerce temp 'single-float)))))
+
+(defun make-temp-ext-sampler (temp delta &optional (exponent 1.0))
+  "Create an extended temperature sampler with dynamic temperature range.
+TEMP is the base temperature, DELTA the range, EXPONENT the curve shape."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-temp-ext
+                                   (coerce temp 'single-float)
+                                   (coerce delta 'single-float)
+                                   (coerce exponent 'single-float)))))
+
+(defun make-xtc-sampler (probability threshold &optional (min-keep 1) (seed 42))
+  "Create an XTC sampler that trims high-probability tokens exceeding THRESHOLD.
+PROBABILITY is the chance of applying XTC per sampling step."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-xtc
+                                   (coerce probability 'single-float)
+                                   (coerce threshold 'single-float)
+                                   min-keep seed))))
+
+(defun make-top-n-sigma-sampler (sigma)
+  "Create a top-n-sigma sampler keeping tokens within SIGMA standard deviations of the max logit."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-top-n-sigma (coerce sigma 'single-float)))))
+
+(defun make-mirostat-v2-sampler (seed tau eta)
+  "Create a Mirostat v2 sampler targeting perplexity TAU with learning rate ETA."
+  (with-llama-compatible-fp-environment
+    (%make-llama-sampler :pointer (%llama:sampler-init-mirostat-v2
+                                   seed
+                                   (coerce tau 'single-float)
+                                   (coerce eta 'single-float)))))
+
+(defun free-sampler (sampler)
+  "Free a LLAMA-SAMPLER handle created by any MAKE-*-SAMPLER function.
+Do not call on samplers that have been added to a chain — the chain owns those."
+  (with-llama-compatible-fp-environment
+    (%llama:sampler-free (llama-sampler-pointer sampler)))
+  nil)
+
 (defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
                                   (parse-special t) prompt-tokens
@@ -237,13 +315,18 @@ samplers."
                                   dry-seq-breakers
                                   logit-bias
                                   dynamic-temp-range (dynamic-temp-exponent 1.0)
-                                  adaptive-p (adaptive-p-decay 0.0))
+                                  adaptive-p (adaptive-p-decay 0.0)
+                                  sampler)
   "Generate text by continuing PROMPT. Returns two values: the generated string
 and a stop reason (:eog, :length, or :callback).
 Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
 Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD,
 :MIROSTAT, :MIROSTAT-V2, :REPEAT-PENALTY, :FREQUENCY-PENALTY, :PRESENCE-PENALTY,
-:DRY-MULTIPLIER, :LOGIT-BIAS, :TOP-N-SIGMA, :DYNAMIC-TEMP-RANGE, :ADAPTIVE-P, etc."
+:DRY-MULTIPLIER, :LOGIT-BIAS, :TOP-N-SIGMA, :DYNAMIC-TEMP-RANGE, :ADAPTIVE-P, etc.
+
+When :SAMPLER is provided (a LLAMA-SAMPLER handle, typically from WITH-SAMPLER-CHAIN),
+GENERATE borrows the chain and does not free it — the caller owns the lifetime.
+All other sampler-related keywords are ignored when :SAMPLER is supplied."
   (with-llama-compatible-fp-environment
     (let* ((ctx-ptr (llama-context-pointer ctx))
            (raw-model (%llama:get-model ctx-ptr))
@@ -263,38 +346,48 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                (rc (%llama:decode ctx-ptr batch)))
           (unless (zerop rc)
             (error 'decode-error :code rc))))
+      ;; Warn if caller supplied a chain but also passed sampler-building kwargs
+      (when (and sampler
+                 (or grammar top-k top-p min-p typical-p xtc-probability
+                     dry-multiplier logit-bias mirostat mirostat-v2
+                     repeat-penalty frequency-penalty presence-penalty
+                     adaptive-p dynamic-temp-range top-n-sigma))
+        (warn "~@<When :SAMPLER is provided, other sampler keywords ~
+(:GRAMMAR, :TOP-K, :TEMP, etc.) are ignored.~@:>"))
       ;; Generation loop
-      (let ((sampler (build-sampler-chain
-                      :temp temp :top-k top-k :top-p top-p
-                      :min-p min-p :seed seed
-                      :model model :grammar grammar
-                      :grammar-root grammar-root
-                      :typical-p typical-p
-                      :xtc-probability xtc-probability
-                      :xtc-threshold xtc-threshold
-                      :top-n-sigma top-n-sigma
-                      :mirostat mirostat :mirostat-v2 mirostat-v2
-                      :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
-                      :repeat-penalty repeat-penalty
-                      :frequency-penalty frequency-penalty
-                      :presence-penalty presence-penalty
-                      :penalty-last-n penalty-last-n
-                      :dry-multiplier dry-multiplier :dry-base dry-base
-                      :dry-allowed-length dry-allowed-length
-                      :dry-penalty-last-n dry-penalty-last-n
-                      :dry-seq-breakers dry-seq-breakers
-                      :logit-bias logit-bias
-                      :dynamic-temp-range dynamic-temp-range
-                      :dynamic-temp-exponent dynamic-temp-exponent
-                      :adaptive-p adaptive-p
-                      :adaptive-p-decay adaptive-p-decay))
+      (let ((chain-ptr (if sampler
+                           (llama-sampler-pointer sampler)
+                           (build-sampler-chain
+                            :temp temp :top-k top-k :top-p top-p
+                            :min-p min-p :seed seed
+                            :model model :grammar grammar
+                            :grammar-root grammar-root
+                            :typical-p typical-p
+                            :xtc-probability xtc-probability
+                            :xtc-threshold xtc-threshold
+                            :top-n-sigma top-n-sigma
+                            :mirostat mirostat :mirostat-v2 mirostat-v2
+                            :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
+                            :repeat-penalty repeat-penalty
+                            :frequency-penalty frequency-penalty
+                            :presence-penalty presence-penalty
+                            :penalty-last-n penalty-last-n
+                            :dry-multiplier dry-multiplier :dry-base dry-base
+                            :dry-allowed-length dry-allowed-length
+                            :dry-penalty-last-n dry-penalty-last-n
+                            :dry-seq-breakers dry-seq-breakers
+                            :logit-bias logit-bias
+                            :dynamic-temp-range dynamic-temp-range
+                            :dynamic-temp-exponent dynamic-temp-exponent
+                            :adaptive-p adaptive-p
+                            :adaptive-p-decay adaptive-p-decay)))
             (emitted-len 0)
             (stop-reason nil))
         (unwind-protect
             ;; sampler-sample already calls sampler-accept internally — do NOT
             ;; call sampler-accept again or the grammar FSM double-advances.
             (loop for i from 0 below max-tokens
-                  for new-token = (%llama:sampler-sample sampler ctx-ptr -1)
+                  for new-token = (%llama:sampler-sample chain-ptr ctx-ptr -1)
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
@@ -325,7 +418,8 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                               (rc (%llama:decode ctx-ptr batch)))
                          (unless (zerop rc)
                            (error 'decode-error :code rc)))))
-          (%llama:sampler-free sampler))
+          (unless sampler
+            (%llama:sampler-free chain-ptr)))
       ;; Convert generated tokens to string
       (let ((text (if (zerop (length generated))
                       ""

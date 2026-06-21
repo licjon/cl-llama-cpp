@@ -381,6 +381,44 @@
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
 
+;;; Individual sampler constructor / free-sampler tests (issue #65)
+
+(deftest sampler-constructors-exported
+  (testing "individual sampler constructors are exported from cl-llama-cpp"
+    (dolist (sym '(make-greedy-sampler
+                   make-dist-sampler
+                   make-top-k-sampler
+                   make-top-p-sampler
+                   make-min-p-sampler
+                   make-typical-sampler
+                   make-temp-sampler
+                   make-temp-ext-sampler
+                   make-xtc-sampler
+                   make-top-n-sigma-sampler
+                   make-mirostat-v2-sampler
+                   free-sampler))
+      (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible in cl-llama-cpp" sym))
+        (ok (eq status :external) (format nil "~A is exported" sym))))))
+
+(deftest sampler-constructors-fbound
+  (testing "individual sampler constructors are fbound"
+    (dolist (name '("MAKE-GREEDY-SAMPLER"
+                    "MAKE-DIST-SAMPLER"
+                    "MAKE-TOP-K-SAMPLER"
+                    "MAKE-TOP-P-SAMPLER"
+                    "MAKE-MIN-P-SAMPLER"
+                    "MAKE-TYPICAL-SAMPLER"
+                    "MAKE-TEMP-SAMPLER"
+                    "MAKE-TEMP-EXT-SAMPLER"
+                    "MAKE-XTC-SAMPLER"
+                    "MAKE-TOP-N-SIGMA-SAMPLER"
+                    "MAKE-MIROSTAT-V2-SAMPLER"
+                    "FREE-SAMPLER"))
+      (let ((sym (find-symbol name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" name))))))
+
 ;;; Batch API wrapper tests
 
 (deftest batch-symbols-exported

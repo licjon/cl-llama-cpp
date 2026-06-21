@@ -646,6 +646,185 @@ ws     ::= [ \\t\\n]*")
           (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer chain)))
               "chain pointer is non-null"))))))
 
+;;; Individual sampler constructors / free-sampler (issue #65)
+
+(deftest make-greedy-sampler-creates-handle
+  (testing "make-greedy-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-greedy-sampler)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s)
+                 "greedy sampler is a llama-sampler handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-temp-sampler-creates-handle
+  (testing "make-temp-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-temp-sampler 0.7)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s)
+                 "temp sampler is a llama-sampler handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-dist-sampler-creates-handle
+  (testing "make-dist-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-dist-sampler 99)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s)
+                 "dist sampler is a llama-sampler handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-top-k-sampler-creates-handle
+  (testing "make-top-k-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-top-k-sampler 40)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "top-k sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-top-p-sampler-creates-handle
+  (testing "make-top-p-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-top-p-sampler 0.9)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "top-p sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-min-p-sampler-creates-handle
+  (testing "make-min-p-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-min-p-sampler 0.05)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "min-p sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-typical-sampler-creates-handle
+  (testing "make-typical-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-typical-sampler 0.9)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "typical sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-temp-ext-sampler-creates-handle
+  (testing "make-temp-ext-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-temp-ext-sampler 0.7 0.1)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "temp-ext sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-xtc-sampler-creates-handle
+  (testing "make-xtc-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-xtc-sampler 0.1 0.3)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "xtc sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-top-n-sigma-sampler-creates-handle
+  (testing "make-top-n-sigma-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-top-n-sigma-sampler 2.0)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "top-n-sigma sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest make-mirostat-v2-sampler-creates-handle
+  (testing "make-mirostat-v2-sampler returns a typed llama-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-mirostat-v2-sampler 42 5.0 0.1)))
+        (unwind-protect
+             (ok (cl-llama-cpp:llama-sampler-p s) "mirostat-v2 sampler is a handle")
+          (cl-llama-cpp:free-sampler s))))))
+
+(deftest free-sampler-returns-nil
+  (testing "free-sampler returns NIL"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((s (cl-llama-cpp:make-greedy-sampler)))
+        (ok (null (cl-llama-cpp:free-sampler s))
+            "free-sampler returns NIL")))))
+
+(deftest sampler-chain-add-accepts-make-temp-sampler
+  (testing "sampler-chain-add accepts a make-temp-sampler handle"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-sampler-chain (chain)
+        (ok (null (cl-llama-cpp:sampler-chain-add
+                   chain (cl-llama-cpp:make-temp-sampler 0.5)))
+            "sampler-chain-add returns NIL for make-temp-sampler handle")))))
+
+(deftest generate-with-sampler-keyword
+  (when-model-available
+    (testing "generate accepts a :sampler chain and produces text"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-sampler-chain (chain :temp 0.1 :seed 42)
+            (multiple-value-bind (text stop-reason)
+                (cl-llama-cpp:generate ctx "The sky is"
+                                       :max-tokens 8
+                                       :sampler chain)
+              (ok (stringp text)
+                  (format nil "generated with :sampler chain: ~S" text))
+              (ok (member stop-reason '(:eog :length))
+                  (format nil "stop reason is valid: ~A" stop-reason)))))))))
+
+(deftest generate-with-sampler-manual-chain
+  (when-model-available
+    (testing "generate with manual chain of make-temp + make-dist samplers"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-sampler-chain (chain)
+            (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-temp-sampler 0.1))
+            (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-dist-sampler 42))
+            (multiple-value-bind (text stop-reason)
+                (cl-llama-cpp:generate ctx "One plus one equals"
+                                       :max-tokens 4
+                                       :sampler chain)
+              (ok (stringp text)
+                  (format nil "generated with manual chain: ~S" text))
+              (ok (member stop-reason '(:eog :length))
+                  "stop reason is valid"))))))))
+
+(deftest generate-sampler-not-freed-by-generate
+  (when-model-available
+    (testing "generate with :sampler does not free the chain (can reuse)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-sampler-chain (chain :temp 0.1 :seed 1)
+            (cl-llama-cpp:generate ctx "Hello" :max-tokens 4 :sampler chain)
+            ;; Chain still valid — a second call must not crash
+            (ok (stringp (cl-llama-cpp:generate ctx "World" :max-tokens 4 :sampler chain))
+                "chain is still usable after first generate call")))))))
+
+(deftest generate-sampler-with-conflicting-kwarg-warns
+  (when-model-available
+    (testing "generate with :sampler + :grammar issues a warning"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (cl-llama-cpp:with-sampler-chain (chain :temp 0.1)
+            (let ((warned nil))
+              (handler-bind ((warning (lambda (w)
+                                        (setf warned t)
+                                        (muffle-warning w))))
+                (cl-llama-cpp:generate ctx "Test" :max-tokens 2
+                                       :sampler chain
+                                       :grammar "root ::= [a-z]+"))
+              (ok warned "warning was issued for :sampler + :grammar"))))))))
+
 ;;; Session state save/load integration tests
 
 (deftest save-session-creates-file
