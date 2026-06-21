@@ -31,11 +31,12 @@ chain is replaced with the mirostat sampler."
     (error ":DRY-MULTIPLIER requires :MODEL"))
   (when (and logit-bias (not model))
     (error ":LOGIT-BIAS requires :MODEL"))
-  (let ((chain (%llama:sampler-chain-init
-                (%llama:sampler-chain-default-params))))
+  (let* ((model-ptr (when model (llama-model-pointer model)))
+         (chain (%llama:sampler-chain-init
+                 (%llama:sampler-chain-default-params))))
     ;; 1. Logit bias (modifies logits first)
     (when logit-bias
-      (let* ((vocab (%llama:model-get-vocab model))
+      (let* ((vocab (%llama:model-get-vocab model-ptr))
              (n-vocab (%llama:vocab-n-tokens vocab))
              (n-bias (length logit-bias)))
         (cffi:with-foreign-object (bias-buf '(:struct %llama:logit-bias) n-bias)
@@ -58,8 +59,8 @@ chain is replaced with the mirostat sampler."
               (coerce (or presence-penalty 0.0) 'single-float))))
     ;; 3. DRY anti-repetition
     (when dry-multiplier
-      (let* ((vocab (%llama:model-get-vocab model))
-             (n-ctx-train (%llama:model-n-ctx-train model))
+      (let* ((vocab (%llama:model-get-vocab model-ptr))
+             (n-ctx-train (%llama:model-n-ctx-train model-ptr))
              (n-breakers (length dry-seq-breakers))
              (foreign-strings nil))
         (unwind-protect
@@ -83,23 +84,24 @@ chain is replaced with the mirostat sampler."
     (when grammar
       (unless model (error ":GRAMMAR requires :MODEL"))
       (%llama:sampler-chain-add
-       chain (if grammar-lazy
-                 (make-grammar-sampler-lazy model grammar
-                   :root grammar-root
-                   :trigger-words grammar-trigger-words
-                   :trigger-patterns grammar-trigger-patterns
-                   :trigger-tokens grammar-trigger-tokens)
-                 (make-grammar-sampler model grammar :root grammar-root))))
+       chain (llama-sampler-pointer
+              (if grammar-lazy
+                  (make-grammar-sampler-lazy model grammar
+                    :root grammar-root
+                    :trigger-words grammar-trigger-words
+                    :trigger-patterns grammar-trigger-patterns
+                    :trigger-tokens grammar-trigger-tokens)
+                  (make-grammar-sampler model grammar :root grammar-root)))))
     (when infill
       (unless model (error ":INFILL requires :MODEL"))
-      (%llama:sampler-chain-add chain (make-infill-sampler model)))
+      (%llama:sampler-chain-add chain (llama-sampler-pointer (make-infill-sampler model))))
     ;; 5. Sampling strategy
     (cond
       (greedy
        (%llama:sampler-chain-add chain (%llama:sampler-init-greedy)))
       ((or mirostat mirostat-v2)
        (if mirostat
-           (let* ((vocab (%llama:model-get-vocab model))
+           (let* ((vocab (%llama:model-get-vocab model-ptr))
                   (n-vocab (%llama:vocab-n-tokens vocab)))
              (%llama:sampler-chain-add
               chain (%llama:sampler-init-mirostat
@@ -184,7 +186,7 @@ chain is replaced with the mirostat sampler."
     `(with-llama-compatible-fp-environment
        (let ((,chain (build-sampler-chain ,@args)))
          (unwind-protect
-              (let ((,var ,chain))
+              (let ((,var (%make-llama-sampler :pointer ,chain)))
                 ,@body)
            (%llama:sampler-free ,chain))))))
 
@@ -193,7 +195,7 @@ chain is replaced with the mirostat sampler."
 (defun sampler-seed (sampler)
   "Return the current RNG seed from SAMPLER as an integer."
   (with-llama-compatible-fp-environment
-    (%llama:sampler-get-seed sampler)))
+    (%llama:sampler-get-seed (llama-sampler-pointer sampler))))
 
 (defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
@@ -221,20 +223,22 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
 :MIROSTAT, :MIROSTAT-V2, :REPEAT-PENALTY, :FREQUENCY-PENALTY, :PRESENCE-PENALTY,
 :DRY-MULTIPLIER, :LOGIT-BIAS, :TOP-N-SIGMA, :DYNAMIC-TEMP-RANGE, :ADAPTIVE-P, etc."
   (with-llama-compatible-fp-environment
-    (let* ((model (%llama:get-model ctx))
-           (vocab (%llama:model-get-vocab model))
+    (let* ((ctx-ptr (llama-context-pointer ctx))
+           (raw-model (%llama:get-model ctx-ptr))
+           (model (%make-llama-model :pointer raw-model))
+           (vocab (%llama:model-get-vocab raw-model))
            (prompt-tokens (or prompt-tokens
                               (tokenize model prompt :parse-special parse-special)))
            (n-prompt (length prompt-tokens))
            (generated (make-array 0 :element-type 'fixnum
                                     :adjustable t :fill-pointer 0)))
-      (%llama:memory-clear (%llama:get-memory ctx) 1)
+      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       ;; Decode the prompt
       (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
         (dotimes (i n-prompt)
           (setf (cffi:mem-aref tok-buf '%llama:token i) (aref prompt-tokens i)))
         (let* ((batch (%llama:batch-get-one tok-buf n-prompt))
-               (rc (%llama:decode ctx batch)))
+               (rc (%llama:decode ctx-ptr batch)))
           (unless (zerop rc)
             (error 'decode-error :code rc))))
       ;; Generation loop
@@ -268,7 +272,7 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
             ;; sampler-sample already calls sampler-accept internally — do NOT
             ;; call sampler-accept again or the grammar FSM double-advances.
             (loop for i from 0 below max-tokens
-                  for new-token = (%llama:sampler-sample sampler ctx -1)
+                  for new-token = (%llama:sampler-sample sampler ctx-ptr -1)
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
@@ -296,7 +300,7 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
                      (cffi:with-foreign-object (tok-buf '%llama:token 1)
                        (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
                        (let* ((batch (%llama:batch-get-one tok-buf 1))
-                              (rc (%llama:decode ctx batch)))
+                              (rc (%llama:decode ctx-ptr batch)))
                          (unless (zerop rc)
                            (error 'decode-error :code rc)))))
           (%llama:sampler-free sampler))
@@ -317,20 +321,25 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
 The context must have been created with :embeddings 1.
 When NORMALIZE is true (default), L2-normalizes the result."
   (with-llama-compatible-fp-environment
-    (let* ((model (%llama:get-model ctx))
+    (let* ((ctx-ptr (llama-context-pointer ctx))
+           (raw-model (%llama:get-model ctx-ptr))
+           (model (%make-llama-model :pointer raw-model))
            (tokens (tokenize model text))
            (n-tokens (length tokens))
-           (n-embd (%llama:model-n-embd model)))
+           (n-embd (%llama:model-n-embd raw-model)))
+      ;; Check embeddings configured before calling C encode (would crash if not)
+      (when (eq (%llama:pooling-type ctx-ptr) :none)
+        (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
       ;; Build batch and encode
       (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
         (dotimes (i n-tokens)
           (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
         (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
-               (rc (%llama:encode ctx batch)))
+               (rc (%llama:encode ctx-ptr batch)))
           (unless (zerop rc)
             (error 'decode-error :code rc))))
       ;; Read embeddings (null-pointer → error per NIL↔null convention)
-      (let* ((embd-ptr (%llama:get-embeddings-ith ctx 0)))
+      (let* ((embd-ptr (%llama:get-embeddings-ith ctx-ptr 0)))
         (when (cffi:null-pointer-p embd-ptr)
           (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
         (let ((result (make-array n-embd :element-type 'single-float)))

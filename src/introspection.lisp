@@ -4,16 +4,17 @@
 
 (defun read-model-buffer-string (model reader-fn &rest extra-args)
   "Read a buffer-probe string from MODEL using READER-FN.
-READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
-  (let ((buf-size 256))
+READER-FN is called as (apply reader-fn model-ptr ...extra-args buf buf-size)."
+  (let ((model-ptr (llama-model-pointer model))
+        (buf-size 256))
     (cffi:with-foreign-pointer (buf buf-size)
-      (let ((n (apply reader-fn model (append extra-args (list buf buf-size)))))
+      (let ((n (apply reader-fn model-ptr (append extra-args (list buf buf-size)))))
         (when (< n 0)
           (return-from read-model-buffer-string nil))
         (when (>= n buf-size)
           (let ((retry-size (1+ n)))
             (cffi:with-foreign-pointer (buf2 retry-size)
-              (let ((n2 (apply reader-fn model (append extra-args (list buf2 retry-size)))))
+              (let ((n2 (apply reader-fn model-ptr (append extra-args (list buf2 retry-size)))))
                 (return-from read-model-buffer-string
                   (cffi:foreign-string-to-lisp buf2 :count (max 0 n2)))))))
         (cffi:foreign-string-to-lisp buf :count n)))))
@@ -26,7 +27,7 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 (defun model-metadata (model)
   "Return all metadata from MODEL as an alist of (key . value) string pairs."
   (with-llama-compatible-fp-environment
-    (let ((count (%llama:model-meta-count model)))
+    (let ((count (%llama:model-meta-count (llama-model-pointer model))))
       (loop for i from 0 below count
             collect (cons
                      (read-model-buffer-string
@@ -37,39 +38,41 @@ READER-FN is called as (apply reader-fn model ...extra-args buf buf-size)."
 (defun model-info (model)
   "Return a plist of MODEL's numeric and boolean properties."
   (with-llama-compatible-fp-environment
-    (list :n-params (%llama:model-n-params model)
-          :n-layers (%llama:model-n-layer model)
-          :n-ctx-train (%llama:model-n-ctx-train model)
-          :size-bytes (%llama:model-size model)
-          :n-heads (%llama:model-n-head model)
-          :n-heads-kv (%llama:model-n-head-kv model)
-          :n-embd-in (%llama:model-n-embd-inp model)
-          :n-embd-out (%llama:model-n-embd-out model)
-          :n-swa (%llama:model-n-swa model)
-          :rope-type (%llama:model-rope-type model)
-          :rope-freq-scale (%llama:model-rope-freq-scale-train model)
-          :n-cls-out (%llama:model-n-cls-out model)
-          :encoder-p (not (zerop (%llama:model-has-encoder model)))
-          :decoder-p (not (zerop (%llama:model-has-decoder model)))
-          :recurrent-p (not (zerop (%llama:model-is-recurrent model)))
-          :hybrid-p (not (zerop (%llama:model-is-hybrid model)))
-          :diffusion-p (not (zerop (%llama:model-is-diffusion model))))))
+    (let ((ptr (llama-model-pointer model)))
+      (list :n-params (%llama:model-n-params ptr)
+            :n-layers (%llama:model-n-layer ptr)
+            :n-ctx-train (%llama:model-n-ctx-train ptr)
+            :size-bytes (%llama:model-size ptr)
+            :n-heads (%llama:model-n-head ptr)
+            :n-heads-kv (%llama:model-n-head-kv ptr)
+            :n-embd-in (%llama:model-n-embd-inp ptr)
+            :n-embd-out (%llama:model-n-embd-out ptr)
+            :n-swa (%llama:model-n-swa ptr)
+            :rope-type (%llama:model-rope-type ptr)
+            :rope-freq-scale (%llama:model-rope-freq-scale-train ptr)
+            :n-cls-out (%llama:model-n-cls-out ptr)
+            :encoder-p (not (zerop (%llama:model-has-encoder ptr)))
+            :decoder-p (not (zerop (%llama:model-has-decoder ptr)))
+            :recurrent-p (not (zerop (%llama:model-is-recurrent ptr)))
+            :hybrid-p (not (zerop (%llama:model-is-hybrid ptr)))
+            :diffusion-p (not (zerop (%llama:model-is-diffusion ptr)))))))
 
 (defun model-cls-label (model index)
   "Return the classification label string at INDEX, or NIL if unavailable."
   (with-llama-compatible-fp-environment
-    (%llama:model-cls-label model index)))
+    (%llama:model-cls-label (llama-model-pointer model) index)))
 
 (defun context-info (ctx)
   "Return a plist of CTX's configuration properties."
   (with-llama-compatible-fp-environment
-    (list :n-ctx (%llama:n-ctx ctx)
-          :n-batch (%llama:n-batch ctx)
-          :n-ubatch (%llama:n-ubatch ctx)
-          :n-seq-max (%llama:n-seq-max ctx)
-          :n-threads (%llama:n-threads ctx)
-          :n-threads-batch (%llama:n-threads-batch ctx)
-          :pooling-type (%llama:pooling-type ctx))))
+    (let ((ptr (llama-context-pointer ctx)))
+      (list :n-ctx (%llama:n-ctx ptr)
+            :n-batch (%llama:n-batch ptr)
+            :n-ubatch (%llama:n-ubatch ptr)
+            :n-seq-max (%llama:n-seq-max ptr)
+            :n-threads (%llama:n-threads ptr)
+            :n-threads-batch (%llama:n-threads-batch ptr)
+            :pooling-type (%llama:pooling-type ptr)))))
 
 (defun system-info ()
   "Return a string describing the llama.cpp build and system capabilities."
@@ -99,7 +102,7 @@ Keys: :MMAP :MLOCK :GPU-OFFLOAD :RPC :MAX-DEVICES"
   "Return performance data for CTX as a plist.
 Keys: :T-START-MS :T-LOAD-MS :T-P-EVAL-MS :T-EVAL-MS :N-P-EVAL :N-EVAL :N-REUSED"
   (with-llama-compatible-fp-environment
-    (let ((data (%llama:perf-context ctx)))
+    (let ((data (%llama:perf-context (llama-context-pointer ctx))))
       (list :t-start-ms  (getf data '%llama::t-start-ms)
             :t-load-ms   (getf data '%llama::t-load-ms)
             :t-p-eval-ms (getf data '%llama::t-p-eval-ms)
@@ -111,33 +114,33 @@ Keys: :T-START-MS :T-LOAD-MS :T-P-EVAL-MS :T-EVAL-MS :N-P-EVAL :N-EVAL :N-REUSED
 (defun print-context-perf (ctx)
   "Print context performance statistics for CTX to stderr."
   (with-llama-compatible-fp-environment
-    (%llama:perf-context-print ctx))
+    (%llama:perf-context-print (llama-context-pointer ctx)))
   nil)
 
 (defun reset-context-perf (ctx)
   "Reset context performance counters for CTX."
   (with-llama-compatible-fp-environment
-    (%llama:perf-context-reset ctx))
+    (%llama:perf-context-reset (llama-context-pointer ctx)))
   nil)
 
 (defun sampler-perf (chain)
   "Return performance data for sampler CHAIN as a plist.
 Keys: :T-SAMPLE-MS :N-SAMPLE"
   (with-llama-compatible-fp-environment
-    (let ((data (%llama:perf-sampler chain)))
+    (let ((data (%llama:perf-sampler (llama-sampler-pointer chain))))
       (list :t-sample-ms (getf data '%llama::t-sample-ms)
             :n-sample    (getf data '%llama::n-sample)))))
 
 (defun print-sampler-perf (chain)
   "Print sampler performance statistics for CHAIN to stderr."
   (with-llama-compatible-fp-environment
-    (%llama:perf-sampler-print chain))
+    (%llama:perf-sampler-print (llama-sampler-pointer chain)))
   nil)
 
 (defun reset-sampler-perf (chain)
   "Reset sampler performance counters for CHAIN."
   (with-llama-compatible-fp-environment
-    (%llama:perf-sampler-reset chain))
+    (%llama:perf-sampler-reset (llama-sampler-pointer chain)))
   nil)
 
 (defun print-perf (ctx)

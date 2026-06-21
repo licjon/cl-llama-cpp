@@ -4,17 +4,17 @@
 
 (defun make-grammar-sampler (model grammar &key (root "root"))
   "Create a grammar sampler from a GBNF grammar string and root rule.
-Returns a sampler pointer. Caller must free with %llama:sampler-free,
-or add to a sampler chain (which frees it automatically)."
+Returns a LLAMA-SAMPLER handle. Caller must free with
+(%llama:sampler-free (llama-sampler-pointer s)), or add to a sampler chain."
   (check-type grammar string)
   (when (zerop (length grammar))
     (error 'grammar-error :grammar grammar))
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (sampler (%llama:sampler-init-grammar vocab grammar root)))
       (when (cffi:null-pointer-p sampler)
         (error 'grammar-error :grammar grammar))
-      sampler)))
+      (%make-llama-sampler :pointer sampler))))
 
 (defun make-grammar-sampler-lazy (model grammar &key (root "root")
                                                       trigger-words
@@ -24,14 +24,15 @@ or add to a sampler chain (which frees it automatically)."
 When TRIGGER-PATTERNS is provided, uses pattern matching; otherwise uses
 TRIGGER-WORDS for exact word matching. TRIGGER-TOKENS are token IDs that
 also trigger grammar activation.
-Returns a sampler pointer. Caller must free with %llama:sampler-free."
+Returns a LLAMA-SAMPLER handle. Caller must free with
+(%llama:sampler-free (llama-sampler-pointer s))."
   (check-type grammar string)
   (when (zerop (length grammar))
     (error 'grammar-error :grammar grammar))
   (when (and trigger-words trigger-patterns)
     (error "Cannot specify both :TRIGGER-WORDS and :TRIGGER-PATTERNS"))
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (use-patterns-p (not (null trigger-patterns)))
            (strings (if use-patterns-p trigger-patterns (or trigger-words nil)))
            (n-strings (length strings))
@@ -60,19 +61,20 @@ Returns a sampler pointer. Caller must free with %llama:sampler-free."
                                  str-ptr n-strings tok-ptr n-tokens))))
               (when (cffi:null-pointer-p sampler)
                 (error 'grammar-error :grammar grammar))
-              sampler))
+              (%make-llama-sampler :pointer sampler)))
         (dolist (ptr foreign-strings)
           (cffi:foreign-string-free ptr))))))
 
 (defun make-infill-sampler (model)
   "Create a fill-in-the-middle sampler for FIM-capable models.
-Returns a sampler pointer. Caller must free with %llama:sampler-free."
+Returns a LLAMA-SAMPLER handle. Caller must free with
+(%llama:sampler-free (llama-sampler-pointer s))."
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (sampler (%llama:sampler-init-infill vocab)))
       (when (cffi:null-pointer-p sampler)
         (error 'grammar-error :grammar "<infill>"))
-      sampler)))
+      (%make-llama-sampler :pointer sampler))))
 
 (defmacro with-grammar-sampler ((var model grammar &key (root "root") lazy
                                                          trigger-words
@@ -94,4 +96,4 @@ When LAZY is true, creates a lazy grammar sampler with optional trigger args."
          (unwind-protect
               (let ((,var ,sampler-ptr))
                 ,@body)
-           (%llama:sampler-free ,sampler-ptr))))))
+           (%llama:sampler-free (llama-sampler-pointer ,sampler-ptr)))))))

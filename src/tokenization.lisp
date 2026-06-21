@@ -3,7 +3,7 @@
 (defun tokenize (model text &key (add-special t) (parse-special nil))
   "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers."
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (text-len (length text))
            (add-sp (if add-special 1 0))
            (parse-sp (if parse-special 1 0))
@@ -28,7 +28,7 @@
 (defun detokenize (model tokens &key (remove-special nil) (unparse-special t))
   "Detokenize a vector of TOKENS using MODEL's vocabulary. Returns a string."
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (n-tokens (length tokens))
            (remove-sp (if remove-special 1 0))
            (unparse-sp (if unparse-special 1 0)))

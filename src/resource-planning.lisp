@@ -51,16 +51,17 @@ Returns a plist with :MODEL-SIZE, :KV-CACHE, :COMPUTE, and :TOTAL (all in bytes)
 N-CTX defaults to the model's training context length.
 TYPE-K and TYPE-V default to :F16."
   (with-llama-compatible-fp-environment
-    (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
+    (let* ((ptr (llama-model-pointer model))
+           (n-ctx (or n-ctx (%llama:model-n-ctx-train ptr)))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
-           (n-layers (%llama:model-n-layer model))
-           (n-embd (%llama:model-n-embd model))
+           (n-layers (%llama:model-n-layer ptr))
+           (n-embd (%llama:model-n-embd ptr))
            ;; n-head/n-head-kv abort in C when n_layer_all == 0 (vocab-only models)
-           (n-heads (if (zerop n-layers) 0 (%llama:model-n-head model)))
-           (n-kv-heads (if (zerop n-layers) 0 (%llama:model-n-head-kv model)))
+           (n-heads (if (zerop n-layers) 0 (%llama:model-n-head ptr)))
+           (n-kv-heads (if (zerop n-layers) 0 (%llama:model-n-head-kv ptr)))
            (head-dim (if (zerop n-heads) 0 (/ n-embd n-heads)))
-           (model-size (%llama:model-size model))
+           (model-size (%llama:model-size ptr))
            (k-bytes (* n-ctx n-layers n-kv-heads head-dim
                        (ggml-type-bytes type-k)))
            (v-bytes (* n-ctx n-layers n-kv-heads head-dim
@@ -77,7 +78,7 @@ TYPE-K and TYPE-V default to :F16."
   "Print a human-readable memory breakdown for MODEL with the given parameters.
 Returns NIL."
   (with-llama-compatible-fp-environment
-    (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
+    (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train (llama-model-pointer model))))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
            (estimate (estimate-memory model :n-ctx n-ctx
@@ -110,7 +111,7 @@ against VRAM-BUDGET."
         (list :status :unknown
               :reason "No VRAM budget supplied; cannot determine feasibility.")
         (with-llama-compatible-fp-environment
-          (let* ((n-layers (%llama:model-n-layer model))
+          (let* ((n-layers (%llama:model-n-layer (llama-model-pointer model)))
                  (gpu-layers (if n-gpu-layers
                                  (min n-gpu-layers n-layers)
                                  n-layers))
@@ -134,7 +135,7 @@ against VRAM-BUDGET."
   "Print a feasibility report for MODEL with the given parameters.
 Returns a plist with the memory estimate and validation status."
   (with-llama-compatible-fp-environment
-    (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
+    (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train (llama-model-pointer model))))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
            (estimate (estimate-memory model :n-ctx n-ctx
@@ -166,8 +167,9 @@ Reduces N-GPU-LAYERS first, then halves N-CTX until the estimate fits."
   (unless vram-budget
     (return-from suggest-configuration nil))
   (with-llama-compatible-fp-environment
-    (let* ((n-layers (%llama:model-n-layer model))
-           (n-ctx (or n-ctx (%llama:model-n-ctx-train model)))
+    (let* ((ptr (llama-model-pointer model))
+           (n-layers (%llama:model-n-layer ptr))
+           (n-ctx (or n-ctx (%llama:model-n-ctx-train ptr)))
            (n-gpu-layers (if n-gpu-layers (min n-gpu-layers n-layers) n-layers)))
       (labels ((fits-p (ctx gpu-layers)
                  (let ((v (validate-configuration model :n-ctx ctx
