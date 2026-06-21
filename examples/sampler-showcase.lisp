@@ -36,24 +36,27 @@ ws      ::= [ ]*")
   (format t "  ~A~%" title)
   (format t "~A~2%" (make-string 64 :initial-element #\═)))
 
-(defun sample-loop (ctx sampler model prompt &key (max-tokens 128))
-  "Decode PROMPT into CTX, then sample up to MAX-TOKENS using SAMPLER,
-streaming each token to stdout.  Returns the generated text."
+(defun sample-loop (ctx sampler-ptr model prompt &key (max-tokens 128))
+  "Decode PROMPT into CTX, then sample up to MAX-TOKENS using SAMPLER-PTR
+(a raw %llama sampler pointer), streaming each token to stdout.
+CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
   (with-llama-compatible-fp-environment
-    (let* ((vocab (%llama:model-get-vocab model))
+    (let* ((ctx-ptr (llama-context-pointer ctx))
+           (model-ptr (llama-model-pointer model))
+           (vocab (%llama:model-get-vocab model-ptr))
            (tokens (tokenize model prompt :parse-special t))
            (n (length tokens))
            (generated (make-array 0 :element-type 'fixnum
                                     :adjustable t :fill-pointer 0))
            (emitted-len 0))
-      (%llama:memory-clear (%llama:get-memory ctx) 1)
+      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       (cffi:with-foreign-object (buf '%llama:token n)
         (dotimes (i n)
           (setf (cffi:mem-aref buf '%llama:token i) (aref tokens i)))
-        (%llama:decode ctx (%llama:batch-get-one buf n)))
+        (%llama:decode ctx-ptr (%llama:batch-get-one buf n)))
       ;; sampler-sample calls sampler-accept internally — do NOT accept again
       (loop for i from 0 below max-tokens
-            for tok = (%llama:sampler-sample sampler ctx -1)
+            for tok = (%llama:sampler-sample sampler-ptr ctx-ptr -1)
             until (not (zerop (%llama:token-is-eog vocab tok)))
             do (vector-push-extend tok generated)
                (ignore-errors
@@ -65,7 +68,7 @@ streaming each token to stdout.  Returns the generated text."
                      (setf emitted-len (length full)))))
                (cffi:with-foreign-object (buf '%llama:token 1)
                  (setf (cffi:mem-aref buf '%llama:token 0) tok)
-                 (%llama:decode ctx (%llama:batch-get-one buf 1))))
+                 (%llama:decode ctx-ptr (%llama:batch-get-one buf 1))))
       (terpri)
       (if (zerop (length generated))
           ""
@@ -104,7 +107,9 @@ streaming each token to stdout.  Returns the generated text."
     (let* ((gs (make-grammar-sampler model *json-grammar*))
            (chain (%llama:sampler-chain-init
                    (%llama:sampler-chain-default-params))))
-      (%llama:sampler-chain-add chain gs)
+      ;; make-grammar-sampler returns a typed handle; extract raw pointer
+      ;; before adding to chain (chain takes ownership of the C sampler)
+      (%llama:sampler-chain-add chain (llama-sampler-pointer gs))
       (%llama:sampler-chain-add chain (%llama:sampler-init-temp 0.3))
       (%llama:sampler-chain-add chain (%llama:sampler-init-dist 42))
       (unwind-protect
@@ -118,8 +123,8 @@ streaming each token to stdout.  Returns the generated text."
   (format t "with-grammar-sampler creates a sampler and frees it on scope~%")
   (format t "exit — useful for inspection or single-sampler workflows.~2%")
   (with-grammar-sampler (gs model *json-grammar*)
-    (format t "  Sampler pointer: ~A~%" gs)
-    (format t "  Non-null:        ~A~%" (not (cffi:null-pointer-p gs))))
+    (format t "  Sampler handle:  ~A~%" gs)
+    (format t "  Valid handle:    ~A~%" (llama-sampler-p gs)))
   (format t "  Sampler automatically freed on scope exit.~%"))
 
 ;;; ── Demo 2: Lazy grammar ───────────────────────────────────────────
@@ -142,7 +147,7 @@ streaming each token to stdout.  Returns the generated text."
                              :grammar-lazy t
                              :grammar-trigger-words '("{")
                              :temp 0.3)
-    (sample-loop ctx chain model
+    (sample-loop ctx (llama-sampler-pointer chain) model
                  "Describe a dog in one sentence, then output traits as JSON:"
                  :max-tokens 256))
   (format t "~%The grammar activated when \"{\" appeared, ensuring valid JSON.~%"))
@@ -168,7 +173,8 @@ streaming each token to stdout.  Returns the generated text."
       (let ((sampler (make-grammar-sampler model "%%%not-valid-gbnf%%%")))
         (format t "  C library accepted the string (returned non-null sampler).~%")
         (format t "  Freeing sampler.~2%")
-        (with-llama-compatible-fp-environment (%llama:sampler-free sampler)))
+        (with-llama-compatible-fp-environment
+          (%llama:sampler-free (llama-sampler-pointer sampler))))
     (grammar-error (c)
       (format t "  Caught: ~A~2%" c)))
 

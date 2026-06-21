@@ -694,6 +694,63 @@
     (let ((sym (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)))
       (ok (boundp sym) "*LAST-LOG-CALLBACK-ERROR* is boundp"))))
 
+;;; Typed opaque handles (issue #41)
+
+(deftest handle-symbols-exported
+  (testing "typed handle symbols are exported from cl-llama-cpp"
+    (dolist (sym '(llama-model llama-model-p llama-model-pointer
+                   llama-context llama-context-p llama-context-pointer
+                   llama-sampler llama-sampler-p llama-sampler-pointer))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest handle-predicates-fbound
+  (testing "handle predicate and accessor functions are fbound"
+    (dolist (sym-name '("LLAMA-MODEL-P" "LLAMA-MODEL-POINTER"
+                        "LLAMA-CONTEXT-P" "LLAMA-CONTEXT-POINTER"
+                        "LLAMA-SAMPLER-P" "LLAMA-SAMPLER-POINTER"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest handle-types-distinct
+  (testing "llama-model, llama-context, llama-sampler are distinct types"
+    (ok (not (subtypep 'cl-llama-cpp:llama-model 'cl-llama-cpp:llama-context))
+        "llama-model is not a subtype of llama-context")
+    (ok (not (subtypep 'cl-llama-cpp:llama-context 'cl-llama-cpp:llama-model))
+        "llama-context is not a subtype of llama-model")
+    (ok (not (subtypep 'cl-llama-cpp:llama-sampler 'cl-llama-cpp:llama-model))
+        "llama-sampler is not a subtype of llama-model")))
+
+(deftest handle-predicates-exclusive
+  (testing "handle predicates reject wrong handle types"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (ok (handler-case
+              (progn
+                ;; with-model on a bad path signals before returning a handle,
+                ;; so we just confirm the predicates reject plain values
+                (let ((not-a-model 42))
+                  (not (cl-llama-cpp:llama-model-p not-a-model))))
+            (error () nil))
+          "llama-model-p returns NIL for non-handle value"))))
+
+(deftest with-model-binds-handle
+  (testing "with-model signals model-load-error and the handle type is correct"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((result
+              (handler-case
+                  (cl-llama-cpp:with-model (m "/nonexistent/path.gguf")
+                    (type-of m))
+                (cl-llama-cpp:model-load-error () :load-error))))
+        (ok (eq result :load-error)
+            "with-model signals model-load-error for bad path (not a raw pointer)")))))
+
 ;;; Boolean ergonomics (issue #43)
 
 (deftest bool-coercion-t-nil

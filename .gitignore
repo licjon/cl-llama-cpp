@@ -8,6 +8,5 @@
 *~
 .#*
 llama.cpp/build/
-examples/my-chat.lisp
-/examples/my-lora.lisp
+examples/my-*.lisp
 my-build-system.org

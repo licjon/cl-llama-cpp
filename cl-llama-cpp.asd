@@ -12,6 +12,7 @@
                  (:file "library")
                  (:file "bindings")
                  (:file "conditions")
+                 (:file "handles")
                  (:file "binding-deps")
 		 (:file "introspection")
 		 (:file "tokenization")

@@ -144,7 +144,7 @@ Signals BATCH-OVERFLOW-ERROR if BATCH would exceed capacity."
   "Decode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
   (with-llama-compatible-fp-environment
-    (let ((rc (%llama:decode ctx (%batch-data batch))))
+    (let ((rc (%llama:decode (llama-context-pointer ctx) (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
       nil)))
@@ -153,7 +153,7 @@ Signals DECODE-ERROR on failure. Returns NIL on success."
   "Encode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
   (with-llama-compatible-fp-environment
-    (let ((rc (%llama:encode ctx (%batch-data batch))))
+    (let ((rc (%llama:encode (llama-context-pointer ctx) (%batch-data batch))))
       (unless (zerop rc)
         (error 'decode-error :code rc))
       nil)))
@@ -186,8 +186,10 @@ reasons (:eog or :length) corresponding to each prompt."
   (when (endp prompts)
     (return-from generate-parallel (values nil nil)))
   (with-llama-compatible-fp-environment
-    (let* ((model (%llama:get-model ctx))
-           (vocab (%llama:model-get-vocab model))
+    (let* ((ctx-ptr (llama-context-pointer ctx))
+           (raw-model (%llama:get-model ctx-ptr))
+           (model (%make-llama-model :pointer raw-model))
+           (vocab (%llama:model-get-vocab raw-model))
            (n-seq (length prompts))
            (token-vecs (mapcar (lambda (p)
                                  (etypecase p
@@ -203,7 +205,7 @@ reasons (:eog or :length) corresponding to each prompt."
            (positions (mapcar #'length token-vecs))
            (active (make-list n-seq :initial-element t))
            (samplers '()))
-      (%llama:memory-clear (%llama:get-memory ctx) 1)
+      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       (unwind-protect
            (progn
              (dotimes (seq n-seq)
@@ -251,7 +253,7 @@ reasons (:eog or :length) corresponding to each prompt."
                                  for idx in logit-indices
                                  collect (when (nth seq active)
                                            (%llama:sampler-sample
-                                            smpl ctx idx)))))
+                                            smpl ctx-ptr idx)))))
                      (loop for tok in new-tokens
                            for seq from 0
                            when (and tok (nth seq active))
