@@ -39,6 +39,10 @@ New wrappers must follow this convention.")
    #:gguf-load-error
    #:gguf-load-error-path
    ;; Resource management
+   #:make-model
+   #:free-model
+   #:make-context
+   #:free-context
    #:with-model
    #:with-context
    #:with-sampler-chain

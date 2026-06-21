@@ -126,54 +126,122 @@ to 0/1."
                            val)))))
     result))
 
+;;; --- GC finalizer support (trivial-garbage) ---------------------------------
+
+(defun %try-claim-for-free (cell)
+  "Atomically transition (car CELL) from NIL to T. Returns T if this call won."
+  #+sbcl (null (sb-ext:cas (car cell) nil t))
+  #-sbcl (prog1 (null (car cell))
+           (setf (car cell) t)))
+
+(defun %register-model-finalizer (model)
+  (let ((ptr (llama-model-pointer model))
+        (cell (llama-model-freed-cell model)))
+    (tg:finalize model
+      (lambda ()
+        (when (and (%try-claim-for-free cell)
+                   *backend-initialized*)
+          (ignore-errors
+            (with-llama-compatible-fp-environment
+              (%llama:model-free ptr))))))))
+
+(defun %register-context-finalizer (ctx)
+  (let ((ptr (llama-context-pointer ctx))
+        (cell (llama-context-freed-cell ctx))
+        (addr (cffi:pointer-address (llama-context-pointer ctx))))
+    (tg:finalize ctx
+      (lambda ()
+        (when (and (%try-claim-for-free cell)
+                   *backend-initialized*)
+          (ignore-errors
+            (with-llama-compatible-fp-environment
+              (%llama:free ptr))
+            (%with-abort-lock
+              (remhash addr *abort-callbacks*))))))))
+
+;;; --- Standalone model/context constructors & destructors --------------------
+
+(defun make-model (path &rest params)
+  "Load a model from PATH, return a LLAMA-MODEL handle with a GC finalizer.
+PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 99).
+The caller owns the handle and must eventually call FREE-MODEL, or let the GC
+collect it (the finalizer frees the foreign memory as a safety net)."
+  (ensure-backend)
+  (with-llama-compatible-fp-environment
+    (let* ((defaults (%llama:model-default-params))
+           (model-params (override-params defaults params))
+           (ptr (%llama:model-load-from-file path model-params)))
+      (when (cffi:null-pointer-p ptr)
+        (error 'model-load-error :path path))
+      (let ((handle (%make-llama-model :pointer ptr)))
+        (%register-model-finalizer handle)
+        handle))))
+
+(defun free-model (model)
+  "Free the foreign memory held by MODEL and cancel its GC finalizer.
+Idempotent — calling on an already-freed model is a no-op. Returns NIL."
+  (when (%try-claim-for-free (llama-model-freed-cell model))
+    (tg:cancel-finalization model)
+    (with-llama-compatible-fp-environment
+      (%llama:model-free (llama-model-pointer model))))
+  nil)
+
+(defun make-context (model &rest params)
+  "Create an inference context from MODEL, return a LLAMA-CONTEXT handle with
+a GC finalizer. PARAMS are keyword overrides for llama_context_default_params
+\(e.g. :n-ctx 2048). Additional keywords :VALIDATION (:off :warn :error) and
+:VRAM-BUDGET (bytes) control pre-creation resource validation.
+The caller owns the handle and must eventually call FREE-CONTEXT, or let the
+GC collect it."
+  (let* ((validation (getf params :validation))
+         (vram-budget (getf params :vram-budget))
+         (clean-params (loop for (k v) on params by #'cddr
+                             unless (member k '(:validation :vram-budget))
+                             collect k collect v)))
+    (with-llama-compatible-fp-environment
+      (let* ((defaults (%llama:context-default-params))
+             (ctx-params (override-params defaults clean-params)))
+        (when validation
+          (%validate-context-params model ctx-params validation vram-budget))
+        (let ((ptr (%llama:new-context-with-model
+                    (llama-model-pointer model) ctx-params)))
+          (when (cffi:null-pointer-p ptr)
+            (error 'context-creation-error))
+          (let ((handle (%make-llama-context :pointer ptr)))
+            (%register-context-finalizer handle)
+            handle))))))
+
+(defun free-context (ctx)
+  "Free the foreign memory held by CTX and cancel its GC finalizer.
+Cleans up any registered abort callback. Idempotent. Returns NIL."
+  (when (%try-claim-for-free (llama-context-freed-cell ctx))
+    (tg:cancel-finalization ctx)
+    (let ((ptr (llama-context-pointer ctx)))
+      (with-llama-compatible-fp-environment
+        (%llama:free ptr))
+      (%with-abort-lock
+        (remhash (cffi:pointer-address ptr) *abort-callbacks*))))
+  nil)
+
+;;; --- Scoped resource macros (now delegate to make/free) ---------------------
+
 (defmacro with-model ((var path &rest params) &body body)
   "Load a model from PATH, bind it to VAR as a LLAMA-MODEL handle, execute BODY, free the model.
 PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 99)."
-  (let ((model-ptr (gensym "MODEL"))
-        (path-val (gensym "PATH")))
-    `(progn
-       (ensure-backend)
-       (with-llama-compatible-fp-environment
-         (let* ((,path-val ,path)
-                (defaults (%llama:model-default-params))
-                (model-params (override-params defaults (list ,@params)))
-                (,model-ptr (%llama:model-load-from-file ,path-val model-params)))
-           (when (cffi:null-pointer-p ,model-ptr)
-             (error 'model-load-error :path ,path-val))
-           (let ((,var (%make-llama-model :pointer ,model-ptr)))
-             (unwind-protect
-                  (progn ,@body)
-               (%llama:model-free ,model-ptr))))))))
+  `(let ((,var (make-model ,path ,@params)))
+     (unwind-protect
+          (progn ,@body)
+       (free-model ,var))))
 
 (defmacro with-context ((var model &rest params) &body body)
   "Create an inference context from MODEL, bind to VAR as a LLAMA-CONTEXT handle, execute BODY, free context.
 PARAMS are keyword overrides for llama_context_default_params (e.g. :n-ctx 2048).
 Additional keywords :VALIDATION (:off :warn :error) and :VRAM-BUDGET (bytes)
 control pre-creation resource validation."
-  (let* ((validation-form (getf params :validation))
-         (vram-budget-form (getf params :vram-budget))
-         (clean-params (loop for (k v) on params by #'cddr
-                             unless (member k '(:validation :vram-budget))
-                             append (list k v)))
-         (ctx-ptr (gensym "CTX"))
-         (model-var (gensym "MODEL")))
-    `(with-llama-compatible-fp-environment
-       (let* ((,model-var ,model)
-              (defaults (%llama:context-default-params))
-              (ctx-params (override-params defaults (list ,@clean-params))))
-         ,@(when validation-form
-             `((%validate-context-params
-                ,model-var ctx-params ,validation-form ,vram-budget-form)))
-         (let ((,ctx-ptr (%llama:new-context-with-model
-                          (llama-model-pointer ,model-var) ctx-params)))
-           (when (cffi:null-pointer-p ,ctx-ptr)
-             (error 'context-creation-error))
-           (let ((,var (%make-llama-context :pointer ,ctx-ptr)))
-             (unwind-protect
-                  (progn ,@body)
-               (%llama:free ,ctx-ptr)
-               (%with-abort-lock
-                 (remhash (cffi:pointer-address ,ctx-ptr) *abort-callbacks*)))))))))
+  `(let ((,var (make-context ,model ,@params)))
+     (unwind-protect
+          (progn ,@body)
+       (free-context ,var))))
 
 ;;; Context runtime configuration
 

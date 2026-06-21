@@ -2539,3 +2539,130 @@ ws     ::= [ \\t\\n]*")
         (let ((name (cl-llama-cpp:gguf-type-name ty)))
           (ok (and (stringp name) (> (length name) 0))
               (format nil "gguf-type-name ~S => ~S" ty name)))))))
+
+;;; GC finalizer / standalone constructor integration tests (issue #46)
+
+(deftest make-model-creates-handle
+  (when-model-available
+    (testing "make-model returns a llama-model handle"
+      (let ((model (cl-llama-cpp:make-model *test-model-path* :n-gpu-layers 0)))
+        (unwind-protect
+             (progn
+               (ok (cl-llama-cpp:llama-model-p model)
+                   "make-model returned a llama-model handle")
+               (ok (cffi:pointerp (cl-llama-cpp:llama-model-pointer model))
+                   "handle contains a CFFI pointer")
+               (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-model-pointer model)))
+                   "handle pointer is non-null"))
+          (cl-llama-cpp:free-model model))))))
+
+(deftest free-model-returns-nil
+  (when-model-available
+    (testing "free-model returns NIL"
+      (let ((model (cl-llama-cpp:make-model *test-model-path* :n-gpu-layers 0)))
+        (ok (null (cl-llama-cpp:free-model model))
+            "free-model returned NIL")))))
+
+(deftest free-model-idempotent
+  (when-model-available
+    (testing "free-model is idempotent — second call is a no-op"
+      (let ((model (cl-llama-cpp:make-model *test-model-path* :n-gpu-layers 0)))
+        (cl-llama-cpp:free-model model)
+        (ok (null (cl-llama-cpp:free-model model))
+            "second free-model returned NIL without error")))))
+
+(deftest free-model-sets-freed-cell
+  (when-model-available
+    (testing "free-model sets the freed-cell flag"
+      (let ((model (cl-llama-cpp:make-model *test-model-path* :n-gpu-layers 0)))
+        (ok (null (car (cl-llama-cpp::llama-model-freed-cell model)))
+            "freed-cell is NIL before free")
+        (cl-llama-cpp:free-model model)
+        (ok (car (cl-llama-cpp::llama-model-freed-cell model))
+            "freed-cell is T after free")))))
+
+(deftest make-context-creates-handle
+  (when-model-available
+    (testing "make-context returns a llama-context handle"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((ctx (cl-llama-cpp:make-context model :n-ctx 512)))
+          (unwind-protect
+               (progn
+                 (ok (cl-llama-cpp:llama-context-p ctx)
+                     "make-context returned a llama-context handle")
+                 (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-context-pointer ctx)))
+                     "context pointer is non-null"))
+            (cl-llama-cpp:free-context ctx)))))))
+
+(deftest free-context-returns-nil
+  (when-model-available
+    (testing "free-context returns NIL"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((ctx (cl-llama-cpp:make-context model :n-ctx 512)))
+          (ok (null (cl-llama-cpp:free-context ctx))
+              "free-context returned NIL"))))))
+
+(deftest free-context-idempotent
+  (when-model-available
+    (testing "free-context is idempotent — second call is a no-op"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((ctx (cl-llama-cpp:make-context model :n-ctx 512)))
+          (cl-llama-cpp:free-context ctx)
+          (ok (null (cl-llama-cpp:free-context ctx))
+              "second free-context returned NIL without error"))))))
+
+(deftest free-context-sets-freed-cell
+  (when-model-available
+    (testing "free-context sets the freed-cell flag"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((ctx (cl-llama-cpp:make-context model :n-ctx 512)))
+          (ok (null (car (cl-llama-cpp::llama-context-freed-cell ctx)))
+              "freed-cell is NIL before free")
+          (cl-llama-cpp:free-context ctx)
+          (ok (car (cl-llama-cpp::llama-context-freed-cell ctx))
+              "freed-cell is T after free"))))))
+
+(deftest with-model-sets-freed-cell-on-exit
+  (when-model-available
+    (testing "with-model marks the handle freed on normal exit"
+      (let ((saved nil))
+        (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+          (setf saved model))
+        (ok (car (cl-llama-cpp::llama-model-freed-cell saved))
+            "freed-cell is T after with-model exits")))))
+
+(deftest with-context-sets-freed-cell-on-exit
+  (when-model-available
+    (testing "with-context marks the handle freed on normal exit"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let ((saved nil))
+          (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+            (setf saved ctx))
+          (ok (car (cl-llama-cpp::llama-context-freed-cell saved))
+              "freed-cell is T after with-context exits"))))))
+
+(deftest with-model-sets-freed-cell-on-error
+  (when-model-available
+    (testing "with-model marks the handle freed on non-local exit"
+      (let ((saved nil))
+        (ignore-errors
+          (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+            (setf saved model)
+            (error "deliberate error")))
+        (ok saved "handle was captured")
+        (ok (car (cl-llama-cpp::llama-model-freed-cell saved))
+            "freed-cell is T after non-local exit")))))
+
+(deftest make-model-then-generate
+  (when-model-available
+    (testing "make-model + make-context can generate text"
+      (let ((model (cl-llama-cpp:make-model *test-model-path* :n-gpu-layers 0)))
+        (unwind-protect
+             (let ((ctx (cl-llama-cpp:make-context model :n-ctx 512)))
+               (unwind-protect
+                    (let ((text (cl-llama-cpp:generate ctx "Hello" :max-tokens 4 :temp 0.1)))
+                      (ok (stringp text)
+                          (format nil "generated: ~S" text))
+                      (ok (> (length text) 0) "generated non-empty text"))
+                 (cl-llama-cpp:free-context ctx)))
+          (cl-llama-cpp:free-model model))))))
