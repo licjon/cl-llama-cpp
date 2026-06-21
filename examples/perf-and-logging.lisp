@@ -90,7 +90,7 @@
            (push (list level text) samples))))
 
       (format t "  Loading model with log capture active...~%")
-      (with-model (model *model-path* :n-gpu-layers 0)
+      (with-model (model *model-path*)
         (set-log-callback nil)   ; restore before any output
         (format t "  Log message counts during load:~%")
         (loop for (level count) on counts by #'cddr

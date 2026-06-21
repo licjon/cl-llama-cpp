@@ -378,3 +378,10 @@ Returns NIL if no GPU devices are registered."
   (let ((devices (gpu-devices)))
     (when devices
       (reduce #'+ devices :key (lambda (p) (getf p :memory-free))))))
+
+(defun detect-total-vram ()
+  "Return total VRAM capacity in bytes across all GPU and IGPU devices.
+Returns NIL if no GPU devices are registered."
+  (let ((devices (gpu-devices)))
+    (when devices
+      (reduce #'+ devices :key (lambda (p) (getf p :memory-total))))))

@@ -100,10 +100,12 @@ Returns NIL."
                                           n-gpu-layers vram-budget)
   "Validate whether a configuration is likely to succeed.
 Returns a plist (:STATUS :SAFE/:UNSAFE/:UNKNOWN :REASON string).
-Without VRAM-BUDGET, status is :UNKNOWN. When N-GPU-LAYERS is supplied,
+Without VRAM-BUDGET, free VRAM is auto-detected from the GPU; status is
+:UNKNOWN only when no GPU is present. When N-GPU-LAYERS is supplied,
 only the proportional GPU share of model weights plus KV cache is checked
 against VRAM-BUDGET."
-  (let* ((estimate (estimate-memory model :n-ctx n-ctx :type-k type-k :type-v type-v))
+  (let* ((vram-budget (or vram-budget (detect-free-vram)))
+         (estimate (estimate-memory model :n-ctx n-ctx :type-k type-k :type-v type-v))
          (model-size (getf estimate :model-size))
          (kv-cache (getf estimate :kv-cache))
          (compute (getf estimate :compute)))
@@ -133,21 +135,33 @@ against VRAM-BUDGET."
 (defun feasibility-report (model &key n-ctx type-k type-v n-gpu-layers vram-budget
                                       (stream *standard-output*))
   "Print a feasibility report for MODEL with the given parameters.
-Returns a plist with the memory estimate and validation status."
+Returns a plist with the memory estimate and validation status.
+When VRAM-BUDGET is omitted, free VRAM is auto-detected from the GPU and
+printed in the report header."
   (with-llama-compatible-fp-environment
     (let* ((n-ctx (or n-ctx (%llama:model-n-ctx-train (llama-model-pointer model))))
            (type-k (or type-k :f16))
            (type-v (or type-v :f16))
+           (auto-vram (unless vram-budget (detect-free-vram)))
+           (effective-budget (or vram-budget auto-vram))
            (estimate (estimate-memory model :n-ctx n-ctx
                                             :type-k type-k :type-v type-v))
            (validation (validate-configuration model :n-ctx n-ctx
                                                      :type-k type-k :type-v type-v
                                                      :n-gpu-layers n-gpu-layers
-                                                     :vram-budget vram-budget))
+                                                     :vram-budget effective-budget))
            (desc (read-model-buffer-string model #'%llama:model-desc))
            (status (getf validation :status))
            (reason (getf validation :reason)))
       (format stream "~&Model: ~A~%~%" desc)
+      (when auto-vram
+        (let* ((devs (gpu-devices))
+               (total (detect-total-vram))
+               (names (mapcar (lambda (p) (getf p :name)) devs)))
+          (format stream "Detected VRAM:    ~A free / ~A total (~{~A~^, ~})~%~%"
+                  (%format-bytes auto-vram)
+                  (%format-bytes total)
+                  names)))
       (format stream "Estimated Usage~%")
       (format stream "---------------~%")
       (format stream "Model Weights:    ~A~%" (%format-bytes (getf estimate :model-size)))
@@ -163,38 +177,42 @@ Returns a plist with the memory estimate and validation status."
 (defun suggest-configuration (model &key n-ctx n-gpu-layers vram-budget)
   "Suggest a configuration that fits within VRAM-BUDGET.
 Returns a plist (:N-CTX n :N-GPU-LAYERS n) or NIL if no viable configuration found.
-Reduces N-GPU-LAYERS first, then halves N-CTX until the estimate fits."
-  (unless vram-budget
-    (return-from suggest-configuration nil))
-  (with-llama-compatible-fp-environment
-    (let* ((ptr (llama-model-pointer model))
-           (n-layers (%llama:model-n-layer ptr))
-           (n-ctx (or n-ctx (%llama:model-n-ctx-train ptr)))
-           (n-gpu-layers (if n-gpu-layers (min n-gpu-layers n-layers) n-layers)))
-      (labels ((fits-p (ctx gpu-layers)
-                 (let ((v (validate-configuration model :n-ctx ctx
-                                                        :n-gpu-layers gpu-layers
-                                                        :vram-budget vram-budget)))
-                   (eq :safe (getf v :status)))))
-        (when (fits-p n-ctx n-gpu-layers)
-          (return-from suggest-configuration
-            (list :n-ctx n-ctx :n-gpu-layers n-gpu-layers)))
-        (loop for gl from (1- n-gpu-layers) downto 0
-              when (fits-p n-ctx gl)
-              do (return-from suggest-configuration
-                   (list :n-ctx n-ctx :n-gpu-layers gl)))
-        (loop for ctx = (ash n-ctx -1) then (ash ctx -1)
-              while (>= ctx 128)
-              do (loop for gl from n-gpu-layers downto 0
-                       when (fits-p ctx gl)
-                       do (return-from suggest-configuration
-                            (list :n-ctx ctx :n-gpu-layers gl))))
-        nil))))
+Without VRAM-BUDGET, free VRAM is auto-detected from the GPU; returns NIL when
+no GPU is present. Reduces N-GPU-LAYERS first, then halves N-CTX until the
+estimate fits."
+  (let ((vram-budget (or vram-budget (detect-free-vram))))
+    (unless vram-budget
+      (return-from suggest-configuration nil))
+    (with-llama-compatible-fp-environment
+      (let* ((ptr (llama-model-pointer model))
+             (n-layers (%llama:model-n-layer ptr))
+             (n-ctx (or n-ctx (%llama:model-n-ctx-train ptr)))
+             (n-gpu-layers (if n-gpu-layers (min n-gpu-layers n-layers) n-layers)))
+        (labels ((fits-p (ctx gpu-layers)
+                   (let ((v (validate-configuration model :n-ctx ctx
+                                                          :n-gpu-layers gpu-layers
+                                                          :vram-budget vram-budget)))
+                     (eq :safe (getf v :status)))))
+          (when (fits-p n-ctx n-gpu-layers)
+            (return-from suggest-configuration
+              (list :n-ctx n-ctx :n-gpu-layers n-gpu-layers)))
+          (loop for gl from (1- n-gpu-layers) downto 0
+                when (fits-p n-ctx gl)
+                do (return-from suggest-configuration
+                     (list :n-ctx n-ctx :n-gpu-layers gl)))
+          (loop for ctx = (ash n-ctx -1) then (ash ctx -1)
+                while (>= ctx 128)
+                do (loop for gl from n-gpu-layers downto 0
+                         when (fits-p ctx gl)
+                         do (return-from suggest-configuration
+                              (list :n-ctx ctx :n-gpu-layers gl))))
+          nil)))))
 
 (defun %validate-context-params (model ctx-params validation vram-budget)
   "Internal: run validation checks before context creation."
   (when (and validation (not (eq validation :off)))
-    (let* ((n-ctx (getf ctx-params '%llama:n-ctx))
+    (let* ((vram-budget (or vram-budget (detect-free-vram)))
+           (n-ctx (getf ctx-params '%llama:n-ctx))
            (type-k (getf ctx-params '%llama:type-k))
            (type-v (getf ctx-params '%llama:type-v))
            (estimate (estimate-memory model :n-ctx n-ctx

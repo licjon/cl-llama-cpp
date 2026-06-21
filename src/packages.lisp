@@ -161,6 +161,7 @@ New wrappers must follow this convention.")
    ;; High-level backend aggregates
    #:gpu-devices
    #:detect-free-vram
+   #:detect-total-vram
    ;; Resource planning & configuration validation
    #:estimate-memory
    #:explain-memory-usage
