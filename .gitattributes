@@ -1,1 +1,3 @@
 llama.cpp/** linguist-vendored
+spec/*.spec linguist-generated
+src/bindings.lisp linguist-generated
