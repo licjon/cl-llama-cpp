@@ -146,7 +146,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =with-context (var model &rest params) &body body= --- Create an inference context from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals =context-creation-error= on failure. The extra keywords =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a pre-creation resource check (see Resource Planning & Validation): =:warn= signals =configuration-unsafe-warning= and proceeds, =:error= signals =configuration-unsafe-error= and aborts.
 
-- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Build a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. With *no keyword arguments*, allocates an empty chain — populate it inside =body= using =sampler-chain-add=. With keyword arguments, pre-builds the chain with the same options as =generate= (see Extended Sampler Keywords). Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
 
 *** Backend Lifecycle
 
@@ -243,11 +243,13 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 *** Sampler Utilities
 
+- =sampler-chain-add chain sampler= --- Add =sampler= to =chain=. Both arguments may be typed =llama-sampler= handles or raw CFFI pointers (e.g. the return value of =%llama:sampler-init-temp=). The chain takes ownership: freeing the chain frees all added samplers. Returns =NIL=.
+
 - =sampler-seed sampler= --- Return the current RNG seed from =sampler= as an integer. Useful for logging the seed that produced a given output.
 
 *** Grammar / Constrained Generation
 
-- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a GBNF =grammar= string and =root= rule (default ="root"=). Returns a =llama-sampler= handle; caller must free (via =llama-sampler-pointer= + =%llama:sampler-free=) or add to a chain (extracting the pointer first; the chain takes ownership). Signals =grammar-error= if the grammar is empty or invalid.
+- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a GBNF =grammar= string and =root= rule (default ="root"=). Returns a =llama-sampler= handle; caller must either free it (via =llama-sampler-pointer= + =%llama:sampler-free=) or add it to a chain with =sampler-chain-add= (the chain takes ownership and frees it). Signals =grammar-error= if the grammar is empty or invalid.
 
 - =make-grammar-sampler-lazy model grammar &key root trigger-words= --- Create a lazy grammar sampler that stays inactive until a trigger word appears in the output. =trigger-words= is a list of strings (e.g. ='("{")=). Returns a =llama-sampler= handle.
 
@@ -612,6 +614,27 @@ ws      ::= [ ]*")))
 #+end_src
 
 See =examples/sampler-showcase.lisp= for demos of strict grammars, lazy grammars with trigger words, and error handling.
+
+*** Custom Sampler Chains
+
+=with-sampler-chain= with no keyword arguments allocates an empty chain. Use =sampler-chain-add= to populate it — it accepts both typed =llama-sampler= handles (from =make-grammar-sampler= etc.) and raw =%llama:= pointers for built-in samplers not yet wrapped at the high level.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (let ((gs (cl-llama-cpp:make-grammar-sampler model my-grammar)))
+      (cl-llama-cpp:with-sampler-chain (chain)
+        ;; typed handle — sampler-chain-add extracts the pointer automatically
+        (cl-llama-cpp:sampler-chain-add chain gs)
+        ;; raw %llama pointer — also accepted directly
+        (cl-llama-cpp:sampler-chain-add chain (%llama:sampler-init-temp 0.3))
+        (cl-llama-cpp:sampler-chain-add chain (%llama:sampler-init-dist 42))
+        ;; chain takes ownership: all samplers freed when with-sampler-chain exits.
+        ;; Pass the raw chain pointer to %llama:sampler-sample in a decode loop,
+        ;; or inspect sampler performance:
+        (let ((perf (cl-llama-cpp:sampler-perf chain)))
+          (format t "Samples taken: ~D~%" (getf perf :n-sample)))))))
+#+end_src
 
 *** Extended Samplers
 

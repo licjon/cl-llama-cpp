@@ -329,6 +329,25 @@
         (ok (member sym deps)
             (format nil "~S is in *binding-deps*" sym))))))
 
+;;; Sampler chain wrapper tests (issue #62)
+
+(deftest sampler-chain-symbols-exported
+  (testing "sampler-chain-add is exported from cl-llama-cpp"
+    (dolist (sym '(with-sampler-chain sampler-chain-add))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest sampler-chain-add-fbound
+  (testing "sampler-chain-add is fbound"
+    (let ((sym (find-symbol "SAMPLER-CHAIN-ADD" :cl-llama-cpp)))
+      (ok (and sym (fboundp sym))
+          "SAMPLER-CHAIN-ADD is fbound"))))
+
 ;;; Extended sampler wrapper tests
 
 (deftest sampler-seed-symbol-exported

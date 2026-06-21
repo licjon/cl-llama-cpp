@@ -583,6 +583,67 @@ ws     ::= [ \\t\\n]*")
           (error () t))
         "error was signaled for grammar without model")))
 
+;;; Sampler chain wrappers (issue #62)
+
+(deftest with-sampler-chain-no-args-creates-empty-chain
+  (when-model-available
+    (testing "with-sampler-chain with no kwargs yields a typed llama-sampler handle"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (ok (cl-llama-cpp:llama-sampler-p chain)
+              "chain is a llama-sampler handle")
+          (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer chain)))
+              "chain pointer is non-null"))))))
+
+(deftest sampler-chain-add-accepts-raw-pointer
+  (when-model-available
+    (testing "sampler-chain-add accepts a raw pointer from %llama:sampler-init-temp"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (cl-llama-cpp:with-llama-compatible-fp-environment
+            (let ((temp-smpl (%llama:sampler-init-temp 0.3)))
+              (ok (null (cl-llama-cpp:sampler-chain-add chain temp-smpl))
+                  "sampler-chain-add returns NIL for raw pointer sampler"))))))))
+
+(deftest sampler-chain-add-accepts-typed-handle
+  (when-model-available
+    (testing "sampler-chain-add accepts a typed llama-sampler handle"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (let ((gs (cl-llama-cpp:make-grammar-sampler model *json-grammar*)))
+            (ok (null (cl-llama-cpp:sampler-chain-add chain gs))
+                "sampler-chain-add returns NIL for typed handle sampler")))))))
+
+(deftest with-sampler-chain-empty-then-add-counts-samplers
+  (when-model-available
+    (testing "sampler count reflects samplers added via sampler-chain-add"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain)
+          (let ((ptr (cl-llama-cpp:llama-sampler-pointer chain)))
+            (ok (= 0 (cl-llama-cpp:with-llama-compatible-fp-environment
+                       (%llama:sampler-chain-n ptr)))
+                "empty chain has 0 samplers")
+            (cl-llama-cpp:with-llama-compatible-fp-environment
+              (cl-llama-cpp:sampler-chain-add chain (%llama:sampler-init-temp 0.5)))
+            (ok (= 1 (cl-llama-cpp:with-llama-compatible-fp-environment
+                       (%llama:sampler-chain-n ptr)))
+                "chain has 1 sampler after first add")
+            (cl-llama-cpp:with-llama-compatible-fp-environment
+              (cl-llama-cpp:sampler-chain-add chain (%llama:sampler-init-dist 42)))
+            (ok (= 2 (cl-llama-cpp:with-llama-compatible-fp-environment
+                       (%llama:sampler-chain-n ptr)))
+                "chain has 2 samplers after second add")))))))
+
+(deftest with-sampler-chain-kwargs-still-work
+  (when-model-available
+    (testing "with-sampler-chain with kwargs still pre-builds the chain as before"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-sampler-chain (chain :temp 0.7 :seed 99)
+          (ok (cl-llama-cpp:llama-sampler-p chain)
+              "chain with kwargs is a llama-sampler handle")
+          (ok (not (cffi:null-pointer-p (cl-llama-cpp:llama-sampler-pointer chain)))
+              "chain pointer is non-null"))))))
+
 ;;; Session state save/load integration tests
 
 (deftest save-session-creates-file
