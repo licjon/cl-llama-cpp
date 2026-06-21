@@ -162,6 +162,8 @@ New wrappers must follow this convention.")
    #:set-embeddings
    #:synchronize
    #:set-abort-callback
+   #:get-abort-callback
+   #:*last-abort-callback-error*
    ;; Threadpool management
    #:attach-threadpool
    #:detach-threadpool

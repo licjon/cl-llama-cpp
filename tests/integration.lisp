@@ -2005,6 +2005,66 @@ ws     ::= [ \\t\\n]*")
             (ok (member stop-reason '(:eog :length))
                 (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))
 
+;;; Abort callback integration tests (issue #45)
+
+(deftest get-abort-callback-initial
+  (when-model-available
+    (testing "get-abort-callback returns NIL on a fresh context"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 128)
+          (ok (null (cl-llama-cpp:get-abort-callback ctx))
+              "get-abort-callback returns NIL on fresh context"))))))
+
+(deftest set-abort-callback-roundtrip
+  (when-model-available
+    (testing "set-abort-callback installs and get-abort-callback retrieves it"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 128)
+          (let ((fn (lambda () nil)))
+            (ok (null (cl-llama-cpp:set-abort-callback ctx fn))
+                "set-abort-callback returns NIL")
+            (ok (eq fn (cl-llama-cpp:get-abort-callback ctx))
+                "get-abort-callback returns the installed function")
+            (ok (null (cl-llama-cpp:set-abort-callback ctx nil))
+                "set-abort-callback nil returns NIL")
+            (ok (null (cl-llama-cpp:get-abort-callback ctx))
+                "get-abort-callback returns NIL after clearing")))))))
+
+(deftest abort-callback-cleared-on-context-free
+  (when-model-available
+    (testing "abort callback hash is cleaned up when context is freed via with-context"
+      (let (key)
+        (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+          (cl-llama-cpp:with-context (ctx model :n-ctx 128)
+            (let ((fn (lambda () nil)))
+              (cl-llama-cpp:set-abort-callback ctx fn)
+              (setf key (cffi:pointer-address
+                         (cl-llama-cpp:llama-context-pointer ctx)))))
+          ;; After with-context exits the hash entry should be gone
+          (ok (null (gethash key cl-llama-cpp::*abort-callbacks*))
+              "abort callbacks hash entry removed after context freed"))))))
+
+(deftest abort-callback-error-captured-in-last-error
+  (when-model-available
+    (testing "errors in abort callback are captured in *last-abort-callback-error*"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 128)
+          (let ((prev-err cl-llama-cpp:*last-abort-callback-error*))
+            (unwind-protect
+                 (progn
+                   (setf cl-llama-cpp:*last-abort-callback-error* nil)
+                   ;; Install a callback that always signals an error
+                   (cl-llama-cpp:set-abort-callback
+                    ctx (lambda () (error "deliberate abort callback error")))
+                   ;; Run generate — the abort callback fires during decode but
+                   ;; the panic boundary catches the error and returns NIL (no abort)
+                   (cl-llama-cpp:generate ctx "The" :max-tokens 4 :temp 0.1)
+                   (ok (typep cl-llama-cpp:*last-abort-callback-error* 'error)
+                       (format nil "abort callback error was captured: ~A"
+                               cl-llama-cpp:*last-abort-callback-error*)))
+              (cl-llama-cpp:set-abort-callback ctx nil)
+              (setf cl-llama-cpp:*last-abort-callback-error* prev-err))))))))
+
 ;;; Backend device & registry introspection integration tests (issue #29)
 
 (deftest backend-dev-count-positive

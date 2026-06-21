@@ -511,6 +511,7 @@
                    set-embeddings
                    synchronize
                    set-abort-callback
+                   get-abort-callback
                    attach-threadpool
                    detach-threadpool))
       (multiple-value-bind (s status)
@@ -528,6 +529,7 @@
                         "SET-EMBEDDINGS"
                         "SYNCHRONIZE"
                         "SET-ABORT-CALLBACK"
+                        "GET-ABORT-CALLBACK"
                         "ATTACH-THREADPOOL"
                         "DETACH-THREADPOOL"))
       (let ((sym (find-symbol sym-name :cl-llama-cpp)))
@@ -754,6 +756,56 @@
   (testing "*last-log-callback-error* is bound"
     (let ((sym (find-symbol "*LAST-LOG-CALLBACK-ERROR*" :cl-llama-cpp)))
       (ok (boundp sym) "*LAST-LOG-CALLBACK-ERROR* is boundp"))))
+
+;;; Abort callback wrapper tests (issue #45)
+
+(deftest abort-callback-symbols-exported
+  (testing "abort callback symbols are exported from cl-llama-cpp"
+    (dolist (sym '(set-abort-callback get-abort-callback))
+      (multiple-value-bind (s status)
+          (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym))))))
+  (testing "abort callback functions are fbound"
+    (dolist (sym-name '("SET-ABORT-CALLBACK" "GET-ABORT-CALLBACK"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest last-abort-callback-error-exported
+  (testing "*last-abort-callback-error* is exported from cl-llama-cpp"
+    (multiple-value-bind (sym status)
+        (find-symbol "*LAST-ABORT-CALLBACK-ERROR*" :cl-llama-cpp)
+      (ok sym "*LAST-ABORT-CALLBACK-ERROR* is accessible")
+      (ok (eq status :external) "*LAST-ABORT-CALLBACK-ERROR* is exported")))
+  (testing "*last-abort-callback-error* is bound"
+    (let ((sym (find-symbol "*LAST-ABORT-CALLBACK-ERROR*" :cl-llama-cpp)))
+      (ok (boundp sym) "*LAST-ABORT-CALLBACK-ERROR* is boundp"))))
+
+(deftest abort-callback-lock-defined
+  (testing "abort callback mutex is defined on SBCL"
+    #+sbcl
+    (ok (boundp 'cl-llama-cpp::*abort-callback-lock*)
+        "*abort-callback-lock* is bound")
+    #-sbcl
+    (ok t "mutex is a no-op on non-SBCL")))
+
+(deftest set-abort-callback-type-check
+  (testing "set-abort-callback rejects non-function/non-nil second argument"
+    (ok (handler-case
+            (cl-llama-cpp:set-abort-callback
+             (cffi:null-pointer)
+             "not-a-function")
+          (type-error () t))
+        "string fn signals type-error")
+    (ok (handler-case
+            (cl-llama-cpp:set-abort-callback
+             (cffi:null-pointer)
+             42)
+          (type-error () t))
+        "integer fn signals type-error")))
 
 ;;; Backend device & registry introspection (issue #29)
 

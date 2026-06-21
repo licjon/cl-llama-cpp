@@ -24,14 +24,14 @@
 
 ;;; ── Abort callback ───────────────────────────────────────────────────
 ;;;
-;;; defcallback must be at the top level so cffi:callback returns a
-;;; stable pointer. The void* data argument IS the flag — the callback
-;;; reads a single :uint8 byte from it. Foreign memory is visible from
-;;; any C or Lisp thread, unlike CL dynamic bindings which are
-;;; thread-local and not inherited by ggml worker threads.
-
-(cffi:defcallback deadline-callback :bool ((flag :pointer))
-  (not (zerop (cffi:mem-ref flag :uint8))))
+;;; set-abort-callback accepts a plain Lisp function. The library
+;;; installs a safe C dispatcher that calls it from ggml worker threads
+;;; and catches errors so they cannot unwind into C.
+;;;
+;;; Thread-safety rule: lexical variables captured by a closure ARE
+;;; visible from ggml worker threads (heap-allocated). Lisp dynamic
+;;; (special) bindings established on the main thread are NOT — they are
+;;; thread-local. Keep the callback minimal: read a flag, nothing more.
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────
 
@@ -138,48 +138,44 @@
         (banner "PHASE 4: Time-limited generation via abort callback")
         ;; ══════════════════════════════════════════════════════════════
         ;;
-        ;; The callback reads a :uint8 from the flag pointer passed as
-        ;; data — foreign memory is visible from ggml worker threads,
-        ;; unlike CL dynamic bindings which are thread-local. A Lisp
-        ;; timer sets the flag after 2 seconds.
+        ;; A closed-over boolean is sufficient — lexical variables are
+        ;; heap-allocated and visible from any thread. An SBCL timer sets
+        ;; the flag after 2 seconds; the callback reads it and returns T
+        ;; to abort. No foreign memory or CFFI needed.
 
-        (let ((abort-flag (cffi:foreign-alloc :uint8 :initial-element 0)))
-          (unwind-protect
-              (progn
-                ;; Pass the flag pointer as data; the callback reads it directly.
-                (set-abort-callback ctx (cffi:callback deadline-callback) abort-flag)
-                (format t "  Callback registered. Arming 2-second deadline...~%")
+        (let ((abort-flag nil))
+          (set-abort-callback ctx (lambda () abort-flag))
+          (format t "  Callback registered. Arming 2-second deadline...~%")
 
-                (let* ((timer (sb-ext:make-timer
-                                (lambda ()
-                                  (setf (cffi:mem-ref abort-flag :uint8) 1))))
-                       (started (get-internal-real-time))
-                       (stop-reason nil))
-                  (sb-ext:schedule-timer timer 2.0)
-                  (unwind-protect
-                      (handler-case
-                          (multiple-value-bind (text reason)
-                              (generate ctx "Count from one:" :max-tokens 512 :temp 0.1)
-                            (setf stop-reason reason)
-                            (format t "  Generated (stop=~A): ~S~%"
-                                    reason
-                                    (if (> (length text) 60)
-                                        (concatenate 'string (subseq text 0 57) "...")
-                                        text)))
-                        (error (e)
-                          (setf stop-reason :aborted)
-                          (format t "  Generation aborted by callback: ~A~%" e)))
-                    (sb-ext:unschedule-timer timer))
+          (let* ((timer (sb-ext:make-timer
+                          (lambda ()
+                            (setf abort-flag t))))
+                 (started (get-internal-real-time))
+                 (stop-reason nil))
+            (sb-ext:schedule-timer timer 2.0)
+            (unwind-protect
+                (handler-case
+                    (multiple-value-bind (text reason)
+                        (generate ctx "Count from one:" :max-tokens 512 :temp 0.1)
+                      (setf stop-reason reason)
+                      (format t "  Generated (stop=~A): ~S~%"
+                              reason
+                              (if (> (length text) 60)
+                                  (concatenate 'string (subseq text 0 57) "...")
+                                  text)))
+                  (error (e)
+                    (setf stop-reason :aborted)
+                    (format t "  Generation aborted by callback: ~A~%" e)))
+              (sb-ext:unschedule-timer timer))
 
-                  (let ((elapsed (/ (- (get-internal-real-time) started)
-                                    internal-time-units-per-second)))
-                    (format t "  Elapsed: ~,2F s  stop-reason: ~A~%"
-                            elapsed (or stop-reason :aborted)))
+            (let ((elapsed (/ (- (get-internal-real-time) started)
+                              internal-time-units-per-second)))
+              (format t "  Elapsed: ~,2F s  stop-reason: ~A~%"
+                      elapsed (or stop-reason :aborted)))
 
-                  (set-abort-callback ctx nil)
-                  (format t "  Callback cleared.~%")
-                  (format t "~%✓ Inference interrupted by deadline callback.~%")))
-            (cffi:foreign-free abort-flag)))))
+            (set-abort-callback ctx nil)
+            (format t "  Callback cleared.~%")
+            (format t "~%✓ Inference interrupted by deadline callback.~%")))))
 
     (format t "~&~%~A~%" (make-string 64 :initial-element #\═))
     (format t "  All phases complete. Backend freed by with-backend.~%")
