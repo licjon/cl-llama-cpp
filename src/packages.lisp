@@ -125,6 +125,19 @@ New wrappers must follow this convention.")
    ;; Sampler utilities
    #:sampler-chain-add
    #:sampler-seed
+   ;; Individual sampler constructors / destructor
+   #:make-greedy-sampler
+   #:make-dist-sampler
+   #:make-top-k-sampler
+   #:make-top-p-sampler
+   #:make-min-p-sampler
+   #:make-typical-sampler
+   #:make-temp-sampler
+   #:make-temp-ext-sampler
+   #:make-xtc-sampler
+   #:make-top-n-sigma-sampler
+   #:make-mirostat-v2-sampler
+   #:free-sampler
    ;; Batch API
    #:batch-init-error
    #:batch-init-error-n-tokens
