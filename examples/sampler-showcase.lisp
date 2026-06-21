@@ -99,24 +99,18 @@ CTX and MODEL are typed handles; SAMPLER-PTR is the raw C pointer."
 
   ;; 1b — Lower-level: make-grammar-sampler + manual chain
   (format t "── 1b: make-grammar-sampler + manual chain ──~2%")
-  (format t "For custom sampler chains, create the grammar sampler with~%")
-  (format t "make-grammar-sampler and add it to a chain yourself.  The chain~%")
-  (format t "takes ownership — freeing the chain frees all its samplers.~2%")
+  (format t "with-sampler-chain (no keyword args) allocates an empty chain.~%")
+  (format t "sampler-chain-add accepts typed handles or raw %llama pointers.~%")
+  (format t "The chain takes ownership — freeing the chain frees all its samplers.~2%")
   (format t "Prompt: \"Output a JSON object describing a dog.\"~2%")
-  (with-llama-compatible-fp-environment
-    (let* ((gs (make-grammar-sampler model *json-grammar*))
-           (chain (%llama:sampler-chain-init
-                   (%llama:sampler-chain-default-params))))
-      ;; make-grammar-sampler returns a typed handle; extract raw pointer
-      ;; before adding to chain (chain takes ownership of the C sampler)
-      (%llama:sampler-chain-add chain (llama-sampler-pointer gs))
-      (%llama:sampler-chain-add chain (%llama:sampler-init-temp 0.3))
-      (%llama:sampler-chain-add chain (%llama:sampler-init-dist 42))
-      (unwind-protect
-          (sample-loop ctx chain model
-                       "Output a JSON object describing a dog."
-                       :max-tokens 128)
-        (%llama:sampler-free chain))))
+  (let ((gs (make-grammar-sampler model *json-grammar*)))
+    (with-sampler-chain (chain)
+      (sampler-chain-add chain gs)                             ; typed handle
+      (sampler-chain-add chain (%llama:sampler-init-temp 0.3)) ; raw pointer
+      (sampler-chain-add chain (%llama:sampler-init-dist 42))
+      (sample-loop ctx (llama-sampler-pointer chain) model
+                   "Output a JSON object describing a dog."
+                   :max-tokens 128)))
 
   ;; 1c — with-grammar-sampler resource macro
   (format t "~%── 1c: with-grammar-sampler (resource macro) ──~2%")

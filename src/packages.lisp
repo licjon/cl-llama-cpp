@@ -96,6 +96,7 @@ New wrappers must follow this convention.")
    #:make-infill-sampler
    #:with-grammar-sampler
    ;; Sampler utilities
+   #:sampler-chain-add
    #:sampler-seed
    ;; Batch API
    #:batch-init-error

@@ -168,7 +168,11 @@ chain is replaced with the mirostat sampler."
                                      dynamic-temp-range (dynamic-temp-exponent 1.0)
                                      adaptive-p (adaptive-p-decay 0.0))
                               &body body)
-  "Create a sampler chain, bind to VAR, execute BODY, free the chain."
+  "Allocate a sampler chain, bind it to VAR, execute BODY, then free it.
+
+With no keyword arguments, an empty chain is created — use SAMPLER-CHAIN-ADD
+inside BODY to populate it.  With keyword arguments the chain is pre-built by
+BUILD-SAMPLER-CHAIN (same keywords as GENERATE)."
   (declare (ignore temp top-k top-p min-p seed greedy
                    model grammar grammar-root grammar-lazy
                    grammar-trigger-words grammar-trigger-patterns
@@ -182,13 +186,31 @@ chain is replaced with the mirostat sampler."
                    dry-penalty-last-n dry-seq-breakers logit-bias
                    dynamic-temp-range dynamic-temp-exponent
                    adaptive-p adaptive-p-decay))
-  (let ((chain (gensym "CHAIN")))
-    `(with-llama-compatible-fp-environment
-       (let ((,chain (build-sampler-chain ,@args)))
-         (unwind-protect
-              (let ((,var (%make-llama-sampler :pointer ,chain)))
-                ,@body)
-           (%llama:sampler-free ,chain))))))
+  (let ((chain-sym (gensym "CHAIN")))
+    (if args
+        `(with-llama-compatible-fp-environment
+           (let ((,chain-sym (build-sampler-chain ,@args)))
+             (unwind-protect
+                  (let ((,var (%make-llama-sampler :pointer ,chain-sym)))
+                    ,@body)
+               (%llama:sampler-free ,chain-sym))))
+        `(with-llama-compatible-fp-environment
+           (let ((,chain-sym (%llama:sampler-chain-init
+                              (%llama:sampler-chain-default-params))))
+             (unwind-protect
+                  (let ((,var (%make-llama-sampler :pointer ,chain-sym)))
+                    ,@body)
+               (%llama:sampler-free ,chain-sym)))))))
+
+(defun sampler-chain-add (chain sampler)
+  "Add SAMPLER to CHAIN.  Both arguments may be typed LLAMA-SAMPLER handles or
+raw CFFI pointers (e.g. the return value of %LLAMA:SAMPLER-INIT-TEMP).  The
+chain takes ownership of the sampler — freeing the chain frees all added
+samplers."
+  (let ((chain-ptr (if (llama-sampler-p chain) (llama-sampler-pointer chain) chain))
+        (smpl-ptr  (if (llama-sampler-p sampler) (llama-sampler-pointer sampler) sampler)))
+    (with-llama-compatible-fp-environment
+      (%llama:sampler-chain-add chain-ptr smpl-ptr))))
 
 ;;; Sampler utilities
 
