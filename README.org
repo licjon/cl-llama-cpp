@@ -21,10 +21,10 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - Grammar / constrained generation (GBNF grammars, lazy grammars)
 - Infill generation
 - Batch API and parallel decoding
-- Backend lifecycle management (=with-backend=, NUMA init, proper init/free)
+- Backend lifecycle management (=with-backend=, =ensure-backend=, NUMA init, thread-safe init/free)
 - Context runtime configuration (thread counts, mode flags, abort callbacks, threadpool management)
 - Performance counters (structured timing data, =with-perf= macro)
-- Logging (route llama.cpp log messages to a Lisp callback)
+- Logging (route llama.cpp log messages to a Lisp callback; thread-safe)
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
 
@@ -147,7 +147,9 @@ The predicates replace =cffi:null-pointer-p= for handle variables. When you drop
 
 *** Backend Lifecycle
 
-- =with-backend (&key numa) &body body= --- Initialize the llama backend, execute =body=, then call =backend-free= on exit (including non-local exit). Nesting is safe: only the outermost =with-backend= shuts down the backend. When =:numa= is a GGML NUMA strategy keyword (=:distribute=, =:isolate=, =:numactl=, =:mirror=), calls =llama-numa-init= before executing =body=. Prefer this over bare =ensure-backend= calls.
+- =ensure-backend= --- Ensure the llama backend is initialized. Thread-safe; safe to call from any thread. Establishes a permanent hold: the backend will not be freed when an enclosing =with-backend= scope exits. The recommended pattern for multi-threaded use is to call =ensure-backend= once from the main thread before spawning worker threads. Subsequent calls are no-ops.
+
+- =with-backend (&key numa) &body body= --- Initialize the llama backend, execute =body=, then call =backend-free= on exit (including non-local exit). Nesting and concurrent calls from multiple threads are both safe: only the first call to find the backend uninitialized initializes it; the last active scope to exit frees it. If =ensure-backend= was called first, =with-backend= will not free the backend on exit. When =:numa= is a GGML NUMA strategy keyword (=:distribute=, =:isolate=, =:numactl=, =:mirror=), calls =llama-numa-init= before executing =body=.
 
 - =set-n-threads ctx n-threads n-threads-batch= --- Set thread counts on =ctx= for single-token decoding (=n-threads=) and batch decoding (=n-threads-batch=). Both are required in one call. Takes effect on the next decode. Both arguments must be non-negative integers.
 
@@ -326,9 +328,9 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 *** Logging
 
-- =set-log-callback fn= --- Route all llama.cpp log messages to Lisp function =fn=. =fn= is called as =(fn level text)= where =level= is an integer (1=debug, 2=info, 3=warn, 4=error) and =text= is the message string. Pass =NIL= to restore the default C stderr logger. The callback is installed via a =cffi:defcallback= dispatcher --- errors in =fn= are silently caught to prevent unwinding into C.
+- =set-log-callback fn= --- Route all llama.cpp log messages to Lisp function =fn=. =fn= is called as =(fn level text)= where =level= is an integer (1=debug, 2=info, 3=warn, 4=error) and =text= is the message string. Pass =NIL= to restore the default C stderr logger. Thread-safe: the callback is captured atomically before each dispatch; calling =set-log-callback= from one thread while =fn= is running on another is safe. Errors in =fn= are silently caught to prevent unwinding into C.
 
-- =get-log-callback= --- Return the current Lisp log callback, or =NIL= if unset.
+- =get-log-callback= --- Return the current Lisp log callback, or =NIL= if unset. Thread-safe.
 
 *** System Queries
 
@@ -664,6 +666,38 @@ See =examples/context-fork.lisp= for a full context-forking demo with file persi
 #+end_src
 
 See =examples/parallel.lisp= for a complete example.
+
+*** Parallel Contexts on Multiple Threads
+
+Independent contexts can run concurrently on separate Lisp threads. A single context must never be used from more than one thread at a time. Call =ensure-backend= once from the main thread before spawning workers; the backend lock guarantees that concurrent =with-context= calls inside worker threads will never race on backend init/free.
+
+#+begin_src lisp
+;; Call ensure-backend once on the main thread before spawning workers.
+(cl-llama-cpp:ensure-backend)
+
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  ;; Models are read-only once loaded; sharing across threads is safe.
+  (let* ((prompts '("The capital of France is"
+                    "The speed of light is approximately"
+                    "Water freezes at"))
+         (results (make-array (length prompts) :initial-element nil))
+         (threads (loop for p in prompts for i from 0
+                        collect (let ((prompt p) (idx i))
+                                  (sb-thread:make-thread
+                                   (lambda ()
+                                     ;; Each thread creates and owns its own context.
+                                     (cl-llama-cpp:with-context (ctx model :n-ctx 256)
+                                       (setf (aref results idx)
+                                             (cl-llama-cpp:generate ctx prompt
+                                                                    :max-tokens 32
+                                                                    :temp 0.0))))
+                                   :name "llama-worker")))))
+    (mapc #'sb-thread:join-thread threads)
+    (loop for p in prompts for r across results for i from 1
+          do (format t "[~D] ~A~A~2%" i p r))))
+#+end_src
+
+This example uses =sb-thread= directly; adapt =make-thread= / =join-thread= to bordeaux-threads, lparallel, or any other library --- cl-llama-cpp imposes no threading dependency. See =examples/parallel-threads.lisp= for a complete runnable version.
 
 *** Backend Lifecycle
 

@@ -38,6 +38,7 @@
                  (:file "kv-cache")
                  (:file "lora")
                  (:file "parallel")
+                 (:file "parallel-threads")
                  (:file "perf-and-logging")
                  (:file "resource-planning")
                  (:file "sampler-comparison")
