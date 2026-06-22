@@ -24,6 +24,7 @@
 		 (:file "batch")
 		 (:file "kv-cache")
 		 (:file "session")
+		 (:file "chat-session")
 		 (:file "lora")
 		 (:file "gguf")))))
 
@@ -33,6 +34,7 @@
   :components ((:module "examples"
                 :components
                 ((:file "simple-chat")
+                 (:file "incremental-chat")
                  (:file "backend-lifecycle")
                  (:file "context-fork")
                  (:file "introspection")

@@ -316,9 +316,12 @@ Do not call on samplers that have been added to a chain — the chain owns those
                                   logit-bias
                                   dynamic-temp-range (dynamic-temp-exponent 1.0)
                                   adaptive-p (adaptive-p-decay 0.0)
-                                  sampler)
-  "Generate text by continuing PROMPT. Returns two values: the generated string
-and a stop reason (:eog, :length, or :callback).
+                                  sampler
+                                  (reset-context t))
+  "Generate text by continuing PROMPT. Returns three values: the generated
+string, a stop reason (:eog, :length, or :callback), and a (simple-array
+fixnum (*)) of the sampled token ids (useful for callers that need to track
+the exact KV-cache contents without a lossy re-tokenise round-trip).
 Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
 Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD,
 :MIROSTAT, :MIROSTAT-V2, :REPEAT-PENALTY, :FREQUENCY-PENALTY, :PRESENCE-PENALTY,
@@ -327,6 +330,12 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
 When :SAMPLER is provided (a LLAMA-SAMPLER handle, typically from WITH-SAMPLER-CHAIN),
 GENERATE borrows the chain and does not free it — the caller owns the lifetime.
 All other sampler-related keywords are ignored when :SAMPLER is supplied.
+
+When :RESET-CONTEXT is NIL, the KV cache is NOT cleared before decoding the
+prompt.  The caller is responsible for ensuring that the context is already in a
+consistent state (e.g. the current cache is a prefix of the new prompt).  The
+default (T) preserves the original behaviour: clear the cache and re-prefill
+the full prompt each call.
 
 Signals INPUT-VALIDATION-ERROR if MAX-TOKENS is not a positive integer or
 PROMPT is neither a string nor a vector."
@@ -346,7 +355,8 @@ PROMPT is neither a string nor a vector."
                                     :adjustable t :fill-pointer 0)))
       (declare (type fixnum n-prompt)
                (type (vector fixnum) generated))
-      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
+      (when reset-context
+        (%llama:memory-clear (%llama:get-memory ctx-ptr) 1))
       ;; Decode the prompt
       (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
         (dotimes (i n-prompt)
@@ -434,19 +444,24 @@ PROMPT is neither a string nor a vector."
                        (setf (llama-context-compute-pending-p ctx) t)))
           (unless sampler
             (%llama:sampler-free chain-ptr)))
-      ;; Convert generated tokens to string
-      (let ((text (if (zerop (length generated))
-                      ""
-                      (let ((result-tokens (make-array (length generated)
-                                                       :element-type 'fixnum)))
-                        (declare (type (simple-array fixnum (*)) result-tokens))
-                        (dotimes (i (length generated))
-                          (declare (type fixnum i))
-                          (setf (aref result-tokens i) (aref generated i)))
-                        (detokenize model result-tokens :remove-special t)))))
+      ;; Convert generated tokens to string.  Always materialise result-tokens so
+      ;; it can be returned as the third value for callers that need exact cache
+      ;; contents (e.g. CHAT-SESSION-SEND) without a lossy re-tokenise.
+      (let* ((n-gen (length generated))
+             (result-tokens (make-array n-gen :element-type 'fixnum))
+             (text (if (zerop n-gen)
+                       ""
+                       (progn
+                         (dotimes (i n-gen)
+                           (declare (type fixnum i))
+                           (setf (aref result-tokens i) (aref generated i)))
+                         (detokenize model result-tokens :remove-special t)))))
+        (declare (type fixnum n-gen)
+                 (type (simple-array fixnum (*)) result-tokens))
         (values text
                 (or stop-reason
-                    (if (= (length generated) max-tokens) :length :eog))))))))
+                    (if (= n-gen max-tokens) :length :eog))
+                result-tokens))))))
 
 (defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.

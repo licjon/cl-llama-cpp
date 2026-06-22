@@ -99,6 +99,15 @@ New wrappers must follow this convention.")
    #:kv-cache-seq-div
    #:kv-cache-pos
    #:kv-cache-can-shift-p
+   ;; Incremental chat session
+   #:chat-session
+   #:chat-session-p
+   #:chat-session-context
+   #:chat-session-model
+   #:chat-session-messages
+   #:make-chat-session
+   #:chat-session-send
+   #:chat-session-reset
    ;; Session state save/load
    #:session-save-error
    #:session-save-error-path
