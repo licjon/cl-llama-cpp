@@ -60,7 +60,18 @@ by subsequent batch-add-token or batch-add-embedding calls."
 TOKEN is a token integer. POS is the position integer.
 SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
 LOGITS when true requests logit computation for this token.
-Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity."
+Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity.
+Signals INPUT-VALIDATION-ERROR if TOKEN or POS is negative."
+  (check-type token fixnum)
+  (check-type pos fixnum)
+  (when (minusp token)
+    (error 'input-validation-error
+           :function-name 'batch-add-token :argument :token :value token
+           :reason "token ID must be non-negative"))
+  (when (minusp pos)
+    (error 'input-validation-error
+           :function-name 'batch-add-token :argument :pos :value pos
+           :reason "position must be non-negative"))
   (%batch-check-overflow batch)
   (let* ((plist (%batch-data batch))
          (idx (getf plist '%llama:n-tokens))
@@ -88,7 +99,13 @@ EMBEDDING is a sequence of floats whose length must match the N-EMBD
 used when creating the batch.
 SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
 LOGITS when true requests logit computation for this slot.
-Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity."
+Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity.
+Signals INPUT-VALIDATION-ERROR if POS is negative or EMBEDDING length mismatches."
+  (check-type pos fixnum)
+  (when (minusp pos)
+    (error 'input-validation-error
+           :function-name 'batch-add-embedding :argument :pos :value pos
+           :reason "position must be non-negative"))
   (%batch-check-overflow batch)
   (let* ((plist (%batch-data batch))
          (n-embd (%batch-n-embd batch))
@@ -102,8 +119,11 @@ Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity."
          (n-seq (length seq-list))
          (embd-offset (* idx n-embd)))
     (when (/= (length embedding) n-embd)
-      (error "Embedding length ~D does not match batch n-embd ~D"
-             (length embedding) n-embd))
+      (error 'input-validation-error
+             :function-name 'batch-add-embedding :argument :embedding
+             :value (length embedding)
+             :reason (format nil "length ~D does not match batch n-embd ~D"
+                             (length embedding) n-embd)))
     (etypecase embedding
       (vector (dotimes (j n-embd)
                 (setf (cffi:mem-aref embd-ptr :float (+ embd-offset j))
@@ -130,7 +150,19 @@ LOGITS controls which tokens get logit computation:
   :LAST (default) — only the final token
   :ALL — every token
   NIL — no tokens
-Signals BATCH-OVERFLOW-ERROR if BATCH would exceed capacity."
+Signals BATCH-OVERFLOW-ERROR if BATCH would exceed capacity.
+Signals INPUT-VALIDATION-ERROR if TOKENS is empty or START-POS is negative."
+  (check-type tokens vector)
+  (check-type seq-id integer)
+  (check-type start-pos fixnum)
+  (when (zerop (length tokens))
+    (error 'input-validation-error
+           :function-name 'batch-add-sequence :argument :tokens :value tokens
+           :reason "token vector must be non-empty"))
+  (when (minusp start-pos)
+    (error 'input-validation-error
+           :function-name 'batch-add-sequence :argument :start-pos :value start-pos
+           :reason "start position must be non-negative"))
   (let ((n (length tokens)))
     (dotimes (i n)
       (batch-add-token batch (aref tokens i) (+ start-pos i) seq-id

@@ -217,4 +217,10 @@ New wrappers must follow this convention.")
    #:suggest-configuration
    #:configuration-unsafe-warning
    #:configuration-unsafe-error
-   #:configuration-unsafe-error-reason))
+   #:configuration-unsafe-error-reason
+   ;; Pre-flight input validation
+   #:input-validation-error
+   #:input-validation-error-function
+   #:input-validation-error-argument
+   #:input-validation-error-value
+   #:input-validation-error-reason))

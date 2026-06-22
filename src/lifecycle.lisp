@@ -126,6 +126,19 @@ to 0/1."
                            val)))))
     result))
 
+;;; --- Abort-callback lock (needed by GC finalizers below) --------------------
+
+#+sbcl
+(defvar *abort-callback-lock* (sb-thread:make-mutex :name "cl-llama-cpp-abort")
+  "Mutex protecting *ABORT-CALLBACKS*.")
+
+(defmacro %with-abort-lock (&body body)
+  #+sbcl `(sb-thread:with-mutex (*abort-callback-lock*) ,@body)
+  #-sbcl `(progn ,@body))
+
+(defvar *abort-callbacks* (make-hash-table)
+  "Maps ctx-pointer addresses (integers) to registered Lisp abort callbacks.")
+
 ;;; --- GC finalizer support (trivial-garbage) ---------------------------------
 
 (defun %try-claim-for-free (cell)
@@ -283,17 +296,8 @@ context leaves internal C state inconsistent."
   nil)
 
 ;;; --- Abort-callback safe dispatcher -------------------------------------------
-
-#+sbcl
-(defvar *abort-callback-lock* (sb-thread:make-mutex :name "cl-llama-cpp-abort")
-  "Mutex protecting *ABORT-CALLBACKS*.")
-
-(defmacro %with-abort-lock (&body body)
-  #+sbcl `(sb-thread:with-mutex (*abort-callback-lock*) ,@body)
-  #-sbcl `(progn ,@body))
-
-(defvar *abort-callbacks* (make-hash-table)
-  "Maps ctx-pointer addresses (integers) to registered Lisp abort callbacks.")
+;;; %with-abort-lock, *abort-callback-lock*, and *abort-callbacks* are defined
+;;; earlier (before the GC finalizer section that needs them).
 
 (defvar *last-abort-callback-error* nil
   "The last error condition caught inside the abort-callback panic boundary, or NIL.")

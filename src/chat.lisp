@@ -24,7 +24,21 @@ If NAME is given, look up a specific named template."
 (defun format-chat (model messages &key template (add-assistant-prefix t))
   "Format MESSAGES as a chat prompt string using a Jinja-style chat template.
 MESSAGES is a list of plists with :role and :content keys.
-Uses MODEL's embedded chat template unless TEMPLATE is provided."
+Uses MODEL's embedded chat template unless TEMPLATE is provided.
+Signals INPUT-VALIDATION-ERROR if MESSAGES is empty or malformed."
+  (when (endp messages)
+    (error 'input-validation-error
+           :function-name 'format-chat :argument :messages :value messages
+           :reason "messages must be a non-empty list"))
+  (dolist (msg messages)
+    (unless (and (getf msg :role) (stringp (getf msg :role)))
+      (error 'input-validation-error
+             :function-name 'format-chat :argument :messages :value msg
+             :reason "each message must have a :ROLE string"))
+    (unless (and (getf msg :content) (stringp (getf msg :content)))
+      (error 'input-validation-error
+             :function-name 'format-chat :argument :messages :value msg
+             :reason "each message must have a :CONTENT string")))
   (with-llama-compatible-fp-environment
     (let* ((tmpl (or template (model-chat-template model)))
            (tmpl-arg (or tmpl (cffi:null-pointer)))

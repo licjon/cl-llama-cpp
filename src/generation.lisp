@@ -326,7 +326,13 @@ Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD
 
 When :SAMPLER is provided (a LLAMA-SAMPLER handle, typically from WITH-SAMPLER-CHAIN),
 GENERATE borrows the chain and does not free it — the caller owns the lifetime.
-All other sampler-related keywords are ignored when :SAMPLER is supplied."
+All other sampler-related keywords are ignored when :SAMPLER is supplied.
+
+Signals INPUT-VALIDATION-ERROR if MAX-TOKENS is not a positive integer or
+PROMPT is neither a string nor a vector."
+  (check-type max-tokens (integer 1 *))
+  (unless prompt-tokens
+    (check-type prompt (or string vector)))
   (with-llama-compatible-fp-environment
     (let* ((ctx-ptr (llama-context-pointer ctx))
            (raw-model (%llama:get-model ctx-ptr))
@@ -437,7 +443,13 @@ All other sampler-related keywords are ignored when :SAMPLER is supplied."
 (defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.
 The context must have been created with :embeddings 1.
-When NORMALIZE is true (default), L2-normalizes the result."
+When NORMALIZE is true (default), L2-normalizes the result.
+Signals INPUT-VALIDATION-ERROR if TEXT is not a non-empty string."
+  (check-type text string)
+  (when (zerop (length text))
+    (error 'input-validation-error
+           :function-name 'embed :argument :text :value text
+           :reason "text must be non-empty"))
   (with-llama-compatible-fp-environment
     (let* ((ctx-ptr (llama-context-pointer ctx))
            (raw-model (%llama:get-model ctx-ptr))

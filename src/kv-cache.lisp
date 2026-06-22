@@ -35,9 +35,13 @@ Returns T if cells were removed, NIL if no matching data."
   nil)
 
 (defun kv-cache-seq-div (ctx seq-id p0 p1 d)
-  "Divide positions in [P0, P1) for SEQ-ID by D. D must be non-zero."
+  "Divide positions in [P0, P1) for SEQ-ID by D. D must be non-zero.
+Signals INPUT-VALIDATION-ERROR if D is zero."
+  (check-type d integer)
   (when (zerop d)
-    (error "Divisor must be non-zero"))
+    (error 'input-validation-error
+           :function-name 'kv-cache-seq-div :argument :d :value d
+           :reason "divisor must be non-zero"))
   (with-llama-compatible-fp-environment
     (%llama:memory-seq-div (%llama:get-memory (llama-context-pointer ctx)) seq-id p0 p1 d))
   nil)
