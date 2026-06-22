@@ -17,6 +17,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - Embeddings
 - LoRA adapters
 - KV cache management (clear, copy, shift, divide, query)
+- Incremental chat session with KV-cache reuse (=make-chat-session=, =chat-session-send=, =chat-session-reset=) --- per-turn prefill cost proportional to new tokens only; common-prefix tracking avoids re-decoding cached history; graceful context-window recovery
 - Session state save/load (file-based and in-memory persistence)
 - Model & context introspection (description, metadata, properties, system info)
 - GGUF file inspection (metadata key/value access, tensor index, version/alignment/offsets; =with-gguf= lifecycle macro)
@@ -103,12 +104,11 @@ If you use Quicklisp and want =ql:quickload= to find it, run =ql:register-local-
                                   :temp 0.7))))
 #+end_src
 
-*** Multi-turn Chat
+*** Multi-turn Chat (Simple)
 
-The =examples/simple-chat.lisp= file provides a minimal interactive chat
-session. =main= loads a model, then loops reading a line from standard input
-and printing the model's reply, keeping the conversation history so the model
-has context. Type =exit= or =quit= to end the session.
+=examples/simple-chat.lisp= is the minimal reference. Every turn re-tokenizes
+and re-processes the full history from scratch (O(n²) total work), so prefill
+latency grows with conversation length. Fine for short demos.
 
 #+begin_src lisp
 (asdf:load-system "cl-llama-cpp/examples")
@@ -116,16 +116,35 @@ has context. Type =exit= or =quit= to end the session.
 (cl-llama-cpp/examples/simple-chat:main
   :model-path "/path/to/chat-model.gguf")
 ;; User> What is Common Lisp?
-;; AI> ... (streams the reply, then prompts again)
+;; AI> ... (reply, then prompts again)
 ;; User> Tell me more about CLOS.
-;; AI> ... (continues with history)
+;; AI> ... (full history re-prefilled each turn)
 ;; User> exit
 #+end_src
 
-This is the simple, not the fast, approach: every turn re-tokenizes and
-re-processes the entire conversation from scratch, so per-turn latency grows
-with history length. That is fine for a short demo; long sessions would want
-incremental decoding that reuses the KV cache.
+*** Multi-turn Chat (Incremental / Fast)
+
+=examples/incremental-chat.lisp= drives the same loop through =make-chat-session= +
+=chat-session-send=. Each turn decodes only the new tokens; the KV cache is
+reused for the already-decoded prefix. Prefill latency stays constant regardless
+of history length. When the context window fills, the session resets
+automatically with a user-facing message.
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/examples")
+
+(cl-llama-cpp/examples/incremental-chat:main
+  :model-path "/path/to/chat-model.gguf"
+  :n-gpu-layers 99)
+;; User> What is Common Lisp?
+;; AI> ... (only new tokens decoded each turn)
+;; User> Tell me more about CLOS.
+;; AI> ... (prefix reused from cache, O(1) prefill)
+;; User> exit
+#+end_src
+
+For REPL use, call =chat-session-send= directly — the REPL itself is the
+interactive loop (=main= blocks the REPL thread).
 
 ** API Reference
 
@@ -198,7 +217,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string. Signals =type-error= if =tokens= is not a vector.
 
-- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog=, =:length=, or =:callback=). Signals =type-error= if =max-tokens= is not a positive integer or =prompt= is not a string or vector (when =prompt-tokens= is not provided). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. See the extended sampler keywords below for advanced sampling control.
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler reset-context= --- Generate text continuing =prompt=. Returns three values: the generated string, a stop reason (=:eog=, =:length=, or =:callback=), and a =(simple-array fixnum (*))= of the sampled token ids (useful for callers that need to track exact KV-cache contents without a lossy re-tokenize round-trip). When =:reset-context= is =NIL=, the KV cache is not cleared before decoding — the caller is responsible for ensuring the cache is already in a consistent state (e.g. the current cached prefix matches the new prompt). The default (=T=) preserves the original behaviour: clear the cache and re-prefill the full prompt each call. Signals =type-error= if =max-tokens= is not a positive integer or =prompt= is not a string or vector (when =prompt-tokens= is not provided). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. See the extended sampler keywords below for advanced sampling control.
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
@@ -312,6 +331,44 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 - =kv-cache-pos ctx seq-id= --- Return the minimum and maximum cached positions for =seq-id= as =(values min max)=.
 
 - =kv-cache-can-shift-p ctx= --- Return =T= if =ctx='s memory supports position shifting, =NIL= otherwise.
+
+*** Incremental Chat Session
+
+A stateful abstraction that tracks exactly which tokens are resident in the
+KV cache and decodes only the delta each turn.  The session *borrows* a
+=llama-context= (no foreign resource of its own) — the caller is responsible
+for the context's lifetime.
+
+- =make-chat-session ctx &key template system-prompt= --- Create a chat session
+  backed by =ctx=. Clears the KV cache to start clean. =template= overrides the
+  model's embedded chat template. =system-prompt=, when given, seeds =messages=
+  with an initial =(:role "system" :content ...)= entry. Signals
+  =input-validation-error= if =ctx= is not a =llama-context=.
+
+- =chat-session-send session content &rest generate-keys= → =(values reply stop-reason)= ---
+  Append a user turn and generate a reply. Only the new tokens since the last
+  turn are decoded; the cached prefix is reused. Additional keyword arguments
+  are forwarded to =generate= (e.g. =:max-tokens=, =:temp=, =:seed=, =:sampler=);
+  =:prompt-tokens= and =:reset-context= are stripped — the session manages
+  those internally. On =decode-error= (context window exhausted), rolls back the
+  KV cache and =messages= list atomically to the pre-call state before
+  re-signaling, so the session remains consistent. Signals
+  =input-validation-error= if =content= is not a non-empty string.
+
+- =chat-session-reset session &key keep-system= --- Clear the KV cache and reset
+  the conversation. When =:keep-system t= and the first message has role
+  ="system"=, that message is retained; the next turn re-seeds the cache from
+  it. Returns =NIL=.
+
+- =chat-session-p session= --- Return =T= if =session= is a =chat-session=.
+
+- =chat-session-context session= --- Return the =llama-context= backing the session.
+
+- =chat-session-model session= --- Return the =llama-model= (derived from the context at creation time).
+
+- =chat-session-messages session= --- Return the current message list as a list of =(:role … :content …)= plists.
+
+See =examples/incremental-chat.lisp= for an interactive demo.
 
 *** Session State Save/Load
 
@@ -796,6 +853,32 @@ See =examples/sampler-comparison.lisp= for a side-by-side comparison of all exte
 #+end_src
 
 See =examples/kv-cache.lisp= for a full multi-user chat server simulation with assert-driven verification.
+
+*** Incremental Chat
+
+=make-chat-session= + =chat-session-send= keep per-turn prefill cost constant.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (let ((session (cl-llama-cpp:make-chat-session ctx
+                     :system-prompt "You are a helpful assistant.")))
+      ;; Turn 1 — prefills from scratch (cache was empty)
+      (format t "~A~%" (cl-llama-cpp:chat-session-send session "Hello!" :max-tokens 64))
+
+      ;; Turn 2 — only the new user turn + assistant prefix are decoded;
+      ;;           the preceding tokens are already in the KV cache.
+      (format t "~A~%" (cl-llama-cpp:chat-session-send session "What is 2 + 2?" :max-tokens 32))
+
+      ;; Inspect the running history
+      (format t "~D messages so far~%" (length (cl-llama-cpp:chat-session-messages session)))
+
+      ;; Reset to a blank slate (system prompt retained with :keep-system t)
+      (cl-llama-cpp:chat-session-reset session :keep-system t))))
+#+end_src
+
+See =examples/incremental-chat.lisp= for a full interactive terminal loop that also
+handles context-window exhaustion gracefully.
 
 *** Session State Save/Load
 
