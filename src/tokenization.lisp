@@ -1,7 +1,9 @@
 (in-package #:cl-llama-cpp)
 
 (defun tokenize (model text &key (add-special t) (parse-special nil))
-  "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers."
+  "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers.
+Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
+  (check-type text string)
   (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (text-len (length text))
@@ -26,7 +28,9 @@
                     (cffi:mem-aref buf '%llama:token i)))))))))
 
 (defun detokenize (model tokens &key (remove-special nil) (unparse-special t))
-  "Detokenize a vector of TOKENS using MODEL's vocabulary. Returns a string."
+  "Detokenize a vector of TOKENS using MODEL's vocabulary. Returns a string.
+Signals a TYPE-ERROR if TOKENS is not a vector."
+  (check-type tokens vector)
   (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (n-tokens (length tokens))

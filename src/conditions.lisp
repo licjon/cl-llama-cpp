@@ -92,3 +92,15 @@
   (:report (lambda (c s)
              (format s "Configuration is unsafe: ~A"
                      (configuration-unsafe-error-reason c)))))
+
+(define-condition input-validation-error (llama-error)
+  ((function-name :initarg :function-name :reader input-validation-error-function)
+   (argument :initarg :argument :reader input-validation-error-argument)
+   (value :initarg :value :reader input-validation-error-value)
+   (reason :initarg :reason :reader input-validation-error-reason))
+  (:report (lambda (c s)
+             (format s "~A: invalid ~A ~S — ~A"
+                     (input-validation-error-function c)
+                     (input-validation-error-argument c)
+                     (input-validation-error-value c)
+                     (input-validation-error-reason c)))))

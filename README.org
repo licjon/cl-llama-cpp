@@ -30,6 +30,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - System capability queries (mmap, mlock, GPU offload, RPC, device count)
 - Backend device & registry introspection (device enumeration, names, types, VRAM, properties; registry enumeration)
 - Resource planning & configuration validation (memory estimation, feasibility reports, configuration suggestions, pre-creation guardrails)
+- Pre-flight input validation (type checks, bounds/range checks, encoding validation — clean Lisp conditions instead of segfaults)
 - GC finalizers as a safety net for model/context handles (=trivial-garbage=; standalone =make-model=/=make-context= constructors with =free-model=/=free-context= destructors)
 
 *Not yet wrapped* at the high level (use the =%llama= bindings directly --- see Low-level =%llama= Access):
@@ -50,6 +51,8 @@ These features provide functionality above what the llama.cpp C API offers direc
 - =generate-parallel= --- Complete multiple prompts simultaneously in shared forward passes. A single function call handles batch allocation, multi-sequence decoding, per-sequence sampling, and result collection. The C API provides batch primitives but no built-in parallel generation loop.
 
 - =estimate-memory= / =feasibility-report= / =suggest-configuration= --- Estimate model + KV-cache + compute memory from GGUF metadata and validate a configuration against a VRAM budget before loading. Free VRAM is auto-detected from the GPU when no budget is supplied. Pure Lisp-side computation; llama.cpp has no equivalent planning API.
+
+- *Pre-flight input validation* --- Every high-level wrapper validates its inputs (types, bounds, ranges, non-emptiness) at the Lisp layer before making the foreign call. Invalid inputs signal structured =input-validation-error= conditions instead of causing segfaults or undefined behavior in C. llama.cpp's C API performs minimal input checking and relies on the caller to pass valid data.
 
 ** Requirements
 
@@ -191,19 +194,19 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 *** Operations
 
-- =tokenize model text &key add-special parse-special= --- Tokenize =text= into a vector of token integers.
+- =tokenize model text &key add-special parse-special= --- Tokenize =text= into a vector of token integers. Signals =type-error= if =text= is not a string.
 
-- =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string.
+- =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string. Signals =type-error= if =tokens= is not a vector.
 
-- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog=, =:length=, or =:callback=). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. See the extended sampler keywords below for advanced sampling control.
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler= --- Generate text continuing =prompt=. Returns two values: the generated string and a stop reason (=:eog=, =:length=, or =:callback=). Signals =type-error= if =max-tokens= is not a positive integer or =prompt= is not a string or vector (when =prompt-tokens= is not provided). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. See the extended sampler keywords below for advanced sampling control.
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
-- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. The context must be created with =:embeddings t= (or =1=). Automatically synchronizes pending async compute before reading from the GPU to ensure correct results.
+- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector of single-floats. Signals =type-error= if =text= is not a string; signals =input-validation-error= if =text= is empty. The context must be created with =:embeddings t= (or =1=). Automatically synchronizes pending async compute before reading from the GPU to ensure correct results.
 
 *** Chat Templates
 
-- =format-chat model messages &key template add-assistant-prefix= --- Format =messages= (a list of =(:role "user" :content "...")= plists) into a prompt string using the model's chat template. Automatically maps the ="assistant"= role for models that expect ="model"= (e.g. Gemma).
+- =format-chat model messages &key template add-assistant-prefix= --- Format =messages= (a list of =(:role "user" :content "...")= plists) into a prompt string using the model's chat template. Signals =input-validation-error= if =messages= is empty or any message is missing a =:role= or =:content= string. Automatically maps the ="assistant"= role for models that expect ="model"= (e.g. Gemma).
 
 - =tokenize-chat model messages &key template add-assistant-prefix= --- Like =format-chat=, but returns a token vector with template markers parsed as special tokens and message content parsed as regular text. This prevents model-generated text that resembles special tokens from corrupting subsequent turns. Use with =generate='s =:prompt-tokens= parameter.
 
@@ -304,7 +307,7 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 
 - =kv-cache-seq-add ctx seq-id p0 p1 delta= --- Shift positions in =[p0, p1)= for =seq-id= by =delta=.
 
-- =kv-cache-seq-div ctx seq-id p0 p1 d= --- Divide positions in =[p0, p1)= for =seq-id= by =d=. =d= must be non-zero.
+- =kv-cache-seq-div ctx seq-id p0 p1 d= --- Divide positions in =[p0, p1)= for =seq-id= by =d=. Signals =input-validation-error= if =d= is zero.
 
 - =kv-cache-pos ctx seq-id= --- Return the minimum and maximum cached positions for =seq-id= as =(values min max)=.
 
@@ -510,11 +513,11 @@ For most use cases, =generate-parallel= (above) is sufficient. These lower-level
 
 - =with-batch (var n-tokens &key n-embd n-seq-max) &body body= --- Allocate a batch with capacity for =n-tokens=, bind to =var=, free on exit. =n-embd= non-zero allocates embedding slots instead of token slots. =n-seq-max= is the maximum sequence IDs per token (default 1). Signals =batch-init-error= if =n-tokens= <= 0 or allocation fails.
 
-- =batch-add-token batch token pos seq-ids &key logits= --- Add one token to =batch= at position =pos= for the given sequence(s). =seq-ids= is an integer or a list of integers. =logits= when true requests logit computation for this token. Signals =batch-overflow-error= if =batch= is at capacity.
+- =batch-add-token batch token pos seq-ids &key logits= --- Add one token to =batch= at position =pos= for the given sequence(s). =seq-ids= is an integer or a list of integers. =logits= when true requests logit computation for this token. Signals =batch-overflow-error= if =batch= is at capacity. Signals =input-validation-error= if =token= or =pos= is negative.
 
-- =batch-add-embedding batch embedding pos seq-ids &key logits= --- Add one embedding vector to =batch=. =embedding= must match the =n-embd= used when creating the batch.
+- =batch-add-embedding batch embedding pos seq-ids &key logits= --- Add one embedding vector to =batch=. =embedding= must match the =n-embd= used when creating the batch. Signals =input-validation-error= if =pos= is negative or =embedding= length mismatches =n-embd=.
 
-- =batch-add-sequence batch tokens seq-id &key start-pos logits= --- Add a vector of =tokens= with sequential positions. =logits= controls which tokens get logit computation: =:last= (default), =:all=, or =nil=.
+- =batch-add-sequence batch tokens seq-id &key start-pos logits= --- Add a vector of =tokens= with sequential positions. =logits= controls which tokens get logit computation: =:last= (default), =:all=, or =nil=. Signals =input-validation-error= if =tokens= is empty or =start-pos= is negative.
 
 - =batch-clear batch= --- Reset =batch='s active token count to 0. Existing slot contents remain allocated and will be overwritten by subsequent add calls.
 
@@ -544,8 +547,11 @@ All conditions inherit from =llama-error=.
 | =batch-init-error=           | =n-tokens=              | Batch allocation fails                                    |
 | =batch-overflow-error=       | =capacity=, =token-count= | Batch add exceeds capacity                                |
 | =configuration-unsafe-error= | =reason=                | =with-context :validation :error= and config exceeds budget |
+| =input-validation-error=     | =function-name=, =argument=, =value=, =reason= | Pre-flight check fails (negative index, empty input, zero divisor, etc.) |
 
 =configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
+
+=input-validation-error= carries four slots: =input-validation-error-function= (which wrapper signaled), =input-validation-error-argument= (which parameter), =input-validation-error-value= (the rejected value), and =input-validation-error-reason= (human-readable explanation). Simple type mismatches (e.g. passing an integer where a string is expected) signal standard =type-error= via =check-type= instead.
 
 *** Low-level =%llama= Access (Escape Hatch)
 

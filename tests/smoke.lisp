@@ -1278,6 +1278,155 @@
       (ok (null (cl-llama-cpp:free-context ctx))
           "free-context returns NIL on already-freed context"))))
 
+;;; Pre-flight input validation tests (issue #47)
+
+(deftest input-validation-condition-hierarchy
+  (testing "input-validation-error is in the condition hierarchy"
+    (ok (subtypep 'cl-llama-cpp:input-validation-error 'cl-llama-cpp:llama-error)
+        "input-validation-error is a llama-error")))
+
+(deftest input-validation-condition-signaling
+  (testing "input-validation-error can be signaled and caught with all slots"
+    (let ((caught (handler-case
+                      (error 'cl-llama-cpp:input-validation-error
+                             :function-name 'test-fn
+                             :argument :test-arg
+                             :value 42
+                             :reason "test reason")
+                    (cl-llama-cpp:input-validation-error (c) c))))
+      (ok (typep caught 'cl-llama-cpp:input-validation-error)
+          "input-validation-error is catchable")
+      (ok (eq 'test-fn (cl-llama-cpp:input-validation-error-function caught))
+          "input-validation-error-function accessor works")
+      (ok (eq :test-arg (cl-llama-cpp:input-validation-error-argument caught))
+          "input-validation-error-argument accessor works")
+      (ok (= 42 (cl-llama-cpp:input-validation-error-value caught))
+          "input-validation-error-value accessor works")
+      (ok (string= "test reason" (cl-llama-cpp:input-validation-error-reason caught))
+          "input-validation-error-reason accessor works"))))
+
+(deftest input-validation-symbols-exported
+  (testing "input-validation-error symbols are exported from cl-llama-cpp"
+    (dolist (sym '(input-validation-error
+                   input-validation-error-function
+                   input-validation-error-argument
+                   input-validation-error-value
+                   input-validation-error-reason))
+      (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+        (ok s (format nil "~A is accessible" sym))
+        (when s
+          (ok (eq status :external)
+              (format nil "~A is exported" sym)))))))
+
+(deftest batch-add-token-validates-token
+  (testing "batch-add-token rejects negative token ID"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-batch (batch 10)
+        (ok (handler-case
+                (progn (cl-llama-cpp:batch-add-token batch -1 0 0) nil)
+              (cl-llama-cpp:input-validation-error () t))
+            "negative token signals input-validation-error")))))
+
+(deftest batch-add-token-validates-pos
+  (testing "batch-add-token rejects negative position"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-batch (batch 10)
+        (ok (handler-case
+                (progn (cl-llama-cpp:batch-add-token batch 1 -1 0) nil)
+              (cl-llama-cpp:input-validation-error () t))
+            "negative pos signals input-validation-error")))))
+
+(deftest batch-add-sequence-validates-empty
+  (testing "batch-add-sequence rejects empty token vector"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-batch (batch 10)
+        (ok (handler-case
+                (progn (cl-llama-cpp:batch-add-sequence batch (vector) 0) nil)
+              (cl-llama-cpp:input-validation-error () t))
+            "empty tokens signals input-validation-error")))))
+
+(deftest batch-add-sequence-validates-start-pos
+  (testing "batch-add-sequence rejects negative start-pos"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-batch (batch 10)
+        (ok (handler-case
+                (progn (cl-llama-cpp:batch-add-sequence batch (vector 1 2) 0
+                                                        :start-pos -1) nil)
+              (cl-llama-cpp:input-validation-error () t))
+            "negative start-pos signals input-validation-error")))))
+
+(deftest kv-cache-seq-div-validates-zero
+  (testing "kv-cache-seq-div signals input-validation-error for zero divisor"
+    (ok (handler-case
+            (progn (cl-llama-cpp:kv-cache-seq-div nil 0 0 10 0) nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "zero divisor signals input-validation-error")))
+
+(deftest generate-validates-max-tokens
+  (testing "generate rejects non-positive max-tokens"
+    (ok (handler-case
+            (progn (cl-llama-cpp:generate nil "hello" :max-tokens 0) nil)
+          (type-error () t))
+        "zero max-tokens signals type-error")
+    (ok (handler-case
+            (progn (cl-llama-cpp:generate nil "hello" :max-tokens -1) nil)
+          (type-error () t))
+        "negative max-tokens signals type-error")))
+
+(deftest generate-validates-prompt-type
+  (testing "generate rejects non-string non-vector prompt"
+    (ok (handler-case
+            (progn (cl-llama-cpp:generate nil 42) nil)
+          (type-error () t))
+        "integer prompt signals type-error")))
+
+(deftest embed-validates-text
+  (testing "embed rejects non-string text"
+    (ok (handler-case
+            (progn (cl-llama-cpp:embed nil 42) nil)
+          (type-error () t))
+        "integer text signals type-error"))
+  (testing "embed rejects empty string"
+    (ok (handler-case
+            (progn (cl-llama-cpp:embed nil "") nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "empty text signals input-validation-error")))
+
+(deftest tokenize-validates-text-type
+  (testing "tokenize rejects non-string text"
+    (ok (handler-case
+            (progn (cl-llama-cpp:tokenize nil 42) nil)
+          (type-error () t))
+        "integer text signals type-error")))
+
+(deftest detokenize-validates-tokens-type
+  (testing "detokenize rejects non-vector tokens"
+    (ok (handler-case
+            (progn (cl-llama-cpp:detokenize nil '(1 2 3)) nil)
+          (type-error () t))
+        "list tokens signals type-error")))
+
+(deftest format-chat-validates-messages
+  (testing "format-chat rejects empty messages"
+    (ok (handler-case
+            (progn (cl-llama-cpp:format-chat nil nil) nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "nil messages signals input-validation-error"))
+  (testing "format-chat rejects messages without :role"
+    (ok (handler-case
+            (progn (cl-llama-cpp:format-chat nil (list (list :content "hi"))) nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "missing :role signals input-validation-error"))
+  (testing "format-chat rejects messages without :content"
+    (ok (handler-case
+            (progn (cl-llama-cpp:format-chat nil (list (list :role "user"))) nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "missing :content signals input-validation-error")))
+
 (deftest make-model-bad-path
   (testing "make-model signals model-load-error on nonexistent path"
     (cl-llama-cpp:with-llama-compatible-fp-environment
