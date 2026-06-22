@@ -3,6 +3,7 @@
 (defun tokenize (model text &key (add-special t) (parse-special nil))
   "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers.
 Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
+  (declare (optimize (speed 3)))
   (check-type text string)
   (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
@@ -13,6 +14,7 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
            (n-needed (- (%llama:tokenize vocab text text-len
                                          (cffi:null-pointer) 0
                                          add-sp parse-sp))))
+      (declare (type fixnum text-len add-sp parse-sp n-needed))
       (when (<= n-needed 0)
         (error 'tokenization-error :text text))
       ;; Second pass: fill token buffer
@@ -20,30 +22,37 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
         (let ((n-written (%llama:tokenize vocab text text-len
                                           buf n-needed
                                           add-sp parse-sp)))
+          (declare (type fixnum n-written))
           (when (< n-written 0)
             (error 'tokenization-error :text text))
           (let ((result (make-array n-written :element-type 'fixnum)))
+            (declare (type (simple-array fixnum (*)) result))
             (dotimes (i n-written result)
+              (declare (type fixnum i))
               (setf (aref result i)
                     (cffi:mem-aref buf '%llama:token i)))))))))
 
 (defun detokenize (model tokens &key (remove-special nil) (unparse-special t))
   "Detokenize a vector of TOKENS using MODEL's vocabulary. Returns a string.
 Signals a TYPE-ERROR if TOKENS is not a vector."
+  (declare (optimize (speed 3)))
   (check-type tokens vector)
   (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
            (n-tokens (length tokens))
            (remove-sp (if remove-special 1 0))
            (unparse-sp (if unparse-special 1 0)))
+      (declare (type fixnum n-tokens remove-sp unparse-sp))
       ;; Copy tokens into foreign buffer
       (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
         (dotimes (i n-tokens)
+          (declare (type fixnum i))
           (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
         ;; First pass: get required text length
         (let ((n-needed (- (%llama:detokenize vocab tok-buf n-tokens
                                               (cffi:null-pointer) 0
                                               remove-sp unparse-sp))))
+          (declare (type fixnum n-needed))
           (when (<= n-needed 0)
             (return-from detokenize ""))
           ;; Second pass: fill text buffer (llama API does not null-terminate)
@@ -51,4 +60,5 @@ Signals a TYPE-ERROR if TOKENS is not a vector."
             (let ((n-written (%llama:detokenize vocab tok-buf n-tokens
                                                 text-buf n-needed
                                                 remove-sp unparse-sp)))
+              (declare (type fixnum n-written))
               (cffi:foreign-string-to-lisp text-buf :count n-written))))))))

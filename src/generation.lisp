@@ -330,6 +330,7 @@ All other sampler-related keywords are ignored when :SAMPLER is supplied.
 
 Signals INPUT-VALIDATION-ERROR if MAX-TOKENS is not a positive integer or
 PROMPT is neither a string nor a vector."
+  (declare (optimize (speed 3)))
   (check-type max-tokens (integer 1 *))
   (unless prompt-tokens
     (check-type prompt (or string vector)))
@@ -343,10 +344,13 @@ PROMPT is neither a string nor a vector."
            (n-prompt (length prompt-tokens))
            (generated (make-array 0 :element-type 'fixnum
                                     :adjustable t :fill-pointer 0)))
+      (declare (type fixnum n-prompt)
+               (type (vector fixnum) generated))
       (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       ;; Decode the prompt
       (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
         (dotimes (i n-prompt)
+          (declare (type fixnum i))
           (setf (cffi:mem-aref tok-buf '%llama:token i) (aref prompt-tokens i)))
         (let* ((batch (%llama:batch-get-one tok-buf n-prompt))
                (rc (%llama:decode ctx-ptr batch)))
@@ -390,11 +394,12 @@ PROMPT is neither a string nor a vector."
                             :adaptive-p-decay adaptive-p-decay)))
             (emitted-len 0)
             (stop-reason nil))
+        (declare (type fixnum emitted-len))
         (unwind-protect
             ;; sampler-sample already calls sampler-accept internally — do NOT
             ;; call sampler-accept again or the grammar FSM double-advances.
-            (loop for i from 0 below max-tokens
-                  for new-token = (%llama:sampler-sample chain-ptr ctx-ptr -1)
+            (loop for i of-type fixnum from 0 below max-tokens
+                  for new-token of-type fixnum = (%llama:sampler-sample chain-ptr ctx-ptr -1)
                   until (not (zerop (%llama:token-is-eog vocab new-token)))
                   do (vector-push-extend new-token generated)
                      (when token-callback
@@ -423,6 +428,7 @@ PROMPT is neither a string nor a vector."
                        (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
                        (let* ((batch (%llama:batch-get-one tok-buf 1))
                               (rc (%llama:decode ctx-ptr batch)))
+                         (declare (type fixnum rc))
                          (unless (zerop rc)
                            (error 'decode-error :code rc)))
                        (setf (llama-context-compute-pending-p ctx) t)))
@@ -433,7 +439,9 @@ PROMPT is neither a string nor a vector."
                       ""
                       (let ((result-tokens (make-array (length generated)
                                                        :element-type 'fixnum)))
+                        (declare (type (simple-array fixnum (*)) result-tokens))
                         (dotimes (i (length generated))
+                          (declare (type fixnum i))
                           (setf (aref result-tokens i) (aref generated i)))
                         (detokenize model result-tokens :remove-special t)))))
         (values text
@@ -445,6 +453,7 @@ PROMPT is neither a string nor a vector."
 The context must have been created with :embeddings 1.
 When NORMALIZE is true (default), L2-normalizes the result.
 Signals INPUT-VALIDATION-ERROR if TEXT is not a non-empty string."
+  (declare (optimize (speed 3)))
   (check-type text string)
   (when (zerop (length text))
     (error 'input-validation-error
@@ -457,12 +466,14 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a non-empty string."
            (tokens (tokenize model text))
            (n-tokens (length tokens))
            (n-embd (%llama:model-n-embd raw-model)))
+      (declare (type fixnum n-tokens n-embd))
       ;; Check embeddings configured before calling C encode (would crash if not)
       (when (eq (%llama:pooling-type ctx-ptr) :none)
         (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
       ;; Build batch and encode
       (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
         (dotimes (i n-tokens)
+          (declare (type fixnum i))
           (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
         (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
                (rc (%llama:encode ctx-ptr batch)))
@@ -478,11 +489,17 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a non-empty string."
         (when (cffi:null-pointer-p embd-ptr)
           (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
         (let ((result (make-array n-embd :element-type 'single-float)))
+          (declare (type (simple-array single-float (*)) result))
           (dotimes (i n-embd)
+            (declare (type fixnum i))
             (setf (aref result i) (cffi:mem-aref embd-ptr :float i)))
           (when normalize
-            (let ((norm (sqrt (loop for x across result sum (* x x)))))
+            (let ((norm (sqrt (loop for x of-type single-float across result
+                                    sum (the single-float (* x x))
+                                    of-type single-float))))
+              (declare (type single-float norm))
               (when (> norm 0.0)
-                (dotimes (i (length result))
+                (dotimes (i n-embd)
+                  (declare (type fixnum i))
                   (setf (aref result i) (/ (aref result i) norm))))))
           result)))))

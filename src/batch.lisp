@@ -11,6 +11,7 @@
 (defun %batch-check-overflow (batch)
   (let ((count (getf (%batch-data batch) '%llama:n-tokens))
         (cap (%batch-capacity batch)))
+    (declare (type fixnum count cap))
     (when (>= count cap)
       (error 'batch-overflow-error :capacity cap :token-count count))))
 
@@ -62,6 +63,7 @@ SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
 LOGITS when true requests logit computation for this token.
 Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity.
 Signals INPUT-VALIDATION-ERROR if TOKEN or POS is negative."
+  (declare (optimize (speed 3)))
   (check-type token fixnum)
   (check-type pos fixnum)
   (when (minusp token)
@@ -82,12 +84,13 @@ Signals INPUT-VALIDATION-ERROR if TOKEN or POS is negative."
          (logits-ptr (getf plist '%llama:logits))
          (seq-list (if (listp seq-ids) seq-ids (list seq-ids)))
          (n-seq (length seq-list)))
+    (declare (type fixnum idx n-seq))
     (setf (cffi:mem-aref tok-ptr '%llama:token idx) token)
     (setf (cffi:mem-aref pos-ptr '%llama:pos idx) pos)
     (setf (cffi:mem-aref n-seq-ptr '%llama:int32-t idx) n-seq)
     (let ((seq-arr (cffi:mem-aref seq-ptr :pointer idx)))
       (loop for s in seq-list
-            for j from 0
+            for j of-type fixnum from 0
             do (setf (cffi:mem-aref seq-arr '%llama:seq-id j) s)))
     (setf (cffi:mem-aref logits-ptr '%llama:int8-t idx) (if logits 1 0))
     (setf (getf (%batch-data batch) '%llama:n-tokens) (1+ idx)))
@@ -101,6 +104,7 @@ SEQ-IDS is an integer (single sequence) or a list of integers (multi-sequence).
 LOGITS when true requests logit computation for this slot.
 Signals BATCH-OVERFLOW-ERROR if BATCH is at capacity.
 Signals INPUT-VALIDATION-ERROR if POS is negative or EMBEDDING length mismatches."
+  (declare (optimize (speed 3)))
   (check-type pos fixnum)
   (when (minusp pos)
     (error 'input-validation-error
@@ -117,7 +121,8 @@ Signals INPUT-VALIDATION-ERROR if POS is negative or EMBEDDING length mismatches
          (logits-ptr (getf plist '%llama:logits))
          (seq-list (if (listp seq-ids) seq-ids (list seq-ids)))
          (n-seq (length seq-list))
-         (embd-offset (* idx n-embd)))
+         (embd-offset (the fixnum (* idx n-embd))))
+    (declare (type fixnum n-embd idx n-seq embd-offset))
     (when (/= (length embedding) n-embd)
       (error 'input-validation-error
              :function-name 'batch-add-embedding :argument :embedding
@@ -126,17 +131,18 @@ Signals INPUT-VALIDATION-ERROR if POS is negative or EMBEDDING length mismatches
                              (length embedding) n-embd)))
     (etypecase embedding
       (vector (dotimes (j n-embd)
-                (setf (cffi:mem-aref embd-ptr :float (+ embd-offset j))
+                (declare (type fixnum j))
+                (setf (cffi:mem-aref embd-ptr :float (the fixnum (+ embd-offset j)))
                       (coerce (aref embedding j) 'single-float))))
       (list (loop for v in embedding
-                  for j from 0
-                  do (setf (cffi:mem-aref embd-ptr :float (+ embd-offset j))
+                  for j of-type fixnum from 0
+                  do (setf (cffi:mem-aref embd-ptr :float (the fixnum (+ embd-offset j)))
                            (coerce v 'single-float)))))
     (setf (cffi:mem-aref pos-ptr '%llama:pos idx) pos)
     (setf (cffi:mem-aref n-seq-ptr '%llama:int32-t idx) n-seq)
     (let ((seq-arr (cffi:mem-aref seq-ptr :pointer idx)))
       (loop for s in seq-list
-            for j from 0
+            for j of-type fixnum from 0
             do (setf (cffi:mem-aref seq-arr '%llama:seq-id j) s)))
     (setf (cffi:mem-aref logits-ptr '%llama:int8-t idx) (if logits 1 0))
     (setf (getf (%batch-data batch) '%llama:n-tokens) (1+ idx)))
@@ -164,8 +170,10 @@ Signals INPUT-VALIDATION-ERROR if TOKENS is empty or START-POS is negative."
            :function-name 'batch-add-sequence :argument :start-pos :value start-pos
            :reason "start position must be non-negative"))
   (let ((n (length tokens)))
+    (declare (type fixnum n))
     (dotimes (i n)
-      (batch-add-token batch (aref tokens i) (+ start-pos i) seq-id
+      (declare (type fixnum i))
+      (batch-add-token batch (aref tokens i) (the fixnum (+ start-pos i)) seq-id
                        :logits (ecase logits
                                  (:last (= i (1- n)))
                                  (:all t)
@@ -217,6 +225,7 @@ seed derived from SEED + sequence-index for independent sampling.
 The context must be created with :N-SEQ-MAX >= (length prompts).
 Returns two values: a list of generated strings and a list of stop
 reasons (:eog or :length) corresponding to each prompt."
+  (declare (optimize (speed 3)))
   (when (endp prompts)
     (return-from generate-parallel (values nil nil)))
   (with-llama-compatible-fp-environment
@@ -231,7 +240,7 @@ reasons (:eog or :length) corresponding to each prompt."
                                                      :parse-special parse-special))
                                    (vector p)))
                                prompts))
-           (total-prompt-tokens (reduce #'+ token-vecs :key #'length))
+           (total-prompt-tokens (reduce #'+ token-vecs :key #'length :initial-value 0))
            (gen-tokens (loop repeat n-seq
                              collect (make-array 0 :element-type 'fixnum
                                                    :adjustable t
@@ -239,6 +248,7 @@ reasons (:eog or :length) corresponding to each prompt."
            (positions (mapcar #'length token-vecs))
            (active (make-list n-seq :initial-element t))
            (samplers '()))
+      (declare (type fixnum n-seq total-prompt-tokens))
       (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       (unwind-protect
            (progn
@@ -275,21 +285,23 @@ reasons (:eog or :length) corresponding to each prompt."
                (batch-decode ctx batch)
                (let ((logit-indices
                        (let ((acc 0))
+                         (declare (type fixnum acc))
                          (mapcar (lambda (tv)
-                                   (prog1 (+ acc (1- (length tv)))
+                                   (prog1 (the fixnum (+ acc (1- (length tv))))
                                      (incf acc (length tv))))
                                  token-vecs))))
                  (dotimes (step max-tokens)
+                   (declare (type fixnum step))
                    (unless (some #'identity active) (return))
                    (let ((new-tokens
-                           (loop for seq from 0 below n-seq
+                           (loop for seq of-type fixnum from 0 below n-seq
                                  for smpl in samplers
-                                 for idx in logit-indices
+                                 for idx of-type fixnum in logit-indices
                                  collect (when (nth seq active)
                                            (%llama:sampler-sample
                                             smpl ctx-ptr idx)))))
                      (loop for tok in new-tokens
-                           for seq from 0
+                           for seq of-type fixnum from 0
                            when (and tok (nth seq active))
                            do (if (not (zerop (%llama:token-is-eog
                                               vocab tok)))
@@ -299,8 +311,9 @@ reasons (:eog or :length) corresponding to each prompt."
                      (when (some #'identity active)
                        (batch-clear batch)
                        (let ((batch-idx 0))
+                         (declare (type fixnum batch-idx))
                          (loop for tok in new-tokens
-                               for seq from 0
+                               for seq of-type fixnum from 0
                                when (and tok (nth seq active))
                                do (batch-add-token batch tok
                                                    (nth seq positions)
