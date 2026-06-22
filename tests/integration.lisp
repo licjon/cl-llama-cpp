@@ -392,6 +392,129 @@
             (ok (>= mn mx)
                 (format nil "after clear, min (~A) >= max (~A) indicates empty" mn mx))))))))
 
+;;; generate / reset-context primitive tests
+
+(deftest generate-returns-token-vector
+  (when-model-available
+    (testing "generate returns three values: text, stop-reason, result-tokens"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason result-tokens)
+              (cl-llama-cpp:generate ctx "The sky is" :max-tokens 4)
+            (ok (stringp text) "first value is a string")
+            (ok (keywordp stop-reason) "second value is a keyword")
+            (ok (typep result-tokens '(simple-array fixnum (*)))
+                "third value is a (simple-array fixnum (*))")
+            (ok (plusp (length result-tokens))
+                "result-tokens is non-empty")))))))
+
+(deftest reset-context-nil-continues-from-cache
+  (when-model-available
+    (testing ":reset-context nil leaves the KV cache intact and advances position"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          ;; First call — normal reset, fills part of cache.
+          (cl-llama-cpp:generate ctx "Hello" :max-tokens 4)
+          (multiple-value-bind (_ mx1)
+              (cl-llama-cpp:kv-cache-pos ctx 0)
+            (declare (ignore _))
+            ;; Second call with :reset-context nil — cache must advance further.
+            (cl-llama-cpp:generate ctx "World" :max-tokens 4 :reset-context nil)
+            (multiple-value-bind (_ mx2)
+                (cl-llama-cpp:kv-cache-pos ctx 0)
+              (declare (ignore _))
+              (ok (> mx2 mx1)
+                  (format nil "cache position advanced from ~A to ~A" mx1 mx2)))))))))
+
+;;; Incremental chat-session integration tests
+
+(deftest chat-session-basic
+  (when-model-available
+    (testing "make-chat-session + chat-session-send produces a reply"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((session (cl-llama-cpp:make-chat-session ctx)))
+            (ok (cl-llama-cpp:chat-session-p session)
+                "make-chat-session returns a chat-session")
+            (multiple-value-bind (reply stop-reason)
+                (cl-llama-cpp:chat-session-send session "Hello!" :max-tokens 8)
+              (ok (stringp reply) "reply is a string")
+              (ok (plusp (length reply)) "reply is non-empty")
+              (ok (keywordp stop-reason) "stop-reason is a keyword"))
+            (let ((msgs (cl-llama-cpp:chat-session-messages session)))
+              (ok (= (length msgs) 2) "messages has user + assistant turns")
+              (ok (string= (getf (first msgs) :role) "user")
+                  "first message is user")
+              (ok (string= (getf (second msgs) :role) "assistant")
+                  "second message is assistant"))))))))
+
+(deftest chat-session-multi-turn
+  (when-model-available
+    (testing "two sends accumulate messages and produce non-empty replies"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((session (cl-llama-cpp:make-chat-session ctx)))
+            (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 8)
+            (cl-llama-cpp:chat-session-send session "How are you?" :max-tokens 8)
+            (ok (= (length (cl-llama-cpp:chat-session-messages session)) 4)
+                "four messages after two turns")))))))
+
+(deftest chat-session-reset-clears
+  (when-model-available
+    (testing "chat-session-reset empties messages and clears the KV cache"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((session (cl-llama-cpp:make-chat-session ctx)))
+            (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 4)
+            (cl-llama-cpp:chat-session-reset session)
+            (ok (null (cl-llama-cpp:chat-session-messages session))
+                "messages is empty after reset")
+            (multiple-value-bind (mn mx)
+                (cl-llama-cpp:kv-cache-pos ctx 0)
+              (ok (>= mn mx)
+                  (format nil "cache position is empty after reset (min ~A >= max ~A)" mn mx)))))))))
+
+(deftest chat-session-reset-keep-system
+  (when-model-available
+    (testing "chat-session-reset with :keep-system t retains the system message"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((session (cl-llama-cpp:make-chat-session
+                          ctx :system-prompt "You are a helpful assistant.")))
+            (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 4)
+            (cl-llama-cpp:chat-session-reset session :keep-system t)
+            (let ((msgs (cl-llama-cpp:chat-session-messages session)))
+              (ok (= (length msgs) 1) "one message retained")
+              (ok (string= (getf (first msgs) :role) "system")
+                  "retained message is the system message"))))))))
+
+(deftest chat-session-incremental-equals-full
+  (when-model-available
+    (testing "incremental decode matches full re-prefill for greedy sampling"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        ;; Two separate contexts: one for incremental, one for full re-prefill.
+        (cl-llama-cpp:with-context (ctx-inc model :n-ctx 512)
+          (cl-llama-cpp:with-context (ctx-full model :n-ctx 512)
+            ;; Greedy sampler = stateless argmax, so sharing it across two
+            ;; sequential generate calls is safe and gives deterministic output.
+            (cl-llama-cpp:with-sampler-chain (greedy-sampler :greedy t)
+              (let* ((user-msg "What is 2 + 2?")
+                     (messages (list (list :role "user" :content user-msg)))
+                     ;; Incremental path via chat-session.
+                     (session (cl-llama-cpp:make-chat-session ctx-inc))
+                     (inc-reply (cl-llama-cpp:chat-session-send
+                                 session user-msg
+                                 :max-tokens 8 :sampler greedy-sampler))
+                     ;; Full re-prefill path via plain generate.
+                     (prompt-tokens (cl-llama-cpp:tokenize-chat model messages))
+                     (full-reply (cl-llama-cpp:generate
+                                  ctx-full nil
+                                  :prompt-tokens prompt-tokens
+                                  :max-tokens 8 :sampler greedy-sampler)))
+                (ok (string= inc-reply full-reply)
+                    (format nil "incremental ~S equals full ~S"
+                            inc-reply full-reply))))))))))
+
 ;;; Model / context introspection integration tests
 
 (deftest model-description-returns-string

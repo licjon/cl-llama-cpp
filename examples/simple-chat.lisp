@@ -49,9 +49,9 @@ called directly at the REPL with (main)."
         (format t "Type 'exit' or 'quit' to end.~%~%")
         (let ((messages '()))
           (loop
-            (format t "User> ")
-            (finish-output)
-            (let ((input (read-line)))
+            (format *query-io* "User> ")
+            (finish-output *query-io*)
+            (let ((input (read-line *query-io*)))
               (when (member input '("exit" "quit") :test #'string-equal)
                 (return))
 

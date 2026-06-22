@@ -1436,3 +1436,55 @@
             (cl-llama-cpp:model-load-error (c)
               (cl-llama-cpp:model-load-error-path c)))
           "model-load-error was signaled for bad path"))))
+
+;;; Chat-session wrapper tests
+
+(deftest chat-session-symbols-exported
+  (testing "chat-session wrapper symbols are exported from cl-llama-cpp"
+    (dolist (sym '(chat-session
+                   chat-session-p
+                   chat-session-context
+                   chat-session-model
+                   chat-session-messages
+                   make-chat-session
+                   chat-session-send
+                   chat-session-reset))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest chat-session-functions-fbound
+  (testing "chat-session wrapper symbols are fbound"
+    (dolist (sym-name '("MAKE-CHAT-SESSION"
+                        "CHAT-SESSION-SEND"
+                        "CHAT-SESSION-RESET"
+                        "CHAT-SESSION-P"
+                        "CHAT-SESSION-CONTEXT"
+                        "CHAT-SESSION-MODEL"
+                        "CHAT-SESSION-MESSAGES"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest chat-session-send-validates-content
+  (testing "chat-session-send rejects non-string content"
+    (ok (handler-case
+            (progn (cl-llama-cpp:chat-session-send nil 42) nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "integer content signals input-validation-error"))
+  (testing "chat-session-send rejects empty string content"
+    (ok (handler-case
+            (progn (cl-llama-cpp:chat-session-send nil "") nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "empty string signals input-validation-error")))
+
+(deftest make-chat-session-validates-ctx
+  (testing "make-chat-session rejects non-context argument"
+    (ok (handler-case
+            (progn (cl-llama-cpp:make-chat-session "not-a-context") nil)
+          (cl-llama-cpp:input-validation-error () t))
+        "non-context signals input-validation-error")))
