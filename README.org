@@ -156,14 +156,14 @@ interactive loop (=main= blocks the REPL thread).
 
 The high-level API represents resources as *typed handle structs* rather than raw C pointers:
 
-| Handle type             | Predicate                 | Pointer accessor               | Created by                                               |
-|-------------------------+---------------------------+--------------------------------+----------------------------------------------------------|
-| =llama-model=             | =llama-model-p=             | =llama-model-pointer=            | =with-model=, =make-model=                                    |
-| =llama-context=           | =llama-context-p=           | =llama-context-pointer=          | =with-context=, =make-context=                                |
-| =llama-sampler=           | =llama-sampler-p=           | =llama-sampler-pointer=          | =with-sampler-chain=, =make-grammar-sampler=, etc.           |
-| =gguf-context=            | =gguf-context-p=            | =gguf-context-pointer=           | =with-gguf=                                                |
-| =ggml-backend-device=     | =ggml-backend-device-p=     | =ggml-backend-device-pointer=    | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
-| =ggml-backend-registry=   | =ggml-backend-registry-p=   | =ggml-backend-registry-pointer=  | =backend-reg-get=, =backend-reg-by-name=                   |
+| Handle type           | Predicate               | Pointer accessor              | Created by                                                     |
+|-----------------------+-------------------------+-------------------------------+----------------------------------------------------------------|
+| =llama-model=           | =llama-model-p=           | =llama-model-pointer=           | =with-model=, =make-model=                                         |
+| =llama-context=         | =llama-context-p=         | =llama-context-pointer=         | =with-context=, =make-context=                                     |
+| =llama-sampler=         | =llama-sampler-p=         | =llama-sampler-pointer=         | =with-sampler-chain=, =make-grammar-sampler=, etc.                 |
+| =gguf-context=          | =gguf-context-p=          | =gguf-context-pointer=          | =with-gguf=                                                      |
+| =ggml-backend-device=   | =ggml-backend-device-p=   | =ggml-backend-device-pointer=   | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
+| =ggml-backend-registry= | =ggml-backend-registry-p= | =ggml-backend-registry-pointer= | =backend-reg-get=, =backend-reg-by-name=                           |
 
 Backend device and registry handles are *borrowed references* — the GGML backend owns the underlying objects and no =free= is needed. The predicates replace =cffi:null-pointer-p= for handle variables. When you drop to =%llama:= directly, use the pointer accessor to get the raw C pointer — see Low-level =%llama= Access.
 
@@ -609,6 +609,39 @@ All conditions inherit from =llama-error=.
 =configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a =warning=, not a =llama-error=; its reason is read with =configuration-unsafe-warning-reason= and =configuration-unsafe-error-reason= for the error.
 
 =input-validation-error= carries four slots: =input-validation-error-function= (which wrapper signaled), =input-validation-error-argument= (which parameter), =input-validation-error-value= (the rejected value), and =input-validation-error-reason= (human-readable explanation). Simple type mismatches (e.g. passing an integer where a string is expected) signal standard =type-error= via =check-type= instead.
+
+Resource-loading conditions also establish domain-specific interactive restarts — see Interactive Restarts below.
+
+*** Interactive Restarts
+
+Every resource-loading condition comes with domain-specific restarts for the interactive debugger. When a load fails in a REPL session (most commonly GPU OOM on model load), the debugger presents these choices in addition to the generic SLY/SLIME restarts.
+
+Restart names are intentionally unexported. For programmatic use from =handler-bind=, reference them as =cl-llama-cpp::restart-name=.
+
+| Condition              | Restart                       | Description                                            |
+|------------------------+-------------------------------+--------------------------------------------------------|
+| =model-load-error=       | =retry-with-layers (n)=         | Retry loading the model with a new =:n-gpu-layers= value |
+|                        | =use-cpu-only ()=               | Retry with =:n-gpu-layers 0= (CPU only)                  |
+|                        | =use-different-path (new-path)= | Retry loading from a different file path               |
+| =context-creation-error= | =retry-with-smaller-ctx (n)=    | Retry context creation with a smaller =:n-ctx= value     |
+|                        | =retry-with-params (plist)=     | Retry with a completely new params plist               |
+| =lora-load-error=        | =use-different-path (new-path)= | Retry loading the LoRA adapter from a different path   |
+|                        | =skip-lora ()=                  | Continue without a LoRA adapter (body receives =NIL=)    |
+| =lora-apply-error=       | =use-different-scale (s)=       | Retry applying the adapter at a different scale        |
+|                        | =skip-apply ()=                 | Continue without applying the LoRA adapter             |
+| =session-save-error=     | =use-different-path (new-path)= | Retry saving the session to a different path           |
+|                        | =skip-save ()=                  | Continue without saving (returns =NIL=)                  |
+| =session-load-error=     | =use-different-path (new-path)= | Retry loading the session from a different path        |
+|                        | =start-fresh ()=                | Skip loading; return an empty token vector             |
+| =grammar-error=          | =skip-grammar ()=               | Continue without grammar constraint (returns =NIL=)      |
+|                        | =use-different-grammar (g)=     | Retry with a different GBNF grammar string             |
+| =chat-template-error=    | =use-default-template ()=       | Retry =format-chat= using the model's built-in template  |
+
+Notes:
+- Restarts that read user input do so from =*query-io*=, so they work both in the interactive debugger and via =(invoke-restart-interactively ...)=.
+- =save-session-seq= and =load-session-seq= expose the same restarts as their non-seq counterparts.
+- =make-grammar-sampler-lazy= and =make-infill-sampler= also establish the grammar restarts (=skip-grammar= / =use-different-grammar=).
+- =with-lora= and =with-grammar-sampler= guard their cleanup so a =skip-*= restart that returns =NIL= does not attempt to free a null pointer.
 
 *** Low-level =%llama= Access (Escape Hatch)
 
