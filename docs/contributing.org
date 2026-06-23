@@ -42,12 +42,6 @@ sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
 Any variable left unset skips the tests that depend on it. Setting only
 =LLAMA_TEST_MODEL= is sufficient to run most integration tests.
 
-*** Known Test Failure
-
-=reset-context-perf-clears-counters= is expected to fail. After a context reset,
-=n_eval= reports 1 instead of 0 due to a quirk in llama.cpp's internal counter
-behaviour — not a binding bug. All other tests should pass.
-
 ** Adding a High-Level Wrapper
 
 When a =%llama= function exists but no high-level wrapper does, the general pattern is:
