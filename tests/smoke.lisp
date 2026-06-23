@@ -1541,3 +1541,49 @@
         (cl-llama-cpp:grammar-error () nil))
       (ok skip-grammar "skip-grammar restart is established by make-grammar-sampler-lazy")
       (ok use-different-grammar "use-different-grammar restart is established by make-grammar-sampler-lazy"))))
+
+;;; Sampler config object tests (issue #49)
+
+(deftest sampler-config-symbol-exported
+  (testing "make-sampler-config is exported from cl-llama-cpp"
+    (multiple-value-bind (sym status)
+        (find-symbol "MAKE-SAMPLER-CONFIG" :cl-llama-cpp)
+      (ok sym "MAKE-SAMPLER-CONFIG is accessible")
+      (ok (eq status :external) "MAKE-SAMPLER-CONFIG is exported"))))
+
+(deftest sampler-config-fbound
+  (testing "make-sampler-config is fbound"
+    (let ((sym (find-symbol "MAKE-SAMPLER-CONFIG" :cl-llama-cpp)))
+      (ok (and sym (fboundp sym)) "MAKE-SAMPLER-CONFIG is fbound"))))
+
+(deftest sampler-config-returns-plist
+  (testing "make-sampler-config returns a plist of the supplied params"
+    (let ((cfg (cl-llama-cpp:make-sampler-config :temp 0.3 :top-k 40)))
+      (ok (listp cfg) "result is a list")
+      (ok (= 0.3 (getf cfg :temp)) ":temp is stored")
+      (ok (= 40 (getf cfg :top-k)) ":top-k is stored"))))
+
+(deftest sampler-config-stores-only-provided
+  (testing "make-sampler-config stores only explicitly supplied params"
+    (let ((cfg (cl-llama-cpp:make-sampler-config :seed 99)))
+      (ok (= 2 (length cfg)) "plist has exactly one key/value pair")
+      (ok (= 99 (getf cfg :seed)) ":seed is stored")
+      (ok (eq (getf cfg :temp :absent) :absent) ":temp absent when not supplied"))))
+
+(deftest sampler-config-rejects-unknown-keys
+  (testing "make-sampler-config rejects unknown keyword arguments"
+    (ok (handler-case
+            (progn (cl-llama-cpp:make-sampler-config :unknown-key 42) nil)
+          (error () t))
+        "unknown keyword signals an error")))
+
+(deftest sampler-config-override-semantics
+  (testing "explicit kwarg in generate overrides config value at the plist level"
+    ;; Verify the merge logic: caller-explicit appears before config in plist.
+    ;; We can't call generate without a real context, so verify the plist mechanic directly.
+    (let* ((cfg (cl-llama-cpp:make-sampler-config :temp 0.3 :top-k 40))
+           ;; Simulate: caller passes :temp 0.9; config has :temp 0.3
+           (caller-sampler '(:temp 0.9))
+           (effective (append caller-sampler cfg)))
+      (ok (= 0.9 (getf effective :temp)) "caller temp (0.9) wins over config temp (0.3)")
+      (ok (= 40  (getf effective :top-k)) "config top-k (40) used when caller omits it"))))

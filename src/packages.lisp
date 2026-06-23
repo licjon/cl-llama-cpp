@@ -70,6 +70,8 @@ New wrappers must follow this convention.")
    #:gguf-tensor-size
    #:gguf-tensor-info
    #:gguf-tensors
+   ;; Sampler config (optional convenience for generate / build-sampler-chain)
+   #:make-sampler-config
    ;; Operations
    #:tokenize
    #:detokenize

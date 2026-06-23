@@ -4,7 +4,7 @@
 ;;;
 ;;; Covers: typical-p, xtc, top-n-sigma, mirostat v1/v2, repeat/frequency/
 ;;; presence penalties, DRY anti-repetition, logit-bias, dynamic temperature,
-;;; adaptive-p, and sampler-seed.
+;;; adaptive-p, sampler-seed, and make-sampler-config (reusable configs).
 ;;;
 ;;; Setup:
 ;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
@@ -290,6 +290,50 @@ Strips leading whitespace from output for cleaner display."
          :max-tokens 192))
   (format t "~%Multiple samplers compose naturally through keyword arguments.~%"))
 
+;;; ── Demo 9: make-sampler-config — reusable parameter bundles ───────
+
+(defun demo-sampler-config (ctx)
+  (banner "DEMO 9: make-sampler-config — Reusable Sampling Policies")
+
+  (format t "make-sampler-config bundles sampler parameters into a plain plist.~%")
+  (format t "Pass it as :sampler-config to generate or with-sampler-chain.~%")
+  (format t "Explicit keyword arguments always override what the config supplies.~%")
+  (format t "Only the keys you provide are stored — no implicit defaults.~%")
+
+  (let ((creative (make-sampler-config
+                    :temp 1.0 :top-p 0.95 :repeat-penalty 1.2
+                    :frequency-penalty 0.3 :seed 42))
+        (focused  (make-sampler-config
+                    :temp 0.2 :top-k 40 :seed 42)))
+
+    (section "9a: Creative config — reused across two different prompts")
+    (format t "Config: :temp 1.0  :top-p 0.95  :repeat-penalty 1.2  :freq-penalty 0.3~%")
+    (format t "Prompt 1:~%")
+    (gen ctx "Write a whimsical opening sentence for a fantasy novel:"
+         :sampler-config creative :max-tokens 64)
+    (format t "Prompt 2 (same config):~%")
+    (gen ctx "Describe an unusual cloud formation:"
+         :sampler-config creative :max-tokens 64)
+
+    (section "9b: Focused config — low temperature for factual output")
+    (format t "Config: :temp 0.2  :top-k 40~%")
+    (gen ctx "What is the capital of Japan?"
+         :sampler-config focused :max-tokens 32)
+
+    (section "9c: Explicit kwarg overrides config (temp 0.9 beats config's 0.2)")
+    (format t "Same focused config, but :temp 0.9 overrides at the call site:~%")
+    (gen ctx "Describe a rainy afternoon:"
+         :sampler-config focused :temp 0.9 :max-tokens 64)
+
+    (section "9d: Config works with with-sampler-chain")
+    (format t "Build a chain from the creative config, then pass :sampler to generate:~%")
+    (with-sampler-chain (chain :sampler-config creative)
+      (gen ctx "Once upon a midnight dreary,"
+           :sampler chain :max-tokens 64)))
+
+  (format t "~%The config object is a plain plist — getf works on it directly.~%")
+  (format t "Keyword API calls without :sampler-config are completely unaffected.~%"))
+
 ;;; ── Entry point ────────────────────────────────────────────────────
 
 (defun run ()
@@ -306,7 +350,8 @@ Strips leading whitespace from output for cleaner display."
       (demo-dynamic-temp ctx)
       (demo-logit-bias model ctx)
       (demo-sampler-seed ctx)
-      (demo-combined ctx)))
+      (demo-combined ctx)
+      (demo-sampler-config ctx)))
   (format t "~&~%~A~%" (make-string 64 :initial-element #\═))
   (format t "  All demos complete.~%")
   (format t "~A~%" (make-string 64 :initial-element #\═))
