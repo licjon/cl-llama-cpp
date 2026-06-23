@@ -91,7 +91,7 @@ underlying objects and no =free= is ever needed.
   Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit.
   With no keyword arguments, allocates an empty chain — populate it inside =body= using
   =sampler-chain-add=. With keyword arguments, pre-builds the chain using the same
-  options as =generate= (see [[*Extended Sampler Keywords]]). Grammar, =:mirostat=,
+  options as =generate= (see Extended Sampler Keywords below). Grammar, =:mirostat=,
   =:dry-multiplier=, and =:logit-bias= require =:model=. =:mirostat= and =:mirostat-v2=
   are mutually exclusive. Pass =:sampler-config= to supply defaults; explicit keyword
   arguments always override the config.
@@ -185,7 +185,7 @@ underlying objects and no =free= is ever needed.
   - =:sampler-config= — a plist from =make-sampler-config=; supplies defaults for any
     sampler parameter not given explicitly; explicit keywords always take priority.
 
-  See [[*Extended Sampler Keywords]] for the full sampler keyword list.
+  See Extended Sampler Keywords below for the full sampler keyword list.
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed
   parse-special= /...all extended sampler keywords.../ --- Generate text for multiple
@@ -502,7 +502,7 @@ decoding loops or embedding batches.
 ** GGUF File Inspection
 
 Inspect GGUF files without loading a model or initializing the backend. The lifecycle
-macro is =with-gguf= — see [[*Resource Management]].
+macro is =with-gguf= — see Resource Management above.
 
 *** File-Level
 

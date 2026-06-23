@@ -6,7 +6,7 @@ fork contexts, and persist state across process restarts.
 
 This guide covers the cache manipulation primitives and the session state save/load
 API. For the higher-level incremental chat abstraction that manages the cache
-automatically, see [[../getting-started.org#incremental-chat][Getting Started: Incremental Chat]].
+automatically, see the [[../getting-started.org][Getting Started]] guide.
 
 ** Concepts
 
