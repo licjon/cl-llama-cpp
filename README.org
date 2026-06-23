@@ -880,6 +880,52 @@ See =examples/kv-cache.lisp= for a full multi-user chat server simulation with a
 See =examples/incremental-chat.lisp= for a full interactive terminal loop that also
 handles context-window exhaustion gracefully.
 
+*** Tool Calling
+
+The chat template already handles model-specific prompt formatting. Tool
+calling only requires three things: tool schemas in the system message,
+parsing the model's tool-call output, and feeding the results back as a
+=tool= message. No new library dependencies are needed.
+
+=examples/tool-calling.lisp= shows the complete cycle. The example
+instructs the model via the system prompt to emit tool calls in a specific
+XML format, making parsing deterministic regardless of model family.
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/examples")
+
+(cl-llama-cpp/examples/tool-calling:run-demo
+  :model-path "/path/to/model.gguf"
+  :user-query "What's the weather in Tokyo and what time is it in UTC?")
+;; === Turn 1: model response ===
+;; <tool_call>{"name": "get_weather", "arguments": {"location": "Tokyo, Japan"}}</tool_call>
+;; <tool_call>{"name": "get_time", "arguments": {"timezone": "UTC"}}</tool_call>
+;;
+;; === Tool: get_weather {"location": "Tokyo, Japan"} ===
+;; === Result: 72°F and sunny in Tokyo, Japan ===
+;;
+;; === Tool: get_time {"timezone": "UTC"} ===
+;; === Result: 15:42 UTC ===
+;;
+;; === Turn 2: model response ===
+;; The weather in Tokyo is 72°F and sunny. The time in UTC is 15:42.
+#+end_src
+
+The loop in =run-demo= continues until the model produces no more
+=<tool_call>= blocks, so multiple tool calls in a single turn are all
+dispatched before the next generate call. The key pieces in the example:
+
+1. *Tool schemas* — a JSON array built with =format= (use jzon/yason in production)
+2. *System message* — embeds the schemas and the expected output format
+3. =tokenize-chat= + =generate= — unchanged from ordinary chat
+4. *Parser* — =parse-all-tool-calls= extracts every =(name . args-json)= pair
+5. *Dispatcher* — calls the corresponding Lisp function per tool call
+6. *Tool result message* — appended with role ="tool"= before the next turn
+
+See =examples/tool-calling.lisp= for the full code including the JSON
+parser, a note on native chat-template tool calling (Llama-3.1, Qwen-2.5),
+and guidance on adapting the output parser per model family.
+
 *** Session State Save/Load
 
 #+begin_src lisp

@@ -45,7 +45,8 @@
                  (:file "perf-and-logging")
                  (:file "resource-planning")
                  (:file "sampler-comparison")
-                 (:file "sampler-showcase")))))
+                 (:file "sampler-showcase")
+                 (:file "tool-calling")))))
 
 (defsystem "cl-llama-cpp/generate"
   :description "Binding generator for cl-llama-cpp (developers only)"
