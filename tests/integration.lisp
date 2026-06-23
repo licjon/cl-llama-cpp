@@ -2789,3 +2789,56 @@ ws     ::= [ \\t\\n]*")
                       (ok (> (length text) 0) "generated non-empty text"))
                  (cl-llama-cpp:free-context ctx)))
           (cl-llama-cpp:free-model model))))))
+
+;;; Sampler config object integration tests (issue #49)
+
+(deftest sampler-config-generate-basic
+  (when-model-available
+    (testing "generate accepts :sampler-config and produces text"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let* ((cfg (cl-llama-cpp:make-sampler-config :temp 0.1 :seed 42))
+                 (result (cl-llama-cpp:generate ctx "The sky is"
+                                                :max-tokens 8
+                                                :sampler-config cfg)))
+            (ok (stringp result) "generate with :sampler-config returns a string")
+            (ok (> (length result) 0) "result is non-empty")))))))
+
+(deftest sampler-config-override-wins
+  (when-model-available
+    (testing "explicit kwarg overrides :sampler-config value"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          ;; Config requests high temp (random); explicit :temp 0.0 (greedy-ish) should override.
+          ;; We can't deterministically test the output, but we can verify no error is raised
+          ;; and that the call honours the override signature without complaint.
+          (let* ((cfg (cl-llama-cpp:make-sampler-config :temp 1.5 :seed 0))
+                 (result (cl-llama-cpp:generate ctx "Once"
+                                                :max-tokens 4
+                                                :sampler-config cfg
+                                                :temp 0.1)))
+            (ok (stringp result) "generate with config + explicit :temp override returns a string")))))))
+
+(deftest sampler-config-no-config-unchanged
+  (when-model-available
+    (testing "generate without :sampler-config behaves as before"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((result (cl-llama-cpp:generate ctx "The capital of France is"
+                                               :max-tokens 4 :temp 0.1 :seed 1)))
+            (ok (stringp result) "baseline generate (no config) still works")
+            (ok (> (length result) 0) "baseline result is non-empty")))))))
+
+(deftest sampler-config-with-sampler-chain
+  (when-model-available
+    (testing "with-sampler-chain accepts :sampler-config"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((cfg (cl-llama-cpp:make-sampler-config :temp 0.1 :seed 7)))
+            (cl-llama-cpp:with-sampler-chain (chain :sampler-config cfg)
+              (ok (cl-llama-cpp:llama-sampler-p chain)
+                  "chain built from config is a llama-sampler handle")
+              (let ((result (cl-llama-cpp:generate ctx "Hello" :max-tokens 4
+                                                              :sampler chain)))
+                (ok (stringp result)
+                    "generate with chain from config returns a string")))))))))

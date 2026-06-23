@@ -1,28 +1,112 @@
 (in-package #:cl-llama-cpp)
 
-(defun build-sampler-chain (&key (temp 0.8) top-k top-p min-p (seed 42) greedy
-                                  model grammar (grammar-root "root") grammar-lazy
-                                  grammar-trigger-words grammar-trigger-patterns
-                                  grammar-trigger-tokens infill
-                                  ;; Extended sampler keywords
-                                  typical-p
-                                  xtc-probability xtc-threshold
-                                  top-n-sigma
-                                  mirostat mirostat-v2
-                                  (mirostat-tau 5.0) (mirostat-eta 0.1)
-                                  repeat-penalty frequency-penalty
-                                  presence-penalty (penalty-last-n 64)
-                                  dry-multiplier (dry-base 1.75)
-                                  (dry-allowed-length 2) (dry-penalty-last-n -1)
-                                  dry-seq-breakers
-                                  logit-bias
-                                  dynamic-temp-range (dynamic-temp-exponent 1.0)
-                                  adaptive-p (adaptive-p-decay 0.0))
+(defun make-sampler-config (&rest kwargs
+                            &key temp top-k top-p min-p seed greedy
+                                 grammar grammar-root grammar-lazy
+                                 grammar-trigger-words grammar-trigger-patterns
+                                 grammar-trigger-tokens infill
+                                 typical-p xtc-probability xtc-threshold
+                                 top-n-sigma mirostat mirostat-v2
+                                 mirostat-tau mirostat-eta
+                                 repeat-penalty frequency-penalty
+                                 presence-penalty penalty-last-n
+                                 dry-multiplier dry-base dry-allowed-length
+                                 dry-penalty-last-n dry-seq-breakers
+                                 logit-bias dynamic-temp-range dynamic-temp-exponent
+                                 adaptive-p adaptive-p-decay)
+  "Bundle sampler parameters into a reusable config plist.
+
+The returned plist can be passed as :SAMPLER-CONFIG to GENERATE,
+BUILD-SAMPLER-CHAIN, or WITH-SAMPLER-CHAIN.  The config provides
+defaults; any keyword supplied at the call site overrides the
+corresponding config entry.  Only the parameters you explicitly supply
+here are stored — the rest continue to use each function's own
+built-in defaults."
+  (declare (ignore temp top-k top-p min-p seed greedy
+                   grammar grammar-root grammar-lazy
+                   grammar-trigger-words grammar-trigger-patterns
+                   grammar-trigger-tokens infill
+                   typical-p xtc-probability xtc-threshold
+                   top-n-sigma mirostat mirostat-v2
+                   mirostat-tau mirostat-eta
+                   repeat-penalty frequency-penalty
+                   presence-penalty penalty-last-n
+                   dry-multiplier dry-base dry-allowed-length
+                   dry-penalty-last-n dry-seq-breakers
+                   logit-bias dynamic-temp-range dynamic-temp-exponent
+                   adaptive-p adaptive-p-decay))
+  kwargs)
+
+(defun build-sampler-chain (&rest all-kwargs
+                           &key sampler-config
+                                (temp 0.8) top-k top-p min-p (seed 42) greedy
+                                model grammar (grammar-root "root") grammar-lazy
+                                grammar-trigger-words grammar-trigger-patterns
+                                grammar-trigger-tokens infill
+                                ;; Extended sampler keywords
+                                typical-p
+                                xtc-probability xtc-threshold
+                                top-n-sigma
+                                mirostat mirostat-v2
+                                (mirostat-tau 5.0) (mirostat-eta 0.1)
+                                repeat-penalty frequency-penalty
+                                presence-penalty (penalty-last-n 64)
+                                dry-multiplier (dry-base 1.75)
+                                (dry-allowed-length 2) (dry-penalty-last-n -1)
+                                dry-seq-breakers
+                                logit-bias
+                                dynamic-temp-range (dynamic-temp-exponent 1.0)
+                                adaptive-p (adaptive-p-decay 0.0))
   "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free.
 When GRAMMAR is provided, a grammar sampler is added (requires MODEL).
 When INFILL is true, an infill sampler is added (requires MODEL).
 When MIROSTAT or MIROSTAT-V2 is true, the normal top-k/top-p/min-p/temp/dist
-chain is replaced with the mirostat sampler."
+chain is replaced with the mirostat sampler.
+When SAMPLER-CONFIG is a plist (from MAKE-SAMPLER-CONFIG), it provides default
+values for any sampler parameter not supplied explicitly at this call site."
+  ;; Merge sampler-config as defaults: caller-supplied kwargs take precedence
+  ;; because they appear first in the appended plist and GETF finds the first match.
+  (when sampler-config
+    (let* ((caller (loop for (k v) on all-kwargs by #'cddr
+                         unless (eq k :sampler-config)
+                         nconc (list k v)))
+           (effective (append caller sampler-config)))
+      (setf temp              (getf effective :temp 0.8)
+            top-k             (getf effective :top-k nil)
+            top-p             (getf effective :top-p nil)
+            min-p             (getf effective :min-p nil)
+            seed              (getf effective :seed 42)
+            greedy            (getf effective :greedy nil)
+            model             (getf effective :model nil)
+            grammar           (getf effective :grammar nil)
+            grammar-root      (getf effective :grammar-root "root")
+            grammar-lazy      (getf effective :grammar-lazy nil)
+            grammar-trigger-words    (getf effective :grammar-trigger-words nil)
+            grammar-trigger-patterns (getf effective :grammar-trigger-patterns nil)
+            grammar-trigger-tokens   (getf effective :grammar-trigger-tokens nil)
+            infill            (getf effective :infill nil)
+            typical-p         (getf effective :typical-p nil)
+            xtc-probability   (getf effective :xtc-probability nil)
+            xtc-threshold     (getf effective :xtc-threshold nil)
+            top-n-sigma       (getf effective :top-n-sigma nil)
+            mirostat          (getf effective :mirostat nil)
+            mirostat-v2       (getf effective :mirostat-v2 nil)
+            mirostat-tau      (getf effective :mirostat-tau 5.0)
+            mirostat-eta      (getf effective :mirostat-eta 0.1)
+            repeat-penalty    (getf effective :repeat-penalty nil)
+            frequency-penalty (getf effective :frequency-penalty nil)
+            presence-penalty  (getf effective :presence-penalty nil)
+            penalty-last-n    (getf effective :penalty-last-n 64)
+            dry-multiplier    (getf effective :dry-multiplier nil)
+            dry-base          (getf effective :dry-base 1.75)
+            dry-allowed-length    (getf effective :dry-allowed-length 2)
+            dry-penalty-last-n    (getf effective :dry-penalty-last-n -1)
+            dry-seq-breakers  (getf effective :dry-seq-breakers nil)
+            logit-bias        (getf effective :logit-bias nil)
+            dynamic-temp-range    (getf effective :dynamic-temp-range nil)
+            dynamic-temp-exponent (getf effective :dynamic-temp-exponent 1.0)
+            adaptive-p        (getf effective :adaptive-p nil)
+            adaptive-p-decay  (getf effective :adaptive-p-decay 0.0))))
   (when (and mirostat mirostat-v2)
     (error "Cannot use both :MIROSTAT and :MIROSTAT-V2"))
   (when (and (or mirostat) (not model))
@@ -151,7 +235,8 @@ chain is replaced with the mirostat sampler."
     chain))
 
 (defmacro with-sampler-chain ((var &rest args
-                                &key (temp 0.8) top-k top-p min-p
+                                &key sampler-config
+                                     (temp 0.8) top-k top-p min-p
                                      (seed 42) greedy
                                      model grammar (grammar-root "root")
                                      grammar-lazy grammar-trigger-words
@@ -172,8 +257,8 @@ chain is replaced with the mirostat sampler."
 
 With no keyword arguments, an empty chain is created — use SAMPLER-CHAIN-ADD
 inside BODY to populate it.  With keyword arguments the chain is pre-built by
-BUILD-SAMPLER-CHAIN (same keywords as GENERATE)."
-  (declare (ignore temp top-k top-p min-p seed greedy
+BUILD-SAMPLER-CHAIN (same keywords as GENERATE, plus :SAMPLER-CONFIG)."
+  (declare (ignore sampler-config temp top-k top-p min-p seed greedy
                    model grammar grammar-root grammar-lazy
                    grammar-trigger-words grammar-trigger-patterns
                    grammar-trigger-tokens infill
@@ -297,7 +382,9 @@ Do not call on samplers that have been added to a chain — the chain owns those
     (%llama:sampler-free (llama-sampler-pointer sampler)))
   nil)
 
-(defun generate (ctx prompt &key (max-tokens 256) (temp 0.8)
+(defun generate (ctx prompt &rest all-kwargs
+                             &key sampler-config
+                                  (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
                                   (parse-special t) prompt-tokens
                                   token-callback
@@ -340,6 +427,45 @@ the full prompt each call.
 Signals INPUT-VALIDATION-ERROR if MAX-TOKENS is not a positive integer or
 PROMPT is neither a string nor a vector."
   (declare (optimize (speed 3)))
+  ;; When :SAMPLER-CONFIG is provided (and no pre-built :SAMPLER chain),
+  ;; merge it as defaults for sampler parameters.  Caller-supplied kwargs
+  ;; appear first in the appended plist so they win over the config.
+  (when (and sampler-config (not sampler))
+    (let* ((skip '(:sampler-config :max-tokens :parse-special
+                   :prompt-tokens :token-callback :sampler :reset-context))
+           (caller-sampler (loop for (k v) on all-kwargs by #'cddr
+                                 unless (member k skip)
+                                 nconc (list k v)))
+           (effective (append caller-sampler sampler-config)))
+      (setf temp              (getf effective :temp 0.8)
+            top-k             (getf effective :top-k nil)
+            top-p             (getf effective :top-p nil)
+            min-p             (getf effective :min-p nil)
+            seed              (getf effective :seed 42)
+            grammar           (getf effective :grammar nil)
+            grammar-root      (getf effective :grammar-root "root")
+            typical-p         (getf effective :typical-p nil)
+            xtc-probability   (getf effective :xtc-probability nil)
+            xtc-threshold     (getf effective :xtc-threshold nil)
+            top-n-sigma       (getf effective :top-n-sigma nil)
+            mirostat          (getf effective :mirostat nil)
+            mirostat-v2       (getf effective :mirostat-v2 nil)
+            mirostat-tau      (getf effective :mirostat-tau 5.0)
+            mirostat-eta      (getf effective :mirostat-eta 0.1)
+            repeat-penalty    (getf effective :repeat-penalty nil)
+            frequency-penalty (getf effective :frequency-penalty nil)
+            presence-penalty  (getf effective :presence-penalty nil)
+            penalty-last-n    (getf effective :penalty-last-n 64)
+            dry-multiplier    (getf effective :dry-multiplier nil)
+            dry-base          (getf effective :dry-base 1.75)
+            dry-allowed-length    (getf effective :dry-allowed-length 2)
+            dry-penalty-last-n    (getf effective :dry-penalty-last-n -1)
+            dry-seq-breakers  (getf effective :dry-seq-breakers nil)
+            logit-bias        (getf effective :logit-bias nil)
+            dynamic-temp-range    (getf effective :dynamic-temp-range nil)
+            dynamic-temp-exponent (getf effective :dynamic-temp-exponent 1.0)
+            adaptive-p        (getf effective :adaptive-p nil)
+            adaptive-p-decay  (getf effective :adaptive-p-decay 0.0))))
   (check-type max-tokens (integer 1 *))
   (unless prompt-tokens
     (check-type prompt (or string vector)))
@@ -369,12 +495,13 @@ PROMPT is neither a string nor a vector."
         (setf (llama-context-compute-pending-p ctx) t))
       ;; Warn if caller supplied a chain but also passed sampler-building kwargs
       (when (and sampler
-                 (or grammar top-k top-p min-p typical-p xtc-probability
+                 (or sampler-config
+                     grammar top-k top-p min-p typical-p xtc-probability
                      dry-multiplier logit-bias mirostat mirostat-v2
                      repeat-penalty frequency-penalty presence-penalty
                      adaptive-p dynamic-temp-range top-n-sigma))
         (warn "~@<When :SAMPLER is provided, other sampler keywords ~
-(:GRAMMAR, :TOP-K, :TEMP, etc.) are ignored.~@:>"))
+(:SAMPLER-CONFIG, :GRAMMAR, :TOP-K, :TEMP, etc.) are ignored.~@:>"))
       ;; Generation loop
       (let ((chain-ptr (if sampler
                            (llama-sampler-pointer sampler)
