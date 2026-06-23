@@ -1,0 +1,148 @@
+* Embeddings Guide
+
+Embeddings map text to dense vectors in a semantic space. Similar texts produce vectors
+with high cosine similarity. They are the foundation of semantic search, retrieval-
+augmented generation (RAG), clustering, and classification.
+
+** Context Setup
+
+Embedding contexts require different creation parameters than generation contexts:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/embedding-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model
+                               :n-ctx 512       ; input token limit
+                               :embeddings t    ; required: enable embedding output
+                               :pooling-type 1) ; 1 = mean pooling (most common)
+    ...))
+#+end_src
+
+Common =:pooling-type= values:
+- =0= — no pooling (returns per-token embeddings; rarely what you want)
+- =1= — mean pooling (average over all tokens; standard for sentence embeddings)
+- =2= — CLS token pooling (uses the first token; common for BERT-style models)
+
+Check your model card for the correct pooling type. Most sentence embedding models
+(e.g. nomic-embed, e5, bge) use mean pooling.
+
+Do not use a generation context for embeddings or vice versa. Create separate contexts
+for each purpose.
+
+** Basic Usage
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/embedding-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings t :pooling-type 1)
+    (let ((vec (cl-llama-cpp:embed ctx "Common Lisp is a powerful language")))
+      (format t "~D dimensions~%" (length vec))
+      (format t "First few values: ~{~,4F ~}~%" (coerce (subseq vec 0 4) 'list)))))
+#+end_src
+
+=embed= returns a =(simple-array single-float (*))=.
+
+** Normalization
+
+Pass =:normalize t= to get unit-length vectors. Normalized vectors make cosine
+similarity equivalent to the dot product — a significant speedup for large-scale
+retrieval:
+
+#+begin_src lisp
+(let ((v (cl-llama-cpp:embed ctx "some text" :normalize t)))
+  ;; With normalized vectors, dot product = cosine similarity
+  ;; No need to divide by magnitudes
+  )
+#+end_src
+
+When not normalizing, compute cosine similarity explicitly:
+
+#+begin_src lisp
+(defun cosine-similarity (a b)
+  (let ((dot 0.0) (mag-a 0.0) (mag-b 0.0))
+    (loop for x across a for y across b do
+      (incf dot (* x y))
+      (incf mag-a (* x x))
+      (incf mag-b (* y y)))
+    (/ dot (* (sqrt mag-a) (sqrt mag-b)))))
+#+end_src
+
+** Semantic Similarity Example
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/embedding-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings t :pooling-type 1)
+    (let* ((query   "What programming language is good for AI?")
+           (doc-a   "Common Lisp is used in AI and symbolic reasoning")
+           (doc-b   "Python is widely used in machine learning")
+           (doc-c   "JavaScript runs in web browsers")
+           (q-vec   (cl-llama-cpp:embed ctx query   :normalize t))
+           (a-vec   (cl-llama-cpp:embed ctx doc-a   :normalize t))
+           (b-vec   (cl-llama-cpp:embed ctx doc-b   :normalize t))
+           (c-vec   (cl-llama-cpp:embed ctx doc-c   :normalize t)))
+      (flet ((dot (u v) (loop for x across u for y across v sum (* x y))))
+        (format t "Doc A similarity: ~,4F~%" (dot q-vec a-vec))
+        (format t "Doc B similarity: ~,4F~%" (dot q-vec b-vec))
+        (format t "Doc C similarity: ~,4F~%" (dot q-vec c-vec))))))
+#+end_src
+
+** Input Length and Truncation
+
+Each call to =embed= processes a single string. The text is tokenized and must fit
+within =:n-ctx= tokens (including any special tokens the model adds). Text that
+exceeds the context length signals an error.
+
+For long documents, chunk the text before embedding:
+
+#+begin_src lisp
+(defun embed-chunks (ctx text chunk-size overlap)
+  "Embed TEXT in overlapping chunks of CHUNK-SIZE characters."
+  (loop for start from 0 below (length text) by (- chunk-size overlap)
+        for end = (min (+ start chunk-size) (length text))
+        collect (cl-llama-cpp:embed ctx (subseq text start end) :normalize t)))
+#+end_src
+
+For retrieval purposes, embedding at the sentence or paragraph level typically
+outperforms character-chunking. Consider splitting on sentence boundaries.
+
+** Combining with Generation
+
+A common RAG (retrieval-augmented generation) pattern uses separate model/context
+pairs — one for embedding, one for generation:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (embed-model "/path/to/embedding-model.gguf")
+  (cl-llama-cpp:with-context (embed-ctx embed-model
+                               :n-ctx 512 :embeddings t :pooling-type 1)
+
+    (cl-llama-cpp:with-model (gen-model "/path/to/generation-model.gguf"
+                               :n-gpu-layers 99)
+      (cl-llama-cpp:with-context (gen-ctx gen-model :n-ctx 4096)
+
+        ;; Embed the query
+        (let* ((query "What is CLOS?")
+               (q-vec (cl-llama-cpp:embed embed-ctx query :normalize t))
+               ;; ... retrieve top-k documents from your vector store ...
+               (retrieved-docs '("CLOS is the Common Lisp Object System..."))
+               ;; Build an augmented prompt
+               (prompt (format nil "Context: ~{~A ~}~%~%Question: ~A~%Answer:"
+                               retrieved-docs query)))
+          (format t "~A~%"
+                  (cl-llama-cpp:generate gen-ctx prompt
+                                         :max-tokens 256 :temp 0.3)))))))
+#+end_src
+
+The two model loads are independent. The embedding model can be much smaller than the
+generation model.
+
+** Performance Notes
+
+- =embed= calls =synchronize= internally to ensure GPU compute completes before reading
+  results. There is no need to call it explicitly.
+- If you are embedding many texts, create one context and call =embed= repeatedly
+  rather than creating a new context per call. Context creation is expensive.
+- The context's =:n-ctx= limits the maximum input length per =embed= call, not the
+  total across calls.
+
+** See Also
+
+- =examples/introspection.lisp= — includes embedding dimension inspection
+- [[../api-reference.org#tokenization-and-generation][API Reference: embed]]

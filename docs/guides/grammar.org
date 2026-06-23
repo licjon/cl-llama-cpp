@@ -1,0 +1,182 @@
+* Grammar Guide
+
+Constrained generation forces the model's output to conform to a formal grammar,
+making structured output (JSON, lists, code, custom formats) reliable rather than
+probabilistic.
+
+cl-llama-cpp uses the GBNF (GGML BNF) grammar format from llama.cpp. A grammar
+sampler runs at each decoding step and masks out any token that would make the
+output impossible to complete as a valid string in the grammar.
+
+** GBNF Basics
+
+GBNF is a BNF-like format where each rule names a sequence of alternatives:
+
+#+begin_src
+root  ::= "{" ws members ws "}"
+members ::= pair ("," ws pair)*
+pair  ::= string ws ":" ws value
+value ::= string | number | "true" | "false" | "null"
+string ::= "\"" [^"]* "\""
+number ::= "-"? [0-9]+ ("." [0-9]+)?
+ws    ::= [ \t\n]*
+#+end_src
+
+The =root= rule is the entry point by default. Every generated sequence must match
+=root= from start to finish.
+
+** Using Grammar via =generate=
+
+The simplest approach: pass the grammar string directly to =generate=:
+
+#+begin_src lisp
+(defparameter *json-grammar*
+  "root    ::= \"{\" ws members ws \"}\"
+members ::= pair (\",\" ws pair)*
+pair    ::= string ws \":\" ws value
+value   ::= string | number | \"true\" | \"false\" | \"null\"
+string  ::= \"\\\"\" [^\"]* \"\\\"\"
+number  ::= \"-\"? [0-9]+ (\".\" [0-9]+)?
+ws      ::= [ \\t\\n]*")
+
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (format t "~A~%"
+            (cl-llama-cpp:generate
+             ctx "Output a JSON object describing a cat."
+             :max-tokens 128
+             :temp 0.3
+             :grammar *json-grammar*))))
+;; => {"name": "Whiskers", "age": 3, "color": "gray"}
+#+end_src
+
+=:grammar-root= overrides the entry rule if your grammar uses a different root name:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Give me a list item:"
+                       :max-tokens 32
+                       :grammar my-grammar
+                       :grammar-root "item")
+#+end_src
+
+** Using Grammar in a Sampler Chain
+
+For more control over sampler ordering, create a grammar sampler explicitly and add it
+to a chain. Grammar should come early in the chain — before temperature and
+distribution samplers:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (let ((gs (cl-llama-cpp:make-grammar-sampler model *json-grammar*)))
+      (cl-llama-cpp:with-sampler-chain (chain)
+        (cl-llama-cpp:sampler-chain-add chain gs)
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-temp-sampler 0.3))
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-dist-sampler 42))
+        (cl-llama-cpp:generate ctx "Describe a dog:" :max-tokens 128
+                               :sampler chain)))))
+#+end_src
+
+=make-grammar-sampler= requires the model handle to initialize the grammar's token
+vocabulary. Once added to a chain with =sampler-chain-add=, the chain owns the grammar
+sampler and frees it on exit.
+
+The convenience macro =with-grammar-sampler= handles the lifecycle automatically:
+
+#+begin_src lisp
+(cl-llama-cpp:with-grammar-sampler (gs model *json-grammar*)
+  ;; gs is freed when the scope exits
+  (cl-llama-cpp:with-sampler-chain (chain)
+    (cl-llama-cpp:sampler-chain-add chain gs)
+    ...))
+#+end_src
+
+Note: once added to a chain, the chain owns =gs=. Do not let =with-grammar-sampler=
+try to free it again on exit — either use the explicit constructor pattern above or
+do not add =gs= to a chain when using =with-grammar-sampler=.
+
+** Lazy Grammars
+
+A lazy grammar sampler stays disabled until a trigger word appears in the output. This
+is useful when you want the model to produce some natural-language preamble before
+switching into a constrained format:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; Grammar activates the moment "{" appears in the output
+    (let ((gs (cl-llama-cpp:make-grammar-sampler-lazy
+               model *json-grammar*
+               :trigger-words '("{"))))
+      (cl-llama-cpp:with-sampler-chain (chain)
+        (cl-llama-cpp:sampler-chain-add chain gs)
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-temp-sampler 0.7))
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-dist-sampler 42))
+        (cl-llama-cpp:generate
+         ctx "Here is the data you requested: "
+         :max-tokens 256
+         :sampler chain)))))
+;; Model might produce: "Here is the data you requested: {"name": "Alice", "age": 30}"
+;; The JSON portion is grammar-constrained; the preamble is free-form.
+#+end_src
+
+Multiple trigger words can be supplied; the grammar activates on whichever appears
+first.
+
+** Error Handling
+
+=make-grammar-sampler= signals =grammar-error= if the grammar string is empty or
+syntactically invalid. The interactive debugger establishes two restarts:
+
+- =skip-grammar= — continue without grammar constraint (returns =NIL=)
+- =use-different-grammar (g)= — retry with a corrected grammar string
+
+#+begin_src lisp
+(handler-case
+    (cl-llama-cpp:make-grammar-sampler model "invalid ::::")
+  (cl-llama-cpp:grammar-error (e)
+    (format t "Bad grammar: ~A~%" e)))
+#+end_src
+
+** Common Grammar Patterns
+
+*** Simple Choice List
+
+#+begin_src
+root ::= "yes" | "no" | "maybe"
+#+end_src
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Will it rain tomorrow? Answer with yes, no, or maybe."
+                       :max-tokens 8
+                       :grammar "root ::= \"yes\" | \"no\" | \"maybe\"")
+#+end_src
+
+*** Comma-Separated List
+
+#+begin_src
+root ::= item ("," ws item)* ws
+item ::= [a-zA-Z ]+
+ws   ::= " "*
+#+end_src
+
+*** Integer
+
+#+begin_src
+root ::= "-"? [0-9]+
+#+end_src
+
+*** Key-Value Pairs (Custom Format)
+
+#+begin_src
+root  ::= pair+
+pair  ::= key "=" value "\n"
+key   ::= [a-z_]+
+value ::= [^\n]+
+#+end_src
+
+** See Also
+
+- =examples/sampler-showcase.lisp= — full grammar demos including lazy grammars
+- [[samplers.org][Samplers guide]] — sampler chain construction and ordering
+- [[../api-reference.org#constrained-generation][API Reference: Constrained Generation]]

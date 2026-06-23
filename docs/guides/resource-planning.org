@@ -1,0 +1,185 @@
+* Resource Planning Guide
+
+Running large models requires knowing in advance whether they will fit in VRAM.
+Loading a model that exceeds available VRAM causes an out-of-memory error mid-load —
+at best a recoverable condition, at worst a process crash. The resource planning API
+lets you estimate memory requirements and validate a configuration *before* committing
+to a load.
+
+** Reading VRAM Availability
+
+=detect-free-vram= and =detect-total-vram= query the live backend device registry.
+They require the backend to be initialized:
+
+#+begin_src lisp
+(cl-llama-cpp:ensure-backend)
+
+(let ((free  (cl-llama-cpp:detect-free-vram))
+      (total (cl-llama-cpp:detect-total-vram)))
+  (if free
+      (format t "VRAM: ~,1F / ~,1F GiB free~%"
+              (/ free  1073741824.0)
+              (/ total 1073741824.0))
+      (format t "No GPU detected~%")))
+#+end_src
+
+Snapshot =detect-free-vram= *before* loading a model. After loading, it reflects only
+the remaining headroom, not the total available at decision time.
+
+** Estimating Memory Requirements
+
+=estimate-memory= reads GGUF metadata without loading model weights. Use =:vocab-only
+t= on =with-model= to load only the metadata — fast, and does not allocate weights:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
+  (let ((est (cl-llama-cpp:estimate-memory model :n-ctx 8192)))
+    (format t "Model weights: ~,1F GiB~%"
+            (/ (getf est :model-size) 1073741824.0))
+    (format t "KV cache:      ~,1F GiB~%"
+            (/ (getf est :kv-cache) 1073741824.0))
+    (format t "Compute:       ~,1F GiB~%"
+            (/ (getf est :compute) 1073741824.0))
+    (format t "Total:         ~,1F GiB~%"
+            (/ (getf est :total) 1073741824.0))))
+#+end_src
+
+The returned plist has keys =:model-size=, =:kv-cache=, =:compute=, =:total=, all in
+bytes. The =:compute= term is a fixed heuristic, so =:total= is an approximation —
+err on the side of a margin.
+
+Optional keyword arguments:
+- =:n-ctx= — context length to estimate (defaults to the model's training context)
+- =:type-k= / =:type-v= — KV cache quantization (default =:f16=; try =:q8-0= or
+  =:q4-0= to reduce KV cache size)
+
+For a human-readable breakdown, use =explain-memory-usage=:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
+  (cl-llama-cpp:explain-memory-usage model :n-ctx 8192))
+;; prints to *standard-output*:
+;; Model size:  4.1 GiB
+;; KV cache:    1.0 GiB  (n-ctx=8192, f16)
+;; Compute:     0.3 GiB
+;; Total:       5.4 GiB
+#+end_src
+
+** Validating a Configuration
+
+=validate-configuration= checks a proposed configuration against a VRAM budget:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
+  (let ((result (cl-llama-cpp:validate-configuration
+                 model
+                 :n-ctx 32768
+                 :n-gpu-layers 35
+                 :vram-budget (* 8 1024 1024 1024))))  ; 8 GiB budget
+    (format t "Status: ~A~%" (getf result :status))  ; :safe, :unsafe, or :unknown
+    (format t "Reason: ~A~%" (getf result :reason))))
+#+end_src
+
+Without =:vram-budget=, free VRAM is auto-detected. Status is =:unknown= only when no
+GPU is present (CPU-only builds).
+
+When =:n-gpu-layers= is supplied, only the GPU share of model weights (plus KV cache
+and compute) is checked against the budget — layers that will run on CPU are excluded.
+
+** Full Feasibility Report
+
+=feasibility-report= combines =estimate-memory= and =validate-configuration= into one
+printed report and returns both result plists:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
+  (cl-llama-cpp:feasibility-report model :n-ctx 8192 :n-gpu-layers 99))
+;; Detected VRAM: 12.0 / 16.0 GiB free  (NVIDIA RTX 5070 Ti)
+;; Model size:     4.1 GiB
+;; KV cache:       1.0 GiB
+;; Compute:        0.3 GiB
+;; Total:          5.4 GiB
+;; Status: SAFE — estimated 5.4 GiB fits within 12.0 GiB budget
+#+end_src
+
+** Configuration Suggestions
+
+When a configuration is too large, =suggest-configuration= searches for one that fits:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :vocab-only t)
+  (let ((suggestion (cl-llama-cpp:suggest-configuration
+                     model
+                     :n-ctx 32768
+                     :n-gpu-layers 99
+                     :vram-budget (* 8 1024 1024 1024))))
+    (if suggestion
+        (format t "Suggested: n-ctx=~D n-gpu-layers=~D~%"
+                (getf suggestion :n-ctx)
+                (getf suggestion :n-gpu-layers))
+        (format t "No fitting configuration found~%"))))
+#+end_src
+
+The search strategy: reduce =:n-gpu-layers= first (shifting layers to CPU), then halve
+=:n-ctx= repeatedly. Returns =NIL= if no configuration fits, or if no GPU is detected.
+
+** Runtime Guardrails
+
+Add validation directly to =with-context= to prevent creating a context that won't
+fit:
+
+#+begin_src lisp
+;; :warn — signal a warning and proceed
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (handler-bind ((cl-llama-cpp:configuration-unsafe-warning
+                  (lambda (w)
+                    (format t "Warning: ~A~%"
+                            (cl-llama-cpp:configuration-unsafe-warning-reason w)))))
+    (cl-llama-cpp:with-context (ctx model :n-ctx 32768
+                                          :validation :warn))))
+
+;; :error — abort context creation if it won't fit
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (handler-case
+      (cl-llama-cpp:with-context (ctx model :n-ctx 32768
+                                            :validation :error
+                                            :vram-budget (* 8 1024 1024 1024))
+        (cl-llama-cpp:generate ctx "Hello" :max-tokens 32))
+    (cl-llama-cpp:configuration-unsafe-error (e)
+      (format t "Refused: ~A~%"
+              (cl-llama-cpp:configuration-unsafe-error-reason e)))))
+#+end_src
+
+=:validation :off= (the default) skips the check entirely.
+
+Without =:vram-budget=, free VRAM is auto-detected at context creation time.
+
+** Typical Workflow
+
+#+begin_src lisp
+(defun load-model-safely (path n-ctx n-gpu-layers vram-budget)
+  "Load a model, reducing layers if it won't fit."
+  (cl-llama-cpp:with-model (model path :vocab-only t)
+    (let ((suggestion (cl-llama-cpp:suggest-configuration
+                       model :n-ctx n-ctx :n-gpu-layers n-gpu-layers
+                       :vram-budget vram-budget)))
+      (unless suggestion
+        (error "Model does not fit within ~,1F GiB budget"
+               (/ vram-budget 1073741824.0)))
+      (let ((actual-layers (getf suggestion :n-gpu-layers))
+            (actual-ctx    (getf suggestion :n-ctx)))
+        (when (< actual-layers n-gpu-layers)
+          (format t "Reducing to ~D GPU layers (requested ~D)~%"
+                  actual-layers n-gpu-layers))
+        (when (< actual-ctx n-ctx)
+          (format t "Reducing context to ~D (requested ~D)~%"
+                  actual-ctx n-ctx))
+        ;; Return the configuration — caller uses it to load for real
+        (list :n-gpu-layers actual-layers :n-ctx actual-ctx))))
+#+end_src
+
+** See Also
+
+- =examples/resource-planning.lisp= — full walkthrough
+- [[../api-reference.org#resource-planning][API Reference: Resource Planning]]
+- [[../api-reference.org#system-and-device][API Reference: detect-free-vram, detect-total-vram]]

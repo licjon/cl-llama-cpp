@@ -1,0 +1,188 @@
+* Low-Level =%llama= Access
+
+The =%llama= package is a *supported, first-class escape hatch* — not an implementation
+detail. It exposes the complete public C API of llama.cpp and the bundled ggml and gguf
+libraries as CFFI bindings: 881 functions, 38 enums, and 59 structs, auto-generated
+from the upstream headers via [[https://github.com/borodust/claw][CLAW]].
+
+The high-level =cl-llama-cpp= API is an ergonomic convenience layer built on top of
+=%llama=. Both layers are equally supported. When a high-level wrapper doesn't exist
+for something llama.cpp can do, drop down to =%llama:= and call the C function
+directly. A missing wrapper is never a blocker.
+
+** Naming Conventions
+
+| C name           | Lisp symbol          | Rule                                               |
+|------------------+----------------------+----------------------------------------------------|
+| =llama_decode=     | =%llama:decode=        | =llama_= prefix stripped, underscores become hyphens |
+| =LLAMA_SPLIT_MODE= | =%llama:split-mode=    | =LLAMA_= prefix stripped from enum/constant names    |
+| =ggml_mul_mat=     | =%llama:ggml-mul-mat=  | =ggml_= prefix kept, underscores become hyphens      |
+| =gguf_get_key=     | =%llama:gguf-get-key=  | =gguf_= prefix kept, underscores become hyphens      |
+| =GGML_TYPE_F16=    | =%llama:ggml-type-f16= | =GGML_= prefix kept for enum values                  |
+
+Everything lives in one package (=%llama=) regardless of which C library it came from.
+
+** Extracting Raw Pointers from Handles
+
+The high-level macros bind *typed handles* (=llama-model=, =llama-context=,
+=llama-sampler=), not raw CFFI pointers. When you need to call a =%llama:= function
+directly, extract the raw pointer first using the appropriate accessor:
+
+| High-level handle     | Accessor                      | Raw type                      |
+|-----------------------+-------------------------------+-------------------------------|
+| =llama-model=           | =llama-model-pointer=           | =%llama:model= (opaque pointer) |
+| =llama-context=         | =llama-context-pointer=         | =%llama:context= pointer        |
+| =llama-sampler=         | =llama-sampler-pointer=         | =%llama:sampler= pointer        |
+| =gguf-context=          | =gguf-context-pointer=          | =%llama:gguf-context= pointer   |
+| =ggml-backend-device=   | =ggml-backend-device-pointer=   | =%llama:ggml-backend-dev-t=     |
+| =ggml-backend-registry= | =ggml-backend-registry-pointer= | =%llama:ggml-backend-reg-t=     |
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf")
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+    (cl-llama-cpp:with-llama-compatible-fp-environment ()
+      (let ((ctx-ptr   (cl-llama-cpp:llama-context-pointer ctx))
+            (model-ptr (cl-llama-cpp:llama-model-pointer model)))
+        ;; ctx-ptr and model-ptr are raw CFFI :pointer values
+        (%llama:decode ctx-ptr batch)))))
+#+end_src
+
+To test whether a variable holds the right kind of handle, use the predicates
+=llama-model-p=, =llama-context-p=, =llama-sampler-p=, =ggml-backend-device-p=,
+=ggml-backend-registry-p= in place of =cffi:null-pointer-p= on raw pointers.
+
+** Structs and Enums
+
+*Structs* are accessed as =(:struct %llama:NAME)= in CFFI type specifiers. Opaque types
+(=llama_model=, =llama_context=, =ggml_context=, etc.) are pointer-sized — pass them as
+=:pointer=.
+
+#+begin_src lisp
+;; Allocate a struct on the foreign heap
+(cffi:with-foreign-object (params '(:struct %llama:model-quantize-params))
+  ;; Fill from the C default-params function
+  (cffi:convert-into-foreign-memory
+   (%llama:model-quantize-default-params)
+   '(:struct %llama:model-quantize-params)
+   params)
+  ;; Read/write individual slots
+  (cffi:foreign-slot-value params
+   '(:struct %llama:model-quantize-params)
+   '%llama:ftype))
+#+end_src
+
+*Enums* are Lisp keywords. CLAW strips the common enum-name prefix from values:
+=LLAMA_SPLIT_MODE_LAYER= → =:layer=, =GGML_TYPE_F16= → =:f16=. Pass the keyword where
+a CFFI function expects the enum type:
+
+#+begin_src lisp
+;; Get the integer value of an enum keyword
+(cffi:foreign-enum-value '%llama:split-mode :layer)  ; => integer
+
+;; Or just pass the keyword directly — CFFI handles the conversion
+(%llama:model-quantize "/input.gguf" "/output.gguf" params)
+#+end_src
+
+*Bitfields* work like enums but multiple values can be OR'd together. CFFI handles the
+masking.
+
+** Floating-Point Environment
+
+llama.cpp's SIMD code triggers floating-point exceptions (denormals, inexact results)
+that SBCL traps by default. All =%llama= calls that enter C code must run inside
+=with-llama-compatible-fp-environment=:
+
+#+begin_src lisp
+(cl-llama-cpp:with-llama-compatible-fp-environment ()
+  (%llama:backend-init)
+  ;; ... all your %llama calls ...
+  )
+#+end_src
+
+The *high-level API handles this automatically* — you only need it when calling =%llama=
+directly outside of a =with-model= / =with-context= scope.
+
+On non-SBCL implementations, =with-llama-compatible-fp-environment= expands to the
+configured FP-trap masking wrapper. See =src/library.lisp= for details.
+
+** Discovering Symbols
+
+Several paths to find the right =%llama= symbol:
+
+- *Grep the bindings source* — =src/bindings.lisp= is the auto-generated binding file.
+  Search it directly or use your editor's =M-.= (find-definition).
+
+- *REPL apropos* — list all symbols matching a substring:
+  #+begin_src lisp
+  (apropos "DECODE" '%llama)
+  #+end_src
+
+- *Inspect a function* — every =%llama= function has a docstring containing its C
+  prototype:
+  #+begin_src lisp
+  (describe #'%llama:decode)
+  #+end_src
+
+- *Verify binding coverage* — =src/binding-deps.lisp= lists the specific =%llama=
+  symbols the high-level API depends on and provides a check function:
+  #+begin_src lisp
+  (cl-llama-cpp:check-binding-deps)
+  #+end_src
+  Run this after regenerating bindings to confirm all expected symbols are still present.
+
+** Worked Examples
+
+*** Model Quantization
+
+Model quantization has no high-level wrapper. Call =%llama= directly:
+
+#+begin_src lisp
+(cl-llama-cpp:with-llama-compatible-fp-environment ()
+  (%llama:backend-init)
+  (unwind-protect
+      (cffi:with-foreign-object (params '(:struct %llama:model-quantize-params))
+        (cffi:convert-into-foreign-memory
+         (%llama:model-quantize-default-params)
+         '(:struct %llama:model-quantize-params)
+         params)
+        (setf (cffi:foreign-slot-value params
+               '(:struct %llama:model-quantize-params)
+               '%llama:ftype)
+              :q4-k-m)
+        (%llama:model-quantize "/path/to/f16.gguf"
+                               "/path/to/q4km.gguf"
+                               params))
+    (%llama:backend-free)))
+#+end_src
+
+The pattern:
+1. Wrap everything in =with-llama-compatible-fp-environment= (handles FP traps).
+2. Call =backend-init= / =backend-free= directly (no =with-backend= needed here since
+   we're managing the lifecycle manually with =unwind-protect=).
+3. Allocate the params struct with =cffi:with-foreign-object=, populate from the C
+   default-params function, then mutate individual slots.
+4. The =:ftype= slot takes a keyword (=:q4-k-m=, =:q5-k-m=, =:q8-0=, etc.) — CLAW
+   generated the enum mapping.
+
+*** Mixing High-Level and =%llama=
+
+A common pattern: use =with-model= / =with-context= for resource management, then drop
+to =%llama= for a specific operation the high-level API doesn't expose:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; High-level generation first
+    (cl-llama-cpp:generate ctx "Hello" :max-tokens 32)
+
+    ;; Drop to %llama for a specific introspection call
+    (cl-llama-cpp:with-llama-compatible-fp-environment ()
+      (let ((ctx-ptr (cl-llama-cpp:llama-context-pointer ctx)))
+        ;; Example: access the raw logits pointer after a decode
+        (let ((logits (%llama:get-logits ctx-ptr)))
+          (format t "Logits pointer: ~A~%" logits))))))
+#+end_src
+
+The high-level wrappers and =%llama= calls compose freely within the same scope. The
+only requirement is wrapping =%llama= calls in =with-llama-compatible-fp-environment=
+when they are not already inside a high-level wrapper that does it for you.

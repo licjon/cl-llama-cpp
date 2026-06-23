@@ -1,0 +1,250 @@
+* Samplers Guide
+
+This guide covers the full sampling API: the keyword shortcuts in =generate=, reusable
+config objects, and explicit sampler chains with fine-grained ordering control.
+
+For the complete function reference, see the [[../api-reference.org#samplers][Samplers section of the API Reference]].
+
+** Default Sampling
+
+=generate= builds a sampler chain internally from keyword arguments. The basic
+parameters:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Tell me about the moon"
+                       :max-tokens 128
+                       :temp 0.8       ; temperature scaling
+                       :top-k 40       ; restrict to top-40 tokens
+                       :top-p 0.95     ; nucleus sampling threshold
+                       :min-p 0.05     ; minimum relative probability cutoff
+                       :seed 42)       ; reproducible output
+#+end_src
+
+Omitting a parameter means that sampler is not added to the chain. Omitting =:temp=
+entirely is not the same as =:temp 1.0= — it skips the temperature sampler. =:greedy
+t= bypasses all other sampling and always picks the highest-probability token.
+
+** Extended Sampling Strategies
+
+*** Repetition Control
+
+Prevent the model from repeating itself:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Describe five different flowers:"
+                       :max-tokens 256
+                       :temp 0.7
+                       ;; Penalise exact token repeats
+                       :repeat-penalty 1.2
+                       ;; Scale penalty with token frequency
+                       :frequency-penalty 0.4
+                       ;; Flat penalty for any repeated token
+                       :presence-penalty 0.3
+                       ;; Consider the last 64 tokens (default)
+                       :penalty-last-n 64)
+#+end_src
+
+DRY (Don't Repeat Yourself) detects and penalises repeated sequences, not just
+repeated tokens. It requires the model handle to compute context-aware penalties:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Write a long story:"
+                       :max-tokens 512
+                       :temp 0.8
+                       :dry-multiplier 0.8      ; penalty strength
+                       :dry-base 1.75           ; exponential base
+                       :dry-allowed-length 2    ; min sequence length to penalise
+                       :dry-penalty-last-n -1   ; -1 = use full context
+                       :dry-seq-breakers '("\n" "." ":" "\"")
+                       :model model)            ; required for DRY
+#+end_src
+
+*** Mirostat
+
+Mirostat targets a specific perplexity level, adapting temperature dynamically:
+
+#+begin_src lisp
+;; Mirostat V2 — simpler, usually preferred
+(cl-llama-cpp:generate ctx "Invent a mythological creature:"
+                       :max-tokens 200
+                       :mirostat-v2 t
+                       :mirostat-tau 5.0   ; target surprise (lower = more focused)
+                       :mirostat-eta 0.1)  ; learning rate
+
+;; Mirostat V1 — requires model handle
+(cl-llama-cpp:generate ctx "Write a haiku:"
+                       :max-tokens 64
+                       :mirostat t
+                       :mirostat-tau 3.0
+                       :model model)
+#+end_src
+
+=:mirostat= and =:mirostat-v2= are mutually exclusive and replace the normal
+top-k/top-p/temperature path.
+
+*** XTC (Exclude Top Choices)
+
+XTC trims the highest-probability tokens before sampling, encouraging less predictable
+continuations:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Describe a sunset:"
+                       :max-tokens 128
+                       :xtc-probability 0.5    ; probability of applying XTC per step
+                       :xtc-threshold 0.5)     ; exclude tokens above this probability
+#+end_src
+
+*** Dynamic Temperature
+
+Adjusts temperature based on entropy — more focused when the model is confident, more
+exploratory when uncertain:
+
+#+begin_src lisp
+(cl-llama-cpp:generate ctx "Write a poem:"
+                       :max-tokens 128
+                       :temp 0.8
+                       :dynamic-temp-range 0.3      ; ± range around base temp
+                       :dynamic-temp-exponent 1.0)  ; curve shape
+#+end_src
+
+*** Logit Bias
+
+Manually boost or suppress specific tokens:
+
+#+begin_src lisp
+;; Ban the word "red" from appearing
+(let* ((tokens (cl-llama-cpp:tokenize model "red" :add-special nil))
+       (biases (mapcar (lambda (tok) (cons tok -100.0)) tokens)))
+  (cl-llama-cpp:generate ctx "Name three colors:"
+                         :max-tokens 32
+                         :temp 0.3
+                         :logit-bias biases
+                         :model model))  ; required for logit-bias
+#+end_src
+
+Positive bias values increase token probability; large negative values (e.g. -100.0)
+effectively ban the token.
+
+** Sampler Config Objects
+
+=make-sampler-config= bundles parameters into a reusable plist. Useful when the same
+sampling settings are shared across many calls:
+
+#+begin_src lisp
+(let ((creative (cl-llama-cpp:make-sampler-config
+                  :temp 1.1
+                  :top-p 0.95
+                  :repeat-penalty 1.2
+                  :frequency-penalty 0.3))
+      (focused (cl-llama-cpp:make-sampler-config
+                 :temp 0.2
+                 :top-k 40
+                 :seed 42)))
+
+  ;; Use as defaults; explicit kwargs always override
+  (cl-llama-cpp:generate ctx "Write a poem:" :max-tokens 128
+                         :sampler-config creative)
+
+  (cl-llama-cpp:generate ctx "Summarise this:" :max-tokens 256
+                         :sampler-config focused)
+
+  ;; Override one param from the config
+  (cl-llama-cpp:generate ctx "Tell me a joke:" :max-tokens 64
+                         :sampler-config focused :temp 0.8))
+#+end_src
+
+The config contains *only the keys explicitly provided* — absent keys carry no default
+and are simply not in the plist. =getf= works directly on the returned value.
+
+=make-sampler-config= also works with =with-sampler-chain=:
+
+#+begin_src lisp
+(cl-llama-cpp:with-sampler-chain (chain :sampler-config creative)
+  (cl-llama-cpp:generate ctx "Describe a landscape:" :max-tokens 128 :sampler chain))
+#+end_src
+
+** Explicit Sampler Chains
+
+For full control over sampler ordering, build the chain explicitly. Samplers apply in
+insertion order.
+
+*** Pre-built Chain via Keywords
+
+Pass keywords to =with-sampler-chain= to build a chain without managing individual
+samplers:
+
+#+begin_src lisp
+(cl-llama-cpp:with-sampler-chain (chain :temp 0.8 :top-p 0.9 :seed 42)
+  ;; Pass the chain to generate — it borrows without freeing
+  (cl-llama-cpp:generate ctx "Hello" :max-tokens 64 :sampler chain)
+  ;; Reuse the same chain for another call
+  (cl-llama-cpp:generate ctx "World" :max-tokens 64 :sampler chain)
+  ;; Inspect the seed that was used
+  (format t "Seed: ~A~%" (cl-llama-cpp:sampler-seed chain)))
+#+end_src
+
+When =:sampler= is passed to =generate=, the chain is borrowed — =generate= does not
+free it. The chain is freed when =with-sampler-chain= exits.
+
+*** Manual Chain Construction
+
+=with-sampler-chain= with no keywords allocates an empty chain. Use
+=sampler-chain-add= and the individual =make-*-sampler= constructors to populate it:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (let ((grammar-sampler
+           (cl-llama-cpp:make-grammar-sampler model my-gbnf-string)))
+      (cl-llama-cpp:with-sampler-chain (chain)
+        ;; Ordering is explicit: grammar constrains first,
+        ;; then temperature scales, then distribution samples.
+        (cl-llama-cpp:sampler-chain-add chain grammar-sampler)
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-temp-sampler 0.3))
+        (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-dist-sampler 42))
+        (cl-llama-cpp:generate ctx "Output JSON:" :max-tokens 128 :sampler chain)))))
+#+end_src
+
+When a sampler is added to a chain with =sampler-chain-add=, *the chain takes
+ownership*. Do not call =free-sampler= on it afterwards — the chain will free it.
+If you create a sampler but decide not to add it to a chain, free it with
+=free-sampler=.
+
+*** Available Constructors
+
+| Constructor                              | Equivalent keyword(s)                     |
+|------------------------------------------+-------------------------------------------|
+| =make-greedy-sampler=                      | =:greedy t=                                 |
+| =make-dist-sampler &optional seed=         | (default distribution sampler)            |
+| =make-top-k-sampler k=                     | =:top-k k=                                  |
+| =make-top-p-sampler p &optional min-keep=  | =:top-p p=                                  |
+| =make-min-p-sampler p &optional min-keep=  | =:min-p p=                                  |
+| =make-typical-sampler p=                   | =:typical-p p=                              |
+| =make-temp-sampler temp=                   | =:temp temp=                                |
+| =make-temp-ext-sampler temp delta exp=     | =:dynamic-temp-range= / =:dynamic-temp-exponent= |
+| =make-xtc-sampler prob thresh=             | =:xtc-probability= / =:xtc-threshold=         |
+| =make-top-n-sigma-sampler sigma=           | =:top-n-sigma sigma=                        |
+| =make-mirostat-v2-sampler seed tau eta=    | =:mirostat-v2 t= + =:mirostat-tau= / =:eta=   |
+
+The constructors are useful when the keyword shortcuts don't provide enough ordering
+control — for example, placing temperature before top-k rather than after.
+
+** Inspecting Sampler State
+
+#+begin_src lisp
+(cl-llama-cpp:with-sampler-chain (chain :temp 0.8 :seed 42)
+  (cl-llama-cpp:generate ctx "Hello" :max-tokens 32 :sampler chain)
+  ;; Check the actual seed used (useful for logging reproducibility)
+  (format t "Seed: ~A~%" (cl-llama-cpp:sampler-seed chain))
+  ;; Timing data
+  (let ((perf (cl-llama-cpp:sampler-perf chain)))
+    (format t "Sampling: ~,2F ms over ~D samples~%"
+            (getf perf :t-sample-ms)
+            (getf perf :n-sample))))
+#+end_src
+
+** See Also
+
+- =examples/sampler-showcase.lisp= — grammars, lazy grammars, error handling
+- =examples/sampler-comparison.lisp= — side-by-side comparison of all strategies
+- [[../guides/grammar.org][Grammar guide]] — constrained generation using sampler chains
