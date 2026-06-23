@@ -120,9 +120,6 @@ restarts for the debugger: retry with different params, use CPU only, skip LoRA,
 Not yet wrapped at the high level (use =%llama= directly):
 
 - Model quantization
-- Speculative decoding
-- Multimodal inputs (vision, audio)
-- Fine-grained sequence control
 
 ** Low-Level =%llama= Access
 
