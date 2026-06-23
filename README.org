@@ -165,9 +165,10 @@ examples (including model quantization).
 
 - [[docs/api-reference.org][API Reference]] — complete function, condition, and restart reference
 - [[docs/getting-started.org][Getting Started]] — guided walkthrough for common patterns
-- [[docs/guides/][Guides]] — samplers, grammar, KV cache, embeddings, resource planning
+- [[docs/guides/][Guides]] — samplers, grammar, KV cache, embeddings, LoRA, parallel, resource planning
 - [[docs/low-level.org][Low-level %llama access]] — calling the C API directly
 - [[docs/upgrading-llama-cpp.org][Upgrading llama.cpp]] — keeping the submodule and bindings in sync
+- [[docs/contributing.org][Contributing]] — running tests, adding wrappers, PR guidelines
 
 ** Running Tests
 

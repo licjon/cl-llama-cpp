@@ -1,0 +1,103 @@
+* Contributing
+
+** Running the Test Suite
+
+*** Smoke Tests (No Model Required)
+
+The smoke tests cover conditions, handle predicates, validation logic, and other
+behaviour that doesn't require a loaded model:
+
+#+begin_src bash
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+With Roswell:
+
+#+begin_src bash
+ros -e '(ql:quickload "cl-llama-cpp/tests")' \
+    -e '(asdf:test-system "cl-llama-cpp/tests")'
+#+end_src
+
+*** Integration Tests
+
+Integration tests require GGUF model files, pointed to via environment variables:
+
+| Variable               | Used by                                        |
+|------------------------+------------------------------------------------|
+| =LLAMA_TEST_MODEL=       | Generation, tokenization, chat, KV cache tests |
+| =LLAMA_TEST_EMBED_MODEL= | Embedding tests                                |
+| =LLAMA_TEST_LORA=        | LoRA adapter tests                             |
+
+#+begin_src bash
+LLAMA_TEST_MODEL=/path/to/model.gguf \
+LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+LLAMA_TEST_LORA=/path/to/adapter.gguf \
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+Any variable left unset skips the tests that depend on it. Setting only
+=LLAMA_TEST_MODEL= is sufficient to run most integration tests.
+
+*** Known Test Failure
+
+=reset-context-perf-clears-counters= is expected to fail. After a context reset,
+=n_eval= reports 1 instead of 0 due to a quirk in llama.cpp's internal counter
+behaviour — not a binding bug. All other tests should pass.
+
+** Adding a High-Level Wrapper
+
+When a =%llama= function exists but no high-level wrapper does, the general pattern is:
+
+1. *Find the binding* — search =src/bindings.lisp= for the C name minus the =llama_=
+   prefix (e.g. =llama_get_logits= → grep for =get-logits=).
+
+2. *Add the wrapper* in the appropriate source file under =src/=. Follow the existing
+   pattern for the relevant subsystem (generation in =generation.lisp=, KV cache in
+   =kv-cache.lisp=, etc.).
+
+3. *Register the dependency* — add the =%llama= symbol(s) to =*binding-deps*= at the
+   top of the relevant source file. =check-binding-deps= uses this list to detect
+   breakage after a binding regeneration.
+
+4. *Export from the package* — add the symbol to =src/packages.lisp= under the
+   =cl-llama-cpp= package's export list.
+
+5. *Add pre-flight validation* — validate inputs with =check-type= (for type errors)
+   and =signal-input-validation-error= (for bounds, ranges, non-emptiness). See
+   existing wrappers for the pattern. Invalid inputs should produce a clean Lisp
+   condition, not a segfault.
+
+6. *Write tests* — add to the appropriate test file under =tests/=. If the function
+   requires a model, guard with the model-skipping helper already used in the
+   integration test suite.
+
+7. *Document* — add to =docs/api-reference.org= in the appropriate section.
+
+** Regenerating Bindings
+
+When the llama.cpp submodule is bumped, the =%llama= bindings must be regenerated from
+the new headers. This is covered in detail in [[upgrading-llama-cpp.org][Upgrading llama.cpp]], including the full
+pipeline (submodule → rebuild → c2ffi spec → CLAW → fixups → bindings.lisp), how to
+interpret the symbol diff output, and how to fix high-level wrappers that break.
+
+Quick reference — verify everything still works after a regen:
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp" :force t)
+(cl-llama-cpp:check-binding-deps)
+#+end_src
+
+** Pull Requests
+
+- Run the smoke tests before opening a PR. Integration tests are encouraged if you
+  have the model files, but not required for contributors who don't.
+- One logical change per PR. Binding regenerations, new wrappers, and bug fixes make
+  cleaner history when kept separate.
+- The API is unstable. Breaking changes to existing high-level wrappers are acceptable
+  on =master= — note them in the PR description.
+- New high-level wrappers should include at least one test and a =docs/api-reference.org=
+  entry. Examples are appreciated but not required.
