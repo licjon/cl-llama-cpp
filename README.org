@@ -12,6 +12,7 @@ The low-level bindings cover the full public C API of llama.cpp and the bundled 
 - Text generation with sampling (temperature, top-k, top-p, min-p, greedy, and extended samplers)
   - Extended samplers: typical-p, XTC, top-n-sigma, mirostat v1/v2, repetition/frequency/presence penalties, DRY anti-repetition, logit bias, dynamic temperature, adaptive-p
   - Individual sampler constructors (=make-temp-sampler=, =make-top-k-sampler=, =make-dist-sampler=, etc.) for building custom chains with full ordering control, without raw =%llama:= calls; =free-sampler= as the public destructor
+  - Reusable sampler config objects (=make-sampler-config=) — bundle any sampler parameters into a plist; pass as =:sampler-config= to =generate= or =with-sampler-chain=; explicit keyword arguments always take priority over the config
 - Token streaming via callback
 - Chat template formatting and safe multi-turn tokenization
 - Embeddings
@@ -183,7 +184,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =with-gguf (var path &key no-alloc) &body body= --- Open a GGUF file at =path=, bind the context to =var= as a =gguf-context= handle, execute =body=, free on exit (including non-local exit). =:no-alloc t= skips ggml tensor allocation, which is faster for metadata-only reads and avoids needing a loaded backend. Signals =gguf-load-error= on failure. Does not require the llama backend to be initialized.
 
-- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay) &body body= --- Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. With *no keyword arguments*, allocates an empty chain — populate it inside =body= using =sampler-chain-add=. With keyword arguments, pre-builds the chain with the same options as =generate= (see Extended Sampler Keywords). Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive.
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler-config) &body body= --- Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit. With *no keyword arguments*, allocates an empty chain — populate it inside =body= using =sampler-chain-add=. With keyword arguments, pre-builds the chain with the same options as =generate= (see Extended Sampler Keywords). Grammar, =:mirostat=, =:dry-multiplier=, and =:logit-bias= keywords require =:model=. =:mirostat= and =:mirostat-v2= are mutually exclusive. Pass =:sampler-config= (a plist from =make-sampler-config=) to supply defaults; explicit keyword arguments always override the config.
 
 *** Backend Lifecycle
 
@@ -217,7 +218,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token vector back to a string. Signals =type-error= if =tokens= is not a vector.
 
-- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler reset-context= --- Generate text continuing =prompt=. Returns three values: the generated string, a stop reason (=:eog=, =:length=, or =:callback=), and a =(simple-array fixnum (*))= of the sampled token ids (useful for callers that need to track exact KV-cache contents without a lossy re-tokenize round-trip). When =:reset-context= is =NIL=, the KV cache is not cleared before decoding — the caller is responsible for ensuring the cache is already in a consistent state (e.g. the current cached prefix matches the new prompt). The default (=T=) preserves the original behaviour: clear the cache and re-prefill the full prompt each call. Signals =type-error= if =max-tokens= is not a positive integer or =prompt= is not a string or vector (when =prompt-tokens= is not provided). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. See the extended sampler keywords below for advanced sampling control.
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special prompt-tokens token-callback grammar grammar-root typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler sampler-config reset-context= --- Generate text continuing =prompt=. Returns three values: the generated string, a stop reason (=:eog=, =:length=, or =:callback=), and a =(simple-array fixnum (*))= of the sampled token ids (useful for callers that need to track exact KV-cache contents without a lossy re-tokenize round-trip). When =:reset-context= is =NIL=, the KV cache is not cleared before decoding — the caller is responsible for ensuring the cache is already in a consistent state (e.g. the current cached prefix matches the new prompt). The default (=T=) preserves the original behaviour: clear the cache and re-prefill the full prompt each call. Signals =type-error= if =max-tokens= is not a positive integer or =prompt= is not a string or vector (when =prompt-tokens= is not provided). When =prompt-tokens= is provided, uses the pre-tokenized input directly. When =token-callback= is provided, calls it with each decoded token string as it is produced; return =NIL= from the callback to stop generation early. When =grammar= is provided, constrains output to match the GBNF grammar string (=grammar-root= defaults to ="root"=). When =sampler= (a =llama-sampler= handle, typically from =with-sampler-chain=) is provided, =generate= borrows the chain without freeing it — the caller owns the lifetime. A non-blocking warning is issued if other sampler-building keywords are also supplied. When =:sampler-config= (a plist from =make-sampler-config=) is provided without a pre-built =:sampler= chain, its values supply defaults for any sampler parameter not given explicitly in this call — explicit keywords always take priority over the config. See the extended sampler keywords below for advanced sampling control.
 
 - =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed parse-special= /...all extended sampler keywords.../ --- Generate text for multiple =prompts= in parallel using the batch API. Each element of =prompts= is a string or a pre-tokenized token vector. All sequences share the same sampler configuration; each gets a unique seed derived from =seed= + sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings and a list of stop reasons (=:eog= or =:length=).
 
@@ -243,7 +244,7 @@ Backend device and registry handles are *borrowed references* — the GGML backe
 
 *** Extended Sampler Keywords
 
-These keywords are accepted by =generate=, =with-sampler-chain=, and =build-sampler-chain=. They compose in a fixed order: logit bias → penalties → DRY → grammar → sampling strategy.
+These keywords are accepted by =generate=, =with-sampler-chain=, and =build-sampler-chain=. They compose in a fixed order: logit bias → penalties → DRY → grammar → sampling strategy. All three also accept =:sampler-config= (a plist from =make-sampler-config=) as a source of defaults; explicit keyword arguments always win — see Sampler Config below.
 
 *Token filtering:*
 
@@ -281,6 +282,10 @@ These keywords are accepted by =generate=, =with-sampler-chain=, and =build-samp
 | =:mirostat-eta=          |     0.1 | Learning rate for mirostat adaptation                     |
 | =:dynamic-temp-range=    |         | +/- range for entropy-adaptive temperature                |
 | =:dynamic-temp-exponent= |     1.0 | Exponent shaping the dynamic temperature curve            |
+
+*** Sampler Config
+
+- =make-sampler-config &key temp top-k top-p min-p seed greedy grammar grammar-root grammar-lazy grammar-trigger-words grammar-trigger-patterns grammar-trigger-tokens infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay= --- Bundle sampler parameters into a reusable plist. Returns a plist containing *only the keys explicitly provided*; absent parameters carry no default — they are simply not in the plist. Pass the result as =:sampler-config= to =generate= or =with-sampler-chain=: the config supplies defaults for any parameter not given at the call site, and explicit keyword arguments at the call site always take priority. Unknown keywords signal =PROGRAM-ERROR= (SBCL also warns at compile time). Does not accept =:model= — resource handles have independent lifetimes and belong at the call site. The returned value is a plain plist; =getf= works directly on it.
 
 *** Sampler Utilities
 
@@ -860,6 +865,36 @@ See =examples/sampler-showcase.lisp= for demos of strict grammars, lazy grammars
 #+end_src
 
 See =examples/sampler-comparison.lisp= for a side-by-side comparison of all extended sampler strategies.
+
+*** Sampler Config (Reusable Settings)
+
+=make-sampler-config= captures sampler parameters as a plist. Pass it as =:sampler-config= to any =generate= or =with-sampler-chain= call; explicit keyword arguments always override the config.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    ;; Define reusable sampling policies once
+    (let ((creative (cl-llama-cpp:make-sampler-config
+                      :temp 1.1 :top-p 0.95 :repeat-penalty 1.2
+                      :frequency-penalty 0.3))
+          (focused  (cl-llama-cpp:make-sampler-config
+                      :temp 0.2 :top-k 40 :seed 42)))
+
+      ;; Reuse across multiple calls without repeating kwargs
+      (cl-llama-cpp:generate ctx "Write a poem:"
+                             :max-tokens 128 :sampler-config creative)
+      (cl-llama-cpp:generate ctx "Summarise this document:"
+                             :max-tokens 256 :sampler-config focused)
+
+      ;; Explicit kwargs override config — focused base, but temp bumped for this call
+      (cl-llama-cpp:generate ctx "Tell me a joke:"
+                             :max-tokens 64 :sampler-config focused :temp 0.8)
+
+      ;; Works with with-sampler-chain too
+      (cl-llama-cpp:with-sampler-chain (chain :sampler-config creative)
+        (cl-llama-cpp:generate ctx "Describe a sunset:"
+                               :max-tokens 128 :sampler chain)))))
+#+end_src
 
 *** KV Cache Management
 
