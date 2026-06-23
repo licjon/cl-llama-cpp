@@ -147,8 +147,7 @@ examples (including model quantization).
 
 | File                             | Demonstrates                                            |
 |----------------------------------+---------------------------------------------------------|
-| =examples/simple-chat.lisp=        | Minimal multi-turn chat (full-history prefill)          |
-| =examples/incremental-chat.lisp=   | KV-cache reuse: O(1) prefill per turn                   |
+| =examples/incremental-chat.lisp=   | Multi-turn chat with KV-cache reuse: O(1) prefill per turn |
 | =examples/tool-calling.lisp=       | Tool calls via chat template + XML parsing              |
 | =examples/sampler-showcase.lisp=   | Grammars, lazy grammars, extended samplers              |
 | =examples/sampler-comparison.lisp= | Side-by-side comparison of all sampling strategies      |

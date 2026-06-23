@@ -66,54 +66,10 @@ reason =:callback=.
 
 ** Chat
 
-*** Understanding the Two Approaches
-
-There are two ways to run multi-turn chat, with an important performance difference:
-
-- *Simple chat* re-tokenizes and re-processes the full conversation history on every
-  turn. Prefill cost grows with conversation length — O(n²) total work.
-- *Incremental chat* (=make-chat-session=) tracks which tokens are resident in the KV
-  cache and decodes only the new tokens each turn. Prefill cost stays proportional to
-  the new content only, regardless of history length.
-
-For short demos or scripts that run a few turns, simple chat is fine. For any
-interactive application or long-running session, use the incremental approach.
-
-*** Simple Chat
-
-=format-chat= formats a message list into a prompt string using the model's embedded
-chat template. =tokenize-chat= does the same but returns a token vector with template
-markers treated as special tokens — this is safer for multi-turn use because it
-prevents model-generated text that resembles a special token from corrupting subsequent
-turns.
-
-#+begin_src lisp
-(cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
-  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
-    (let ((history (list (list :role "system"
-                               :content "You are a helpful assistant."))))
-
-      ;; Add a user turn and generate a reply
-      (push (list :role "user" :content "What is Common Lisp?") history)
-      (let* ((messages (reverse history))
-             (tokens (cl-llama-cpp:tokenize-chat model messages
-                                                 :add-assistant-prefix t))
-             (reply (cl-llama-cpp:generate ctx nil
-                                           :prompt-tokens tokens
-                                           :max-tokens 256
-                                           :temp 0.7)))
-        (push (list :role "assistant" :content reply) history)
-        (format t "~A~%" reply)))))
-#+end_src
-
-=:prompt-tokens= passes a pre-tokenized vector directly to =generate=, bypassing
-tokenization of =prompt=. This is the correct way to use =tokenize-chat= output.
-
-*** Incremental Chat (Recommended)
-
 =make-chat-session= wraps a context and manages the KV cache automatically. Each call
-to =chat-session-send= appends a user turn, generates a reply, and appends the reply
-to the session's message history — decoding only the new tokens.
+to =chat-session-send= appends a user turn, generates a reply, and records it in the
+session's message history — decoding only the new tokens since the last turn. Prefill
+cost stays proportional to the new content only, regardless of history length.
 
 #+begin_src lisp
 (cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
@@ -137,6 +93,12 @@ to the session's message history — decoding only the new tokens.
 Additional keyword arguments to =chat-session-send= are forwarded to =generate=
 (=:max-tokens=, =:temp=, =:seed=, =:sampler=, etc.).
 
+Internally, the session uses =tokenize-chat= rather than =format-chat= to tokenize each
+turn. The distinction matters: =tokenize-chat= marks template tokens as special so that
+model-generated text resembling a control token can't corrupt the prompt structure.
+If you call =generate= directly with chat input, prefer =tokenize-chat= over
+=format-chat= and pass the result via =:prompt-tokens=.
+
 When the context window fills, =chat-session-send= signals =decode-error=. The session
 rolls back to its pre-call state before re-signaling, so it remains consistent. You
 can catch this and reset:
@@ -152,7 +114,8 @@ can catch this and reset:
 =:keep-system t= retains the system prompt message so the model's persona is preserved
 after reset.
 
-See =examples/incremental-chat.lisp= for a complete interactive terminal loop.
+See =examples/incremental-chat.lisp= for a complete interactive terminal loop including
+context-window exhaustion handling.
 
 ** Embeddings
 
