@@ -1488,3 +1488,56 @@
             (progn (cl-llama-cpp:make-chat-session "not-a-context") nil)
           (cl-llama-cpp:input-validation-error () t))
         "non-context signals input-validation-error")))
+
+;;; Interactive restart tests (issue #74)
+
+(deftest model-load-error-restarts
+  (testing "make-model establishes retry-with-layers, use-cpu-only, and use-different-path restarts"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let (retry-with-layers use-cpu-only use-different-path)
+        (handler-case
+            (handler-bind ((cl-llama-cpp:model-load-error
+                            (lambda (c)
+                              (declare (ignore c))
+                              (setf retry-with-layers
+                                    (find-restart 'cl-llama-cpp::retry-with-layers)
+                                    use-cpu-only
+                                    (find-restart 'cl-llama-cpp::use-cpu-only)
+                                    use-different-path
+                                    (find-restart 'cl-llama-cpp::use-different-path)))))
+              (cl-llama-cpp:make-model "/nonexistent/model.gguf"))
+          (cl-llama-cpp:model-load-error () nil))
+        (ok retry-with-layers "retry-with-layers restart is established")
+        (ok use-cpu-only "use-cpu-only restart is established")
+        (ok use-different-path "use-different-path restart is established")))))
+
+(deftest grammar-error-restarts
+  (testing "make-grammar-sampler establishes skip-grammar and use-different-grammar restarts"
+    (let (skip-grammar use-different-grammar)
+      (handler-case
+          (handler-bind ((cl-llama-cpp:grammar-error
+                          (lambda (c)
+                            (declare (ignore c))
+                            (setf skip-grammar
+                                  (find-restart 'cl-llama-cpp::skip-grammar)
+                                  use-different-grammar
+                                  (find-restart 'cl-llama-cpp::use-different-grammar)))))
+            (cl-llama-cpp:make-grammar-sampler nil ""))
+        (cl-llama-cpp:grammar-error () nil))
+      (ok skip-grammar "skip-grammar restart is established by make-grammar-sampler")
+      (ok use-different-grammar "use-different-grammar restart is established by make-grammar-sampler")))
+  (testing "make-grammar-sampler-lazy establishes skip-grammar and use-different-grammar restarts"
+    (let (skip-grammar use-different-grammar)
+      (handler-case
+          (handler-bind ((cl-llama-cpp:grammar-error
+                          (lambda (c)
+                            (declare (ignore c))
+                            (setf skip-grammar
+                                  (find-restart 'cl-llama-cpp::skip-grammar)
+                                  use-different-grammar
+                                  (find-restart 'cl-llama-cpp::use-different-grammar)))))
+            (cl-llama-cpp:make-grammar-sampler-lazy nil ""))
+        (cl-llama-cpp:grammar-error () nil))
+      (ok skip-grammar "skip-grammar restart is established by make-grammar-sampler-lazy")
+      (ok use-different-grammar "use-different-grammar restart is established by make-grammar-sampler-lazy"))))

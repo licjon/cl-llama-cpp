@@ -184,11 +184,26 @@ collect it (the finalizer frees the foreign memory as a safety net)."
     (let* ((defaults (%llama:model-default-params))
            (model-params (override-params defaults params))
            (ptr (%llama:model-load-from-file path model-params)))
-      (when (cffi:null-pointer-p ptr)
-        (error 'model-load-error :path path))
-      (let ((handle (%make-llama-model :pointer ptr)))
-        (%register-model-finalizer handle)
-        handle))))
+      (if (cffi:null-pointer-p ptr)
+          (restart-case (error 'model-load-error :path path)
+            (retry-with-layers (n)
+              :report "Retry loading with a different :n-gpu-layers value"
+              :interactive (lambda ()
+                             (format *query-io* "n-gpu-layers: ")
+                             (list (read *query-io*)))
+              (apply #'make-model path (append params (list :n-gpu-layers n))))
+            (use-cpu-only ()
+              :report "Retry loading with :n-gpu-layers 0 (CPU only)"
+              (apply #'make-model path (append params (list :n-gpu-layers 0))))
+            (use-different-path (new-path)
+              :report "Retry loading from a different path"
+              :interactive (lambda ()
+                             (format *query-io* "Model path: ")
+                             (list (read-line *query-io*)))
+              (apply #'make-model new-path params)))
+          (let ((handle (%make-llama-model :pointer ptr)))
+            (%register-model-finalizer handle)
+            handle)))))
 
 (defun free-model (model)
   "Free the foreign memory held by MODEL and cancel its GC finalizer.
@@ -218,11 +233,23 @@ GC collect it."
           (%validate-context-params model ctx-params validation vram-budget))
         (let ((ptr (%llama:new-context-with-model
                     (llama-model-pointer model) ctx-params)))
-          (when (cffi:null-pointer-p ptr)
-            (error 'context-creation-error))
-          (let ((handle (%make-llama-context :pointer ptr)))
-            (%register-context-finalizer handle)
-            handle))))))
+          (if (cffi:null-pointer-p ptr)
+              (restart-case (error 'context-creation-error)
+                (retry-with-smaller-ctx (n)
+                  :report "Retry with a smaller :n-ctx value"
+                  :interactive (lambda ()
+                                 (format *query-io* "n-ctx: ")
+                                 (list (read *query-io*)))
+                  (apply #'make-context model (append clean-params (list :n-ctx n))))
+                (retry-with-params (plist)
+                  :report "Retry with new params (plist)"
+                  :interactive (lambda ()
+                                 (format *query-io* "Params plist: ")
+                                 (list (read *query-io*)))
+                  (apply #'make-context model plist)))
+              (let ((handle (%make-llama-context :pointer ptr)))
+                (%register-context-finalizer handle)
+                handle)))))))
 
 (defun free-context (ctx)
   "Free the foreign memory held by CTX and cancel its GC finalizer.

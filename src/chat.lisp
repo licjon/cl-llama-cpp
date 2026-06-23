@@ -66,12 +66,16 @@ Signals INPUT-VALIDATION-ERROR if MESSAGES is empty or malformed."
               (let ((n-needed (%llama:chat-apply-template
                                tmpl-arg chat n-msg add-ass
                                (cffi:null-pointer) 0)))
-                (when (< n-needed 0)
-                  (error 'chat-template-error))
-                (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
-                  (%llama:chat-apply-template
-                   tmpl-arg chat n-msg add-ass
-                   buf (1+ n-needed)))))
+                (if (< n-needed 0)
+                    (restart-case (error 'chat-template-error)
+                      (use-default-template ()
+                        :report "Retry format-chat with the model's default template"
+                        (format-chat model messages
+                                     :add-assistant-prefix add-assistant-prefix)))
+                    (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
+                      (%llama:chat-apply-template
+                       tmpl-arg chat n-msg add-ass
+                       buf (1+ n-needed))))))
           (dolist (ptr foreign-strings)
             (cffi:foreign-string-free ptr)))))))
 

@@ -3,21 +3,37 @@
 ;;; LoRA adapter wrappers
 
 (defmacro with-lora ((var model path) &body body)
-  "Load a LoRA adapter from PATH for MODEL, bind it to VAR, execute BODY, free the adapter."
+  "Load a LoRA adapter from PATH for MODEL, bind it to VAR, execute BODY, free the adapter.
+If loading fails, SKIP-LORA binds VAR to NIL and continues; USE-DIFFERENT-PATH retries."
   (let ((adapter-ptr (gensym "ADAPTER"))
+        (model-val (gensym "MODEL"))
         (path-val (gensym "PATH")))
     `(progn
        (ensure-backend)
        (with-llama-compatible-fp-environment
-         (let* ((,path-val ,path)
+         (let* ((,model-val ,model)
+                (,path-val ,path)
                 (,adapter-ptr (%llama:adapter-lora-init
-                               (llama-model-pointer ,model) ,path-val)))
+                               (llama-model-pointer ,model-val) ,path-val)))
            (when (cffi:null-pointer-p ,adapter-ptr)
-             (error 'lora-load-error :path ,path-val))
+             (setf ,adapter-ptr
+                   (restart-case (error 'lora-load-error :path ,path-val)
+                     (use-different-path (new-path)
+                       :report "Retry loading LoRA from a different path"
+                       :interactive (lambda ()
+                                      (format *query-io* "LoRA path: ")
+                                      (list (read-line *query-io*)))
+                       (%llama:adapter-lora-init
+                        (llama-model-pointer ,model-val) new-path))
+                     (skip-lora ()
+                       :report "Continue without loading a LoRA adapter"
+                       nil))))
            (let ((,var ,adapter-ptr))
              (unwind-protect
                   (progn ,@body)
-               (%llama:adapter-lora-free ,var))))))))
+               (when (and ,adapter-ptr
+                          (not (cffi:null-pointer-p ,adapter-ptr)))
+                 (%llama:adapter-lora-free ,adapter-ptr)))))))))
 
 (defun apply-lora (ctx adapter &key (scale 1.0))
   "Set the active LoRA adapter on CTX to ADAPTER with the given SCALE factor.
@@ -34,7 +50,16 @@ Returns NIL on success, signals LORA-APPLY-ERROR on failure."
         (setf (cffi:mem-aref scales-buf :float 0) scale-f)
         (let ((rc (%llama:set-adapters-lora (llama-context-pointer ctx) adapters-buf 1 scales-buf)))
           (unless (zerop rc)
-            (error 'lora-apply-error :code rc))
+            (restart-case (error 'lora-apply-error :code rc)
+              (use-different-scale (s)
+                :report "Retry applying the adapter with a different scale"
+                :interactive (lambda ()
+                               (format *query-io* "Scale (float): ")
+                               (list (read *query-io*)))
+                (apply-lora ctx adapter :scale s))
+              (skip-apply ()
+                :report "Continue without applying the LoRA adapter"
+                nil)))
           nil)))))
 
 (defun read-adapter-meta-string (adapter index reader-fn)
