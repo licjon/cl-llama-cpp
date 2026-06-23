@@ -1,0 +1,746 @@
+* cl-llama-cpp API Reference
+
+Complete reference for the =cl-llama-cpp= package. For calling the C API directly,
+see [[low-level.org][Low-level %llama Access]].
+
+** Conventions
+
+*** Nullability
+
+Every high-level wrapper translates between Lisp =NIL= and C null pointers
+automatically. Pass =NIL= for optional pointer arguments (e.g. the =fn= argument to
+=set-abort-callback=, the batch threadpool in =attach-threadpool=). Receive =NIL= for
+nullable returns (e.g. =model-chat-template= when no template exists,
+=backend-dev-by-name= when not found). Allocation failures signal a condition rather
+than returning =NIL=. You never need to call =cffi:null-pointer= or
+=cffi:null-pointer-p=.
+
+*** Boolean Parameters
+
+Parameters that are semantically boolean in the C API (=:embeddings=, =:vocab-only=,
+=:offload-kqv=, =:no-perf=, etc.) accept both Lisp booleans (=T= / =NIL=) and raw C
+integers (=1= / =0=). Integers pass through unchanged; =T= becomes =1= and =NIL=
+becomes =0=. Other types signal a =type-error=. This applies to all =:char=-typed
+boolean fields in =llama_model_params= and =llama_context_params= when passed as
+keyword overrides to =with-model= and =with-context=.
+
+*** Handle Types
+
+The high-level API represents foreign resources as typed handle structs rather than
+raw C pointers. Use the predicates to test handle variables; use the pointer accessors
+when dropping down to =%llama:= calls.
+
+| Handle type           | Predicate               | Pointer accessor              | Created by                                                     |
+|-----------------------+-------------------------+-------------------------------+----------------------------------------------------------------|
+| =llama-model=           | =llama-model-p=           | =llama-model-pointer=           | =with-model=, =make-model=                                         |
+| =llama-context=         | =llama-context-p=         | =llama-context-pointer=         | =with-context=, =make-context=                                     |
+| =llama-sampler=         | =llama-sampler-p=         | =llama-sampler-pointer=         | =with-sampler-chain=, =make-grammar-sampler=, =make-*-sampler=, etc. |
+| =gguf-context=          | =gguf-context-p=          | =gguf-context-pointer=          | =with-gguf=                                                      |
+| =ggml-backend-device=   | =ggml-backend-device-p=   | =ggml-backend-device-pointer=   | =backend-dev-get=, =backend-dev-by-name/type=, =backend-reg-dev-get= |
+| =ggml-backend-registry= | =ggml-backend-registry-p= | =ggml-backend-registry-pointer= | =backend-reg-get=, =backend-reg-by-name=                           |
+
+Backend device and registry handles are borrowed references — GGML owns the
+underlying objects and no =free= is ever needed.
+
+** Resource Management
+
+- =with-model (var path &rest params) &body body= --- Load a GGUF model, bind to =var=
+  as a =llama-model= handle, free on exit (including non-local exit). Keyword params
+  override =llama_model_default_params= (e.g. =:n-gpu-layers 99=). Signals
+  =model-load-error= on failure. Delegates to =make-model= / =free-model= internally.
+
+- =make-model path &rest params= --- Standalone model constructor. Same parameters as
+  =with-model=. Returns a =llama-model= handle with a GC finalizer: if the handle is
+  garbage-collected without being freed, the finalizer calls =llama_model_free= as a
+  safety net. The caller owns the handle and should eventually call =free-model=.
+  Signals =model-load-error= on failure.
+
+- =free-model model= --- Free the foreign memory held by =model= and cancel its GC
+  finalizer. Idempotent — calling on an already-freed model is a no-op. Returns =NIL=.
+
+- =with-context (var model &rest params) &body body= --- Create an inference context
+  from =model=, bind to =var= as a =llama-context= handle, free on exit. Keyword
+  params override =llama_context_default_params= (e.g. =:n-ctx 2048=). Signals
+  =context-creation-error= on failure. Accepts two extra keywords not in the C params:
+  =:validation= (=:off=, =:warn=, =:error=) and =:vram-budget= (bytes) run a
+  pre-creation resource check — =:warn= signals =configuration-unsafe-warning= and
+  proceeds, =:error= signals =configuration-unsafe-error= and aborts. Without
+  =:vram-budget=, free VRAM is auto-detected from the GPU. Delegates to
+  =make-context= / =free-context= internally.
+
+- =make-context model &rest params= --- Standalone context constructor. Same parameters
+  as =with-context=. Returns a =llama-context= handle with a GC finalizer. The caller
+  owns the handle and should eventually call =free-context=. Signals
+  =context-creation-error= on failure.
+
+- =free-context ctx= --- Free the foreign memory held by =ctx=, cancel its GC
+  finalizer, and clean up any registered abort callback. Idempotent. Returns =NIL=.
+
+- =with-gguf (var path &key no-alloc) &body body= --- Open a GGUF file at =path=, bind
+  to =var= as a =gguf-context= handle, execute =body=, free on exit. =:no-alloc t=
+  skips ggml tensor allocation (faster for metadata-only reads; does not require a
+  loaded backend). Signals =gguf-load-error= on failure. Does not require the llama
+  backend to be initialized.
+
+- =with-sampler-chain (var &key temp top-k top-p min-p seed greedy model grammar
+  grammar-lazy grammar-trigger-words infill typical-p xtc-probability xtc-threshold
+  top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta repeat-penalty
+  frequency-penalty presence-penalty penalty-last-n dry-multiplier dry-base
+  dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias dynamic-temp-range
+  dynamic-temp-exponent adaptive-p adaptive-p-decay sampler-config) &body body= ---
+  Allocate a sampler chain, bind to =var= as a =llama-sampler= handle, free on exit.
+  With no keyword arguments, allocates an empty chain — populate it inside =body= using
+  =sampler-chain-add=. With keyword arguments, pre-builds the chain using the same
+  options as =generate= (see Extended Sampler Keywords below). Grammar, =:mirostat=,
+  =:dry-multiplier=, and =:logit-bias= require =:model=. =:mirostat= and =:mirostat-v2=
+  are mutually exclusive. Pass =:sampler-config= to supply defaults; explicit keyword
+  arguments always override the config.
+
+** Backend Lifecycle
+
+- =ensure-backend= --- Ensure the llama backend is initialized. Thread-safe; safe to
+  call from any thread. Establishes a permanent hold: the backend will not be freed
+  when an enclosing =with-backend= scope exits. The recommended pattern for
+  multi-threaded use is to call =ensure-backend= once from the main thread before
+  spawning worker threads. Subsequent calls are no-ops.
+
+- =with-backend (&key numa) &body body= --- Initialize the llama backend, execute
+  =body=, then call =backend-free= on exit (including non-local exit). Nesting and
+  concurrent calls from multiple threads are both safe: only the first call to find
+  the backend uninitialized initializes it; the last active scope to exit frees it.
+  If =ensure-backend= was called first, =with-backend= will not free the backend on
+  exit. When =:numa= is a GGML NUMA strategy keyword (=:distribute=, =:isolate=,
+  =:numactl=, =:mirror=), calls =llama-numa-init= before executing =body=.
+
+- =set-n-threads ctx n-threads n-threads-batch= --- Set thread counts on =ctx= for
+  single-token decoding (=n-threads=) and batch decoding (=n-threads-batch=). Both are
+  required in one call. Takes effect on the next decode. Both arguments must be
+  non-negative integers.
+
+- =set-warmup ctx warmup-p= --- Enable or disable the warmup pass on =ctx=. Disabling
+  after the first decode avoids redundant computation.
+
+- =set-causal-attn ctx causal-attn-p= --- Enable or disable causal (autoregressive)
+  attention on =ctx=. Disable for bidirectional attention models; takes effect on the
+  next decode.
+
+- =set-embeddings ctx embeddings-p= --- Set the embedding-output flag on =ctx=. Must
+  match the mode the context was created with: enable only on contexts created with
+  =:embeddings= non-nil, disable only on contexts created without it.
+
+- =synchronize ctx= --- Block until all pending async compute on =ctx= is complete.
+  High-level accessors (e.g. =embed=) call this automatically before reading results;
+  use it explicitly in batched pipelines that need finer-grained control.
+
+- =set-abort-callback ctx fn= --- Register a Lisp function as the abort callback on
+  =ctx=. =fn= is called with no arguments and should return =T= to abort the current
+  decode or =NIL= to continue. Pass =NIL= to clear a previously registered callback.
+  The callback runs on a ggml worker thread: lexical variables captured in a closure
+  are visible there, but Lisp dynamic (special) bindings from other threads are not.
+  Errors in =fn= are caught, stored in =*last-abort-callback-error*=, and generation
+  continues (callback returns =NIL=). Returns =NIL=.
+
+- =get-abort-callback ctx= --- Return the Lisp abort callback registered on =ctx=, or
+  =NIL= if none is set. Thread-safe.
+
+- =*last-abort-callback-error*= --- The last error condition caught inside the
+  abort-callback panic boundary, or =NIL=.
+
+- =attach-threadpool ctx threadpool &optional threadpool-batch= --- Attach an external
+  =ggml-threadpool= to =ctx=. =threadpool-batch= optionally specifies a separate
+  threadpool for batch operations; when omitted, =threadpool= is used for both. The
+  caller retains ownership; =detach-threadpool= does not free the threadpool.
+
+- =detach-threadpool ctx= --- Detach the threadpool from =ctx=. Does not free it.
+
+** Tokenization and Generation
+
+- =tokenize model text &key add-special parse-special= --- Tokenize =text= into a
+  vector of token integers. Signals =type-error= if =text= is not a string.
+
+- =detokenize model tokens &key remove-special unparse-special= --- Convert a token
+  vector back to a string. Signals =type-error= if =tokens= is not a vector.
+
+- =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special
+  prompt-tokens token-callback grammar grammar-root typical-p xtc-probability
+  xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta
+  repeat-penalty frequency-penalty presence-penalty penalty-last-n dry-multiplier
+  dry-base dry-allowed-length dry-penalty-last-n dry-seq-breakers logit-bias
+  dynamic-temp-range dynamic-temp-exponent adaptive-p adaptive-p-decay sampler
+  sampler-config reset-context= --- Generate text continuing =prompt=. Returns three
+  values: the generated string, a stop reason (=:eog=, =:length=, or =:callback=),
+  and a =(simple-array fixnum (*))= of the sampled token ids.
+
+  Notable keyword behaviours:
+
+  - =:reset-context= (default =T=) — when =NIL=, the KV cache is not cleared before
+    decoding; the caller is responsible for ensuring the cache is consistent.
+  - =:prompt-tokens= — use a pre-tokenized token vector instead of tokenizing =prompt=.
+  - =:token-callback= — called with each decoded token string; return =NIL= to stop
+    generation early (stop reason =:callback=).
+  - =:grammar= — constrain output to a GBNF grammar string; =:grammar-root= defaults
+    to ="root"=.
+  - =:sampler= — a =llama-sampler= handle from =with-sampler-chain=; =generate= borrows
+    it without freeing. A warning is issued if other sampler keywords are also supplied.
+  - =:sampler-config= — a plist from =make-sampler-config=; supplies defaults for any
+    sampler parameter not given explicitly; explicit keywords always take priority.
+
+  See Extended Sampler Keywords below for the full sampler keyword list.
+
+- =generate-parallel ctx prompts &key max-tokens temp top-k top-p min-p seed
+  parse-special= /...all extended sampler keywords.../ --- Generate text for multiple
+  =prompts= simultaneously in shared forward passes using the batch API. Each element
+  of =prompts= is a string or a pre-tokenized token vector. All sequences share the
+  same sampler configuration; each gets a unique seed derived from =seed= +
+  sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=.
+  Returns two values: a list of generated strings and a list of stop reasons (=:eog=
+  or =:length=).
+
+- =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector
+  of single-floats. The context must be created with =:embeddings t= (or =1=).
+  Automatically synchronizes pending async compute before reading from the GPU.
+  Signals =type-error= if =text= is not a string; signals =input-validation-error= if
+  =text= is empty.
+
+** Extended Sampler Keywords
+
+Accepted by =generate=, =generate-parallel=, =with-sampler-chain=, and
+=build-sampler-chain=. Samplers compose in a fixed order: logit bias → penalties →
+DRY → grammar → sampling strategy.
+
+*Token filtering:*
+
+| Keyword           | Default | Description                                                |
+|-------------------+---------+------------------------------------------------------------|
+| =:typical-p=        |         | Keep tokens whose information content is near the expected |
+| =:xtc-probability=  |         | Probability of excluding top choices (XTC)                 |
+| =:xtc-threshold=    |     0.5 | Minimum probability for a token to be excludable           |
+| =:top-n-sigma=      |         | Keep tokens within N standard deviations of the top logit  |
+| =:adaptive-p=       |         | Dynamic top-p target probability (experimental)            |
+| =:adaptive-p-decay= |     0.0 | Rate at which adaptive-p converges to target               |
+
+*Repetition control:*
+
+| Keyword             | Default | Description                                                |
+|---------------------+---------+------------------------------------------------------------|
+| =:repeat-penalty=     |         | Penalise exact token repeats (1.0 = no penalty)            |
+| =:frequency-penalty=  |         | Penalty scaling with token frequency (0.0 = off)           |
+| =:presence-penalty=   |         | Flat penalty if token appeared at all (0.0 = off)          |
+| =:penalty-last-n=     |      64 | How many recent tokens to consider for penalties           |
+| =:dry-multiplier=     |         | DRY sequence-repetition penalty strength (requires =:model=) |
+| =:dry-base=           |    1.75 | DRY exponential base                                       |
+| =:dry-allowed-length= |       2 | Minimum sequence length before DRY applies                 |
+| =:dry-penalty-last-n= |      -1 | Token window for DRY (-1 = use context size)               |
+| =:dry-seq-breakers=   |         | List of strings that reset DRY matching (e.g. =("\n" ".")=)  |
+| =:logit-bias=         |         | Alist of =(token-id . bias)= pairs (requires =:model=)         |
+
+*Sampling strategy:*
+
+| Keyword                | Default | Description                                                |
+|------------------------+---------+------------------------------------------------------------|
+| =:mirostat=              |         | Enable Mirostat V1 (requires =:model=; replaces normal path) |
+| =:mirostat-v2=           |         | Enable Mirostat V2 (replaces normal path)                  |
+| =:mirostat-tau=          |     5.0 | Target surprise level (lower = more focused)               |
+| =:mirostat-eta=          |     0.1 | Learning rate for mirostat adaptation                      |
+| =:dynamic-temp-range=    |         | +/- range for entropy-adaptive temperature                 |
+| =:dynamic-temp-exponent= |     1.0 | Exponent shaping the dynamic temperature curve             |
+
+** Samplers
+
+*** Sampler Config
+
+- =make-sampler-config &key temp top-k top-p min-p seed greedy grammar grammar-root
+  grammar-lazy grammar-trigger-words grammar-trigger-patterns grammar-trigger-tokens
+  infill typical-p xtc-probability xtc-threshold top-n-sigma mirostat mirostat-v2
+  mirostat-tau mirostat-eta repeat-penalty frequency-penalty presence-penalty
+  penalty-last-n dry-multiplier dry-base dry-allowed-length dry-penalty-last-n
+  dry-seq-breakers logit-bias dynamic-temp-range dynamic-temp-exponent adaptive-p
+  adaptive-p-decay= --- Bundle sampler parameters into a reusable plist. Returns a
+  plist containing *only the keys explicitly provided* — absent parameters carry no
+  default. Pass the result as =:sampler-config= to =generate= or =with-sampler-chain=;
+  explicit keyword arguments at the call site always take priority over the config.
+  Unknown keywords signal =PROGRAM-ERROR=. Does not accept =:model= — resource handles
+  have independent lifetimes and belong at the call site. The returned value is a plain
+  plist; =getf= works directly on it.
+
+*** Sampler Utilities
+
+- =sampler-chain-add chain sampler= --- Add =sampler= to =chain=. Both arguments may
+  be typed =llama-sampler= handles or raw CFFI pointers. The chain takes ownership:
+  freeing the chain frees all added samplers. Returns =NIL=.
+
+- =sampler-seed sampler= --- Return the current RNG seed from =sampler= as an integer.
+
+- =free-sampler sampler= --- Free a =llama-sampler= handle created by any
+  =make-*-sampler= function. Do not call on samplers that have been added to a chain —
+  the chain owns and frees those. Returns =NIL=.
+
+*** Individual Sampler Constructors
+
+Each returns a typed =llama-sampler= handle. The caller owns it and must either pass
+it to =sampler-chain-add= (transferring ownership to the chain) or free it with
+=free-sampler=. These enable building chains with full control over sampler ordering
+without any =%llama:= calls.
+
+- =make-greedy-sampler= --- Always picks the highest-probability token.
+- =make-dist-sampler &optional (seed 42)= --- Random sampling weighted by softmax probabilities.
+- =make-top-k-sampler k= --- Restrict candidates to the =k= highest-probability tokens.
+- =make-top-p-sampler p &optional (min-keep 1)= --- Keep tokens until cumulative probability >= =p= (nucleus sampling).
+- =make-min-p-sampler p &optional (min-keep 1)= --- Remove tokens with probability < =p= × max-prob.
+- =make-typical-sampler p &optional (min-keep 1)= --- Locally typical sampling with probability mass =p=.
+- =make-temp-sampler temp= --- Scale logits by =temp= before softmax.
+- =make-temp-ext-sampler temp delta &optional (exponent 1.0)= --- Dynamic temperature: base =temp=, range =delta=, curve =exponent=.
+- =make-xtc-sampler probability threshold &optional (min-keep 1) (seed 42)= --- XTC: trim high-probability tokens above =threshold= with probability =probability= per step.
+- =make-top-n-sigma-sampler sigma= --- Keep tokens within =sigma= standard deviations of the max logit.
+- =make-mirostat-v2-sampler seed tau eta= --- Mirostat V2 targeting perplexity =tau= with learning rate =eta=.
+
+** Chat Templates
+
+- =format-chat model messages &key template add-assistant-prefix= --- Format =messages=
+  (a list of =(:role "..." :content "...")= plists) into a prompt string using the
+  model's chat template. Signals =input-validation-error= if =messages= is empty or
+  any message is missing a =:role= or =:content= string. Automatically maps the
+  ="assistant"= role for models that expect ="model"= (e.g. Gemma).
+
+- =tokenize-chat model messages &key template add-assistant-prefix= --- Like
+  =format-chat=, but returns a token vector with template markers parsed as special
+  tokens and message content parsed as regular text. Prevents model-generated text
+  resembling special tokens from corrupting subsequent turns. Use with =generate='s
+  =:prompt-tokens= parameter.
+
+- =model-chat-template model &optional name= --- Return the chat template string
+  embedded in the model, or =NIL= if none is present.
+
+- =list-chat-templates= --- Return a list of built-in chat template name strings.
+
+** Incremental Chat Sessions
+
+A stateful abstraction that tracks exactly which tokens are resident in the KV cache
+and decodes only the delta each turn. The session /borrows/ a =llama-context= — the
+caller is responsible for the context's lifetime.
+
+- =make-chat-session ctx &key template system-prompt= --- Create a chat session backed
+  by =ctx=. Clears the KV cache to start clean. =:template= overrides the model's
+  embedded chat template. =:system-prompt=, when given, seeds =messages= with an
+  initial =(:role "system" :content ...)= entry. Signals =input-validation-error= if
+  =ctx= is not a =llama-context=.
+
+- =chat-session-send session content &rest generate-keys= → =(values reply stop-reason)=
+  --- Append a user turn and generate a reply. Only the new tokens since the last turn
+  are decoded; the cached prefix is reused. Additional keyword arguments are forwarded
+  to =generate= (e.g. =:max-tokens=, =:temp=, =:seed=, =:sampler=); =:prompt-tokens=
+  and =:reset-context= are stripped — the session manages those internally. On
+  =decode-error= (context window exhausted), rolls back the KV cache and =messages=
+  list atomically to the pre-call state before re-signaling, so the session remains
+  consistent. Signals =input-validation-error= if =content= is not a non-empty string.
+
+- =chat-session-reset session &key keep-system= --- Clear the KV cache and reset the
+  conversation. When =:keep-system t= and the first message has role ="system"=, that
+  message is retained; the next turn re-seeds the cache from it. Returns =NIL=.
+
+- =chat-session-p session= --- Return =T= if =session= is a =chat-session=.
+- =chat-session-context session= --- Return the =llama-context= backing the session.
+- =chat-session-model session= --- Return the =llama-model= (derived from the context).
+- =chat-session-messages session= --- Return the current message list as =(:role … :content …)= plists.
+
+** Constrained Generation
+
+- =make-grammar-sampler model grammar &key root= --- Create a grammar sampler from a
+  GBNF =grammar= string and =root= rule (default ="root"=). Returns a =llama-sampler=
+  handle; caller must either free it with =free-sampler= or pass it to
+  =sampler-chain-add= (which transfers ownership). Signals =grammar-error= if the
+  grammar is empty or invalid.
+
+- =make-grammar-sampler-lazy model grammar &key root trigger-words= --- Create a lazy
+  grammar sampler that stays inactive until a trigger word appears in the output.
+  =:trigger-words= is a list of strings (e.g. ='("{")=). Returns a =llama-sampler=
+  handle.
+
+- =make-infill-sampler model= --- Create an infill sampler for fill-in-the-middle
+  generation. Returns a =llama-sampler= handle.
+
+- =with-grammar-sampler (var model grammar &key root) &body body= --- Create a grammar
+  sampler, bind to =var=, free on exit.
+
+** LoRA Adapters
+
+- =with-lora (var model path) &body body= --- Load a LoRA adapter GGUF from =path= for
+  =model=, bind to =var=, free on exit. Signals =lora-load-error= on failure.
+
+- =apply-lora ctx adapter &key scale= --- Set the active LoRA adapter on =ctx=.
+  =:scale= (default 1.0) controls adapter strength. Replaces any previously applied
+  adapter. Signals =lora-apply-error= on failure.
+
+- =lora-metadata adapter= --- Return metadata from =adapter= as an alist of
+  =(key . value)= string pairs.
+
+** KV Cache
+
+- =clear-kv-cache ctx= --- Clear all KV cache state for =ctx=.
+
+- =kv-cache-seq-rm ctx seq-id p0 p1= --- Remove cached tokens in positions =[p0, p1)=
+  for =seq-id=. =-1= for =p0= means from the start; =-1= for =p1= means to the end.
+  Returns =T= if cells were removed, =NIL= if no matching data.
+
+- =kv-cache-seq-cp ctx src-seq dst-seq p0 p1= --- Copy cached data from =src-seq= to
+  =dst-seq= for positions =[p0, p1)=.
+
+- =kv-cache-seq-keep ctx seq-id= --- Keep only =seq-id='s cached data, removing all
+  other sequences.
+
+- =kv-cache-seq-add ctx seq-id p0 p1 delta= --- Shift positions in =[p0, p1)= for
+  =seq-id= by =delta=.
+
+- =kv-cache-seq-div ctx seq-id p0 p1 d= --- Divide positions in =[p0, p1)= for
+  =seq-id= by =d=. Signals =input-validation-error= if =d= is zero.
+
+- =kv-cache-pos ctx seq-id= --- Return the minimum and maximum cached positions for
+  =seq-id= as =(values min max)=.
+
+- =kv-cache-can-shift-p ctx= --- Return =T= if =ctx='s memory supports position
+  shifting, =NIL= otherwise.
+
+** Session State
+
+*** File-Based Persistence
+
+Save and restore full context state (including KV cache) to disk. Enables prompt
+caching across process restarts.
+
+- =save-session ctx path &optional tokens= --- Save full context state to a session
+  file at =path=. =tokens= is an optional vector of token integers stored alongside the
+  state. Signals =session-save-error= on failure.
+
+- =load-session ctx path= --- Load context state from a session file at =path=. Returns
+  a vector of cached token integers stored with the state. Signals =session-load-error=
+  on failure.
+
+- =save-session-seq ctx path seq-id &optional tokens= --- Save a single sequence's
+  state to a file.
+
+- =load-session-seq ctx path seq-id= --- Load a single sequence's state from a file.
+  Returns a vector of cached token integers.
+
+*** Memory-Based Persistence
+
+Serialize context state to Lisp octet vectors. Enables in-process snapshotting,
+context forking, and custom storage backends.
+
+- =save-state ctx= --- Serialize full context state to an octet vector.
+
+- =load-state ctx state-bytes= --- Restore context state from an octet vector. Returns
+  the number of bytes consumed.
+
+- =save-state-seq ctx seq-id &key flags= --- Serialize one sequence's state to an octet
+  vector. When =:flags= is provided, uses the extended variant with
+  =llama_state_seq_flags=.
+
+- =load-state-seq ctx seq-id state-bytes &key flags= --- Restore one sequence's state
+  from an octet vector. Returns the number of bytes consumed.
+
+** Batch API
+
+For most use cases, =generate-parallel= is sufficient. These lower-level functions are
+available when you need direct control over token-level batching, such as custom
+decoding loops or embedding batches.
+
+- =with-batch (var n-tokens &key n-embd n-seq-max) &body body= --- Allocate a batch
+  with capacity for =n-tokens=, bind to =var=, free on exit. =:n-embd= non-zero
+  allocates embedding slots instead of token slots. =:n-seq-max= is the maximum
+  sequence IDs per token (default 1). Signals =batch-init-error= if =n-tokens= <= 0 or
+  allocation fails.
+
+- =batch-add-token batch token pos seq-ids &key logits= --- Add one token to =batch= at
+  position =pos= for the given sequence(s). =seq-ids= is an integer or a list of
+  integers. =:logits t= requests logit computation for this token. Signals
+  =batch-overflow-error= if =batch= is at capacity. Signals =input-validation-error= if
+  =token= or =pos= is negative.
+
+- =batch-add-embedding batch embedding pos seq-ids &key logits= --- Add one embedding
+  vector to =batch=. =embedding= must match the =n-embd= used when creating the batch.
+  Signals =input-validation-error= if =pos= is negative or =embedding= length mismatches
+  =n-embd=.
+
+- =batch-add-sequence batch tokens seq-id &key start-pos logits= --- Add a vector of
+  =tokens= with sequential positions. =:logits= controls which tokens get logit
+  computation: =:last= (default), =:all=, or =nil=. Signals =input-validation-error= if
+  =tokens= is empty or =start-pos= is negative.
+
+- =batch-clear batch= --- Reset =batch='s active token count to 0. Existing slot
+  contents remain allocated and will be overwritten by subsequent add calls.
+
+- =batch-token-count batch= --- Return the current number of tokens in =batch=.
+
+- =batch-decode ctx batch= --- Decode =batch= using context =ctx=. Signals =decode-error=
+  on failure.
+
+- =batch-encode ctx batch= --- Encode =batch= using context =ctx=. Signals =decode-error=
+  on failure.
+
+** Introspection
+
+- =model-description model= --- Return the model's description string (e.g.
+  ="gemma3 1B Q4_K - Medium"=).
+
+- =model-metadata model= --- Return all GGUF metadata as an alist of =(key . value)=
+  string pairs.
+
+- =model-info model= --- Return a plist of model architecture properties:
+  =:n-params=, =:n-layers=, =:n-ctx-train=, =:size-bytes=, =:n-heads=, =:n-heads-kv=,
+  =:n-embd-in=, =:n-embd-out=, =:n-swa=, =:rope-type=, =:rope-freq-scale=,
+  =:n-cls-out=, =:encoder-p=, =:decoder-p=, =:recurrent-p=, =:hybrid-p=, =:diffusion-p=.
+
+- =model-cls-label model index= --- Return the classification label string at =index=,
+  or =NIL= if unavailable.
+
+- =context-info ctx= --- Return a plist of context configuration:
+  =:n-ctx=, =:n-batch=, =:n-ubatch=, =:n-seq-max=, =:n-threads=, =:n-threads-batch=,
+  =:pooling-type=.
+
+- =system-info= --- Return a string describing the llama.cpp build and CPU capabilities.
+
+** GGUF File Inspection
+
+Inspect GGUF files without loading a model or initializing the backend. The lifecycle
+macro is =with-gguf= — see Resource Management above.
+
+*** File-Level
+
+- =gguf-version gguf= --- Return the GGUF format version as an integer (typically 3).
+- =gguf-alignment gguf= --- Return the tensor alignment value in bytes.
+- =gguf-data-offset gguf= --- Return the byte offset of the tensor data section.
+
+*** KV Metadata — Discovery
+
+- =gguf-n-kv gguf= --- Return the number of key/value metadata entries.
+- =gguf-find-key gguf key= --- Return the integer index of metadata key =key=, or =NIL=.
+- =gguf-key gguf key-id= --- Return the key name string at index =key-id=.
+- =gguf-kv-type gguf key-id= --- Return the type keyword for entry =key-id=: =:uint8=,
+  =:int8=, =:uint16=, =:int16=, =:uint32=, =:int32=, =:float32=, =:bool=, =:string=,
+  =:array=, =:uint64=, =:int64=, =:float64=.
+
+*** KV Metadata — Value Access
+
+- =gguf-val gguf key-id= --- Return the CL value for a scalar KV entry. Dispatches on
+  type: integer types → integers, =:float32= → =single-float=, =:float64= →
+  =double-float=, =:bool= → =T= / =NIL=, =:string= → string. Returns keyword =:ARRAY=
+  for array entries; use the array accessors below.
+
+- =gguf-type-name type= --- Return a human-readable string for a gguf-type keyword.
+
+- =gguf-metadata gguf= --- Return all KV metadata as an alist of =(key . value)= pairs.
+  Scalar values are resolved to CL types. Array entries appear as =(key . (:array . N))=
+  where =N= is the element count.
+
+*** KV Metadata — Array Access
+
+- =gguf-arr-type gguf key-id= --- Return the element type keyword for an array KV entry.
+- =gguf-arr-n gguf key-id= --- Return the element count of an array KV entry.
+- =gguf-arr-data gguf key-id= --- Return =(values foreign-pointer cffi-element-type count)=
+  for a numeric array entry. =cffi-element-type= is a CFFI primitive keyword (e.g.
+  =:float=, =:unsigned-int=) ready for =cffi:mem-aref=. Not valid for =:string= arrays.
+- =gguf-arr-str gguf key-id index= --- Return the string at =index= within a string
+  array KV entry.
+
+*** Tensor Info
+
+- =gguf-n-tensors gguf= --- Return the number of tensors described in the file.
+- =gguf-find-tensor gguf name= --- Return the integer index of tensor =name=, or =NIL=.
+- =gguf-tensor-name gguf tensor-id= --- Return the tensor's name string.
+- =gguf-tensor-type gguf tensor-id= --- Return the tensor's =ggml-type= keyword (e.g.
+  =:f32=, =:q4-0=, =:bf16=).
+- =gguf-tensor-offset gguf tensor-id= --- Return the byte offset of the tensor within
+  the data section.
+- =gguf-tensor-size gguf tensor-id= --- Return the tensor's byte size.
+- =gguf-tensor-info gguf tensor-id= --- Return a plist =(:name … :type … :offset … :size …)=.
+- =gguf-tensors gguf= --- Return a list of =gguf-tensor-info= plists, one per tensor.
+
+** Performance
+
+- =context-perf ctx= --- Return context performance data as a plist:
+  =:t-start-ms=, =:t-load-ms=, =:t-p-eval-ms=, =:t-eval-ms=, =:n-p-eval=, =:n-eval=,
+  =:n-reused=. Timing values are doubles in milliseconds; counts are integers.
+
+- =print-context-perf ctx= --- Print context performance statistics to stderr.
+- =reset-context-perf ctx= --- Zero all context performance counters.
+- =print-perf ctx= --- Alias for =print-context-perf=.
+- =reset-perf ctx= --- Alias for =reset-context-perf=.
+
+- =sampler-perf chain= --- Return sampler performance data as a plist:
+  =:t-sample-ms=, =:n-sample=.
+
+- =print-sampler-perf chain= --- Print sampler performance statistics to stderr.
+- =reset-sampler-perf chain= --- Zero all sampler performance counters.
+
+- =with-perf (ctx) &body body= --- Reset context performance counters, execute =body=,
+  then print performance to stderr. Printing happens even on non-local exit. Returns
+  the values of =body=.
+
+** Logging
+
+- =set-log-callback fn= --- Route all llama.cpp log messages to Lisp function =fn=,
+  called as =(fn level text)= where =level= is an integer (1=debug, 2=info, 3=warn,
+  4=error) and =text= is the message string. Pass =NIL= to restore the default C stderr
+  logger. Thread-safe: the callback is captured atomically before each dispatch. Errors
+  in =fn= are silently caught to prevent unwinding into C.
+
+- =get-log-callback= --- Return the current Lisp log callback, or =NIL=. Thread-safe.
+
+** System and Device
+
+*** System
+
+- =time-us= --- Return the current wall-clock time in microseconds as an integer.
+
+- =system-capabilities= --- Return a plist of system capability flags:
+  =:mmap= (boolean), =:mlock= (boolean), =:gpu-offload= (boolean), =:rpc= (boolean),
+  =:max-devices= (integer), =:n-backend-devs= (integer), =:n-backend-regs= (integer),
+  =:has-gpu= (boolean). The last three reflect the live backend device registry.
+
+*** Backend Device Enumeration
+
+Requires the backend to be initialized (call =ensure-backend= or use =with-backend=
+first). Returned handles are borrowed references — no =free= is ever needed.
+
+- =backend-dev-count= --- Return the total number of registered backend devices.
+- =backend-dev-get index= --- Return the =ggml-backend-device= at =index= (0-based),
+  or =NIL= if the C pointer is null. Signals an error if =index= is out of range.
+- =backend-dev-by-name name= --- Return the =ggml-backend-device= named =name=, or =NIL=.
+- =backend-dev-by-type type= --- Return the first =ggml-backend-device= of the given
+  =type= keyword (=:cpu=, =:gpu=, =:igpu=, =:accel=, =:meta=), or =NIL=.
+
+*** Backend Device Properties
+
+- =backend-dev-name device= --- Return the name string of =device=.
+- =backend-dev-description device= --- Return the description string of =device=.
+- =backend-dev-type device= --- Return the type keyword: =:cpu=, =:gpu=, =:igpu=,
+  =:accel=, or =:meta=.
+- =backend-dev-memory device= --- Return =(values free-bytes total-bytes)=. GPU devices
+  report VRAM; the CPU device typically reports system RAM.
+- =backend-dev-props device= --- Return all device properties as a plist:
+  =:name=, =:description=, =:memory-free=, =:memory-total=, =:type=, =:device-id=,
+  =:async=, =:host-buffer=, =:buffer-from-host-ptr=, =:events=.
+
+*** Backend Registry
+
+- =backend-reg-count= --- Return the total number of registered backend registries.
+- =backend-reg-get index= --- Return the =ggml-backend-registry= at =index=, or =NIL=.
+  Signals an error if =index= is out of range.
+- =backend-reg-by-name name= --- Return the registry named =name=, or =NIL=.
+- =backend-reg-name reg= --- Return the name string of =reg=.
+- =backend-reg-dev-count reg= --- Return the number of devices belonging to =reg=.
+- =backend-reg-dev-get reg index= --- Return the =ggml-backend-device= at =index=
+  within =reg=, or =NIL=. Signals an error if =index= is out of range.
+
+*** High-Level Aggregates
+
+- =gpu-devices= --- Return a list of =backend-dev-props= plists for all devices of type
+  =:gpu= or =:igpu=. Returns =()= on CPU-only builds.
+- =detect-free-vram= --- Return total free VRAM in bytes across all GPU/IGPU devices,
+  or =NIL= if no GPU devices are registered.
+- =detect-total-vram= --- Return total VRAM capacity in bytes across all GPU/IGPU
+  devices, or =NIL= if no GPU devices are registered.
+
+** Resource Planning
+
+Estimate memory use from GGUF metadata and validate a configuration against a VRAM
+budget before loading a model or creating a context. All sizes are in bytes. Snapshot
+=detect-free-vram= before loading for pre-load planning; after loading, the returned
+value reflects remaining headroom only.
+
+- =estimate-memory model &key n-ctx type-k type-v= --- Return a plist
+  =(:model-size :kv-cache :compute :total)= estimating memory for =model=. =:n-ctx=
+  defaults to the model's training context length; =:type-k= / =:type-v= default to
+  =:f16= (the KV-cache quantization types). The =:compute= term is a fixed heuristic,
+  so =:total= is an approximation.
+
+- =explain-memory-usage model &key n-ctx type-k type-v stream= --- Print a
+  human-readable memory breakdown to =:stream= (default =*standard-output*=).
+  Returns =NIL=.
+
+- =validate-configuration model &key n-ctx type-k type-v n-gpu-layers vram-budget= ---
+  Return a plist =(:status :safe/:unsafe/:unknown :reason string)=. Without
+  =:vram-budget=, free VRAM is auto-detected; status is =:unknown= only when no GPU is
+  present. When =:n-gpu-layers= is supplied, only the GPU share of model weights (plus
+  KV cache and compute) is checked against the budget.
+
+- =feasibility-report model &key n-ctx type-k type-v n-gpu-layers vram-budget stream=
+  --- Print an estimate + validation report to =:stream= and return the combined
+  estimate/validation plist. When =:vram-budget= is omitted, prints a detected VRAM
+  header.
+
+- =suggest-configuration model &key n-ctx n-gpu-layers vram-budget= --- Return a plist
+  =(:n-ctx n :n-gpu-layers n)= that fits within =:vram-budget=, or =NIL= if none is
+  found. Without =:vram-budget=, free VRAM is auto-detected; returns =NIL= on CPU-only
+  builds. Reduces =:n-gpu-layers= first, then halves =:n-ctx=.
+
+*Runtime guardrails:* =with-context= accepts =:validation= (=:off=, =:warn=, =:error=)
+and =:vram-budget=. =:warn= signals =configuration-unsafe-warning= (a =warning=) and
+proceeds; =:error= signals =configuration-unsafe-error= and aborts context creation.
+
+** Conditions
+
+All conditions inherit from =llama-error=.
+
+| Condition                  | Slot(s)                                | When                                                           |
+|----------------------------+----------------------------------------+----------------------------------------------------------------|
+| =model-load-error=           | =path=                                   | Model file cannot be loaded                                    |
+| =gguf-load-error=            | =path=                                   | GGUF file cannot be opened (=with-gguf=)                         |
+| =context-creation-error=     |                                        | Context allocation fails                                       |
+| =tokenization-error=         | =text=                                   | Tokenization fails                                             |
+| =decode-error=               | =code=                                   | =llama_decode= returns non-zero                                  |
+| =chat-template-error=        |                                        | Chat template rendering fails                                  |
+| =lora-load-error=            | =path=                                   | LoRA adapter file cannot be loaded                             |
+| =lora-apply-error=           | =code=                                   | =set-adapters-lora= returns non-zero                             |
+| =session-save-error=         | =path=                                   | Session file save fails                                        |
+| =session-load-error=         | =path=                                   | Session file load fails                                        |
+| =grammar-error=              | =grammar=                                | Empty or invalid GBNF grammar string                           |
+| =batch-init-error=           | =n-tokens=                               | Batch allocation fails                                         |
+| =batch-overflow-error=       | =capacity=, =token-count=                  | Batch add exceeds capacity                                     |
+| =configuration-unsafe-error= | =reason=                                 | =with-context :validation :error= and config exceeds VRAM budget |
+| =input-validation-error=     | =function-name=, =argument=, =value=, =reason= | Pre-flight check fails (negative index, empty input, etc.)     |
+
+=configuration-unsafe-warning= (signaled by =with-context :validation :warn=) is a
+=warning=, not a =llama-error=; read its reason with
+=configuration-unsafe-warning-reason=.
+
+=input-validation-error= carries four slots: =input-validation-error-function= (which
+wrapper signaled), =input-validation-error-argument= (which parameter),
+=input-validation-error-value= (the rejected value), =input-validation-error-reason=
+(human-readable explanation). Simple type mismatches signal standard =type-error= via
+=check-type= instead.
+
+** Interactive Restarts
+
+Every resource-loading condition establishes domain-specific restarts for the
+interactive debugger. Restart names are intentionally unexported; for programmatic use
+from =handler-bind=, reference them as =cl-llama-cpp::restart-name=.
+
+| Condition              | Restart                       | Description                                           |
+|------------------------+-------------------------------+-------------------------------------------------------|
+| =model-load-error=       | =retry-with-layers (n)=         | Retry loading with a new =:n-gpu-layers= value          |
+|                        | =use-cpu-only ()=               | Retry with =:n-gpu-layers 0=                            |
+|                        | =use-different-path (new-path)= | Retry loading from a different file path              |
+| =context-creation-error= | =retry-with-smaller-ctx (n)=    | Retry context creation with a smaller =:n-ctx= value    |
+|                        | =retry-with-params (plist)=     | Retry with a completely new params plist              |
+| =lora-load-error=        | =use-different-path (new-path)= | Retry loading the LoRA adapter from a different path  |
+|                        | =skip-lora ()=                  | Continue without a LoRA adapter (body receives =NIL=)   |
+| =lora-apply-error=       | =use-different-scale (s)=       | Retry applying the adapter at a different scale       |
+|                        | =skip-apply ()=                 | Continue without applying the LoRA adapter            |
+| =session-save-error=     | =use-different-path (new-path)= | Retry saving to a different path                      |
+|                        | =skip-save ()=                  | Continue without saving (returns =NIL=)                 |
+| =session-load-error=     | =use-different-path (new-path)= | Retry loading from a different path                   |
+|                        | =start-fresh ()=                | Skip loading; return an empty token vector            |
+| =grammar-error=          | =skip-grammar ()=               | Continue without grammar constraint (returns =NIL=)     |
+|                        | =use-different-grammar (g)=     | Retry with a different GBNF grammar string            |
+| =chat-template-error=    | =use-default-template ()=       | Retry =format-chat= using the model's built-in template |
+
+Notes:
+- Restarts that read user input do so from =*query-io*=, so they work in the interactive
+  debugger and via =(invoke-restart-interactively ...)=.
+- =save-session-seq= and =load-session-seq= expose the same restarts as their non-seq
+  counterparts.
+- =make-grammar-sampler-lazy= and =make-infill-sampler= also establish the grammar
+  restarts (=skip-grammar= / =use-different-grammar=).
+- =with-lora= and =with-grammar-sampler= guard their cleanup so a =skip-*= restart that
+  returns =NIL= does not attempt to free a null pointer.

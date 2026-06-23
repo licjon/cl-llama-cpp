@@ -1,0 +1,204 @@
+* Getting Started
+
+This guide walks through the common patterns in order of increasing complexity. It
+assumes you have completed the installation steps in the [[../README.org][README]] and have at least one
+GGUF model file on hand.
+
+For a complete function reference, see [[api-reference.org][API Reference]].
+
+** Loading the System
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp")
+#+end_src
+
+This loads both the =%llama= bindings layer and the =cl-llama-cpp= high-level package.
+The llama backend initializes automatically the first time you load a model.
+
+** First Generation
+
+The basic pattern is: open a model, create a context, generate text.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (princ (cl-llama-cpp:generate ctx "The capital of France is"
+                                  :max-tokens 64
+                                  :temp 0.7))))
+#+end_src
+
+=with-model= and =with-context= are resource macros — they bind the handle to the
+variable and free the foreign memory on exit, including on non-local exits (errors,
+=return-from=, etc.). The keyword arguments passed to them are forwarded directly to
+the C default-params structures, so any parameter in =llama_model_params= or
+=llama_context_params= is accepted.
+
+Key =generate= options:
+
+- =:max-tokens= — hard cap on output length; =generate= also stops at end-of-generation
+  token, whichever comes first
+- =:temp= — sampling temperature; lower is more deterministic, 0.0 is greedy
+- =:seed= — for reproducible output; defaults to a random seed
+- =:top-k=, =:top-p=, =:min-p= — nucleus and min-p sampling filters
+
+=generate= returns three values: the generated string, a stop reason (=:eog=,
+=:length=, or =:callback=), and a vector of the sampled token IDs.
+
+** Streaming
+
+Pass =:token-callback= to receive each token as it is decoded. Return =T= to continue,
+=NIL= to stop early:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (cl-llama-cpp:generate ctx "Once upon a time"
+                           :max-tokens 256
+                           :temp 0.8
+                           :token-callback (lambda (tok)
+                                             (write-string tok)
+                                             (force-output)
+                                             t))))
+#+end_src
+
+When the callback returns =NIL=, generation stops and =generate= returns with stop
+reason =:callback=.
+
+** Chat
+
+=make-chat-session= wraps a context and manages the KV cache automatically. Each call
+to =chat-session-send= appends a user turn, generates a reply, and records it in the
+session's message history — decoding only the new tokens since the last turn. Prefill
+cost stays proportional to the new content only, regardless of history length.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (let ((session (cl-llama-cpp:make-chat-session ctx
+                     :system-prompt "You are a helpful assistant.")))
+
+      (format t "~A~%~%"
+              (cl-llama-cpp:chat-session-send session "What is Common Lisp?"
+                                              :max-tokens 256))
+
+      (format t "~A~%~%"
+              (cl-llama-cpp:chat-session-send session "Tell me more about CLOS."
+                                              :max-tokens 256))
+
+      ;; Inspect the full conversation so far
+      (dolist (msg (cl-llama-cpp:chat-session-messages session))
+        (format t "[~A] ~A~%~%" (getf msg :role) (getf msg :content))))))
+#+end_src
+
+Additional keyword arguments to =chat-session-send= are forwarded to =generate=
+(=:max-tokens=, =:temp=, =:seed=, =:sampler=, etc.).
+
+Internally, the session uses =tokenize-chat= rather than =format-chat= to tokenize each
+turn. The distinction matters: =tokenize-chat= marks template tokens as special so that
+model-generated text resembling a control token can't corrupt the prompt structure.
+If you call =generate= directly with chat input, prefer =tokenize-chat= over
+=format-chat= and pass the result via =:prompt-tokens=.
+
+When the context window fills, =chat-session-send= signals =decode-error=. The session
+rolls back to its pre-call state before re-signaling, so it remains consistent. You
+can catch this and reset:
+
+#+begin_src lisp
+(handler-case
+    (cl-llama-cpp:chat-session-send session "Another turn" :max-tokens 128)
+  (cl-llama-cpp:decode-error ()
+    (cl-llama-cpp:chat-session-reset session :keep-system t)
+    (cl-llama-cpp:chat-session-send session "Another turn" :max-tokens 128)))
+#+end_src
+
+=:keep-system t= retains the system prompt message so the model's persona is preserved
+after reset.
+
+See =examples/incremental-chat.lisp= for a complete interactive terminal loop including
+context-window exhaustion handling.
+
+** Embeddings
+
+Embedding contexts are created differently from generation contexts — pass
+=:embeddings t= and typically a pooling type:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/embedding-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 512 :embeddings t :pooling-type 1)
+    (let* ((v1 (cl-llama-cpp:embed ctx "Common Lisp is a programming language"))
+           (v2 (cl-llama-cpp:embed ctx "Lisp is a family of languages"))
+           (dot (loop for a across v1 for b across v2 sum (* a b))))
+      (format t "Vectors: ~D dimensions~%" (length v1))
+      (format t "Dot product: ~,4F~%" dot))))
+#+end_src
+
+=embed= returns a =(simple-array single-float (*))=. Pass =:normalize t= to get
+unit-length vectors, which makes cosine similarity equivalent to the dot product.
+
+Do not mix an embedding context and a generation context — create separate contexts
+for each purpose.
+
+** Error Handling
+
+All conditions inherit from =llama-error=. The common ones to handle:
+
+#+begin_src lisp
+;; Catch model load failure (e.g. file not found, GPU OOM)
+(handler-case
+    (cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+      ...)
+  (cl-llama-cpp:model-load-error (e)
+    (format t "Failed to load ~A~%" (cl-llama-cpp:model-load-error-path e))))
+
+;; Catch decode failure (e.g. context exhausted in manual usage)
+(handler-case
+    (cl-llama-cpp:generate ctx "Hello" :max-tokens 512)
+  (cl-llama-cpp:decode-error (e)
+    (format t "Decode returned ~A~%" (cl-llama-cpp:decode-error-code e))))
+#+end_src
+
+In an interactive REPL session, resource-loading conditions also establish restarts
+that the debugger presents automatically — for example, when a model fails to load due
+to GPU OOM, the debugger offers "Retry with fewer GPU layers" and "Use CPU only"
+without requiring any additional code. See [[api-reference.org#interactive-restarts][Interactive Restarts]] for the full list.
+
+** Long-Lived Handles
+
+=with-model= and =with-context= tie the resource lifetime to a dynamic extent. For
+server-style code where a model should live for the process lifetime, use the
+standalone constructors:
+
+#+begin_src lisp
+;; Load once at startup
+(defvar *model*
+  (cl-llama-cpp:make-model "/path/to/model.gguf" :n-gpu-layers 99))
+
+;; Create a context per request
+(defun handle-request (prompt)
+  (let ((ctx (cl-llama-cpp:make-context *model* :n-ctx 2048)))
+    (unwind-protect
+        (cl-llama-cpp:generate ctx prompt :max-tokens 256)
+      (cl-llama-cpp:free-context ctx))))
+
+;; Explicit cleanup on shutdown
+(defun shutdown ()
+  (cl-llama-cpp:free-model *model*))
+#+end_src
+
+=make-model= and =make-context= register GC finalizers via =trivial-garbage=: if a
+handle is garbage-collected without being freed, the finalizer frees the foreign memory
+as a safety net. Prefer explicit =free-model= / =free-context= calls — the finalizer
+is a last resort, not a substitute.
+
+Models are read-only once loaded. Sharing a single =llama-model= handle across
+multiple threads is safe. Each thread must have its own =llama-context=.
+
+** Next Steps
+
+- [[api-reference.org][API Reference]] — complete function, condition, and restart reference
+- [[guides/samplers.org][Samplers guide]] — sampler chains, config objects, extended sampling strategies
+- [[guides/grammar.org][Grammar guide]] — GBNF constrained generation and lazy grammars
+- [[guides/kv-cache.org][KV cache guide]] — cache operations, session state, context forking
+- [[guides/embeddings.org][Embeddings guide]] — normalization, batching, similarity search patterns
+- [[guides/parallel.org][Parallel guide]] — =generate-parallel= and concurrent thread contexts
+- [[low-level.org][Low-level %llama access]] — calling the C API directly

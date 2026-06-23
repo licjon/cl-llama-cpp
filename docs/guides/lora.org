@@ -1,0 +1,121 @@
+* LoRA Adapters Guide
+
+LoRA (Low-Rank Adaptation) adapters are GGUF files that modify a base model's
+behaviour without changing its weights. Common uses: domain specialisation, style
+transfer, instruction-tuning a base model, and combining multiple personas on the same
+loaded model.
+
+For the function reference, see [[../api-reference.org#lora-adapters][API Reference: LoRA Adapters]].
+
+** Loading and Applying an Adapter
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/base-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+      (cl-llama-cpp:apply-lora ctx adapter :scale 1.0)
+      (cl-llama-cpp:generate ctx "Write a poem about autumn:"
+                             :max-tokens 128 :temp 0.8))))
+#+end_src
+
+=with-lora= loads the adapter and binds it to =adapter=, freeing it on exit.
+=apply-lora= activates it on =ctx=. The adapter must be loaded for the same model —
+passing an adapter from a different model is undefined behaviour.
+
+** Scale
+
+=:scale= (default 1.0) controls how strongly the adapter influences outputs:
+
+- =1.0= — full adapter strength
+- =0.5= — blend halfway between the base model and the adapter
+- =0.0= — effectively disables the adapter without unloading it
+- =1.5+= — amplify the adapter's influence beyond what it was trained for (may degrade quality)
+
+#+begin_src lisp
+;; Try different scales on the same adapter
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+      (dolist (scale '(0.25 0.5 0.75 1.0))
+        (cl-llama-cpp:apply-lora ctx adapter :scale scale)
+        (format t "=== Scale ~A ===~%" scale)
+        (format t "~A~%~%"
+                (cl-llama-cpp:generate ctx "Describe your personality:"
+                                       :max-tokens 64 :temp 0.3 :seed 42))))))
+#+end_src
+
+=apply-lora= replaces any previously applied adapter on =ctx=. There is no stack —
+calling it a second time with a different adapter replaces the first.
+
+** Using LoRA with Chat Templates
+
+The adapter does not affect tokenization or chat template formatting — use
+=tokenize-chat= and =chat-session-send= normally:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+      (cl-llama-cpp:apply-lora ctx adapter :scale 1.0)
+      (let ((session (cl-llama-cpp:make-chat-session ctx
+                       :system-prompt "You are a helpful assistant.")))
+        (format t "~A~%"
+                (cl-llama-cpp:chat-session-send session "Hello!"
+                                                :max-tokens 128))))))
+#+end_src
+
+** Inspecting Adapter Metadata
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf")
+  (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+    (dolist (entry (cl-llama-cpp:lora-metadata adapter))
+      (format t "~A = ~A~%" (car entry) (cdr entry)))))
+#+end_src
+
+=lora-metadata= returns an alist of =(key . value)= string pairs from the adapter's
+GGUF metadata. Typical keys include the base model name, training rank, and author
+information — useful for verifying the adapter was trained for the right base model
+before applying it.
+
+** Error Handling
+
+=with-lora= signals =lora-load-error= (carrying =path=) if the file cannot be read or
+is not a valid adapter for =model=. =apply-lora= signals =lora-apply-error= (carrying
+=code=) if the backend rejects the application.
+
+Both conditions establish interactive restarts in the debugger:
+
+| Condition        | Restart                       | Description                              |
+|------------------+-------------------------------+------------------------------------------|
+| =lora-load-error=  | =use-different-path (new-path)= | Retry loading from a different path      |
+|                  | =skip-lora ()=                  | Continue without a LoRA adapter          |
+| =lora-apply-error= | =use-different-scale (s)=       | Retry applying at a different scale      |
+|                  | =skip-apply ()=                 | Continue without applying the adapter    |
+
+#+begin_src lisp
+(handler-case
+    (cl-llama-cpp:with-lora (adapter model "/path/to/adapter.gguf")
+      (cl-llama-cpp:apply-lora ctx adapter))
+  (cl-llama-cpp:lora-load-error (e)
+    (format t "Could not load adapter: ~A~%"
+            (cl-llama-cpp:lora-load-error-path e)))
+  (cl-llama-cpp:lora-apply-error (e)
+    (format t "Could not apply adapter (code ~A)~%"
+            (cl-llama-cpp:lora-apply-error-code e))))
+#+end_src
+
+** Notes
+
+- The adapter must be trained for the specific base model architecture and quant
+  type. Applying an adapter trained on Llama-3 to a Gemma model will produce
+  garbage or an error.
+- GPU offloading of LoRA layers follows the base model's =:n-gpu-layers= setting.
+- Multiple adapters cannot be active simultaneously on one context. If you need to
+  switch adapters, call =apply-lora= again with the new adapter.
+
+** See Also
+
+- =examples/lora.lisp= — complete walkthrough including adapter download and GGUF
+  conversion from a Hugging Face safetensors checkpoint
+- [[../api-reference.org#lora-adapters][API Reference: LoRA Adapters]]

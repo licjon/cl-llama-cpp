@@ -1,0 +1,172 @@
+* Parallel Inference Guide
+
+There are two ways to run multiple inferences concurrently:
+
+- =generate-parallel= — multiple prompts decoded in *shared forward passes* within a
+  single context. Efficient for batch workloads where all prompts are available at once.
+- *Parallel contexts on separate threads* — independent contexts running on separate
+  Lisp threads. Each context decodes at its own pace; suitable for concurrent request
+  handling.
+
+** generate-parallel
+
+=generate-parallel= uses the batch API to interleave token decoding across multiple
+sequences in a single context. Each forward pass includes tokens from all active
+sequences simultaneously, which is more GPU-efficient than running sequences serially.
+
+*** Setup
+
+The context must be created with =:n-seq-max= >= the number of prompts:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096 :n-seq-max 8)
+    (multiple-value-bind (texts stop-reasons)
+        (cl-llama-cpp:generate-parallel
+         ctx
+         '("The capital of France is"
+           "The largest ocean on Earth is"
+           "The speed of light is approximately"
+           "Water boils at")
+         :max-tokens 64
+         :temp 0.7
+         :seed 42)
+      (loop for text in texts
+            for reason in stop-reasons
+            for i from 1
+            do (format t "[~D] ~A  (stopped: ~A)~%" i text reason)))))
+#+end_src
+
+Returns two values: a list of generated strings and a list of stop reasons (=:eog= or
+=:length=). Each sequence gets a unique seed derived from =:seed= + sequence-index.
+
+*** Sampler Options
+
+=generate-parallel= accepts the same extended sampler keywords as =generate=. All
+sequences share the same sampler configuration:
+
+#+begin_src lisp
+(cl-llama-cpp:generate-parallel
+ ctx
+ '("Prompt A" "Prompt B" "Prompt C")
+ :max-tokens 128
+ :temp 0.8
+ :top-p 0.9
+ :repeat-penalty 1.1)
+#+end_src
+
+For per-sequence sampler control, use the batch API directly.
+
+*** Pre-tokenized Input
+
+Elements of =prompts= can be pre-tokenized token vectors instead of strings:
+
+#+begin_src lisp
+(let ((tokens-a (cl-llama-cpp:tokenize model "Prompt A" :add-special t))
+      (tokens-b (cl-llama-cpp:tokenize model "Prompt B" :add-special t)))
+  (cl-llama-cpp:generate-parallel ctx (list tokens-a tokens-b) :max-tokens 64))
+#+end_src
+
+** Parallel Contexts on Separate Threads
+
+Models are read-only once loaded. A single =llama-model= handle can be safely shared
+across threads. Each thread must own its own =llama-context= — sharing a context
+across threads is not safe.
+
+*** Setup: ensure-backend
+
+Call =ensure-backend= once on the main thread before spawning workers. This
+initializes the backend with a permanent hold so no worker thread can accidentally
+trigger a backend free while other workers are still running:
+
+#+begin_src lisp
+(cl-llama-cpp:ensure-backend)
+#+end_src
+
+=with-backend= and =with-context= inside worker threads then operate safely without
+racing on backend init/free.
+
+*** Example: Thread-per-Request
+
+#+begin_src lisp
+(cl-llama-cpp:ensure-backend)
+
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (let* ((prompts '("The capital of France is"
+                    "The speed of light is approximately"
+                    "Water freezes at"))
+         (results (make-array (length prompts) :initial-element nil))
+         (threads
+          (loop for prompt in prompts
+                for i from 0
+                collect
+                (let ((p prompt) (idx i))
+                  (sb-thread:make-thread
+                   (lambda ()
+                     ;; Each thread creates and owns its own context
+                     (cl-llama-cpp:with-context (ctx model :n-ctx 256)
+                       (setf (aref results idx)
+                             (cl-llama-cpp:generate ctx p
+                                                    :max-tokens 32
+                                                    :temp 0.0))))
+                   :name (format nil "llama-worker-~D" i))))))
+
+    (mapc #'sb-thread:join-thread threads)
+
+    (loop for prompt in prompts
+          for result across results
+          for i from 1
+          do (format t "[~D] ~A~A~%" i prompt result))))
+#+end_src
+
+This example uses =sb-thread= directly. Adapt =make-thread= / =join-thread= to
+bordeaux-threads, lparallel, or any threading library — cl-llama-cpp imposes no
+threading dependency.
+
+*** Thread Safety Summary
+
+| Resource        | Thread-safe?                             |
+|-----------------+------------------------------------------|
+| =llama-model=     | Yes — read-only after load; share freely |
+| =llama-context=   | No — one thread at a time                |
+| Backend init    | Yes — =ensure-backend= is atomic          |
+| Log callback    | Yes — dispatched atomically              |
+| Abort callback  | Yes — read atomically; runs on ggml thread |
+
+*** GPU Contention
+
+With multiple contexts on a GPU, each forward pass blocks while the GPU executes.
+Threads queue up waiting for GPU access. This is handled by the GGML backend
+automatically — no explicit locking is needed at the Lisp level.
+
+For maximum GPU utilization on batch workloads, =generate-parallel= within a single
+context is usually more efficient than multiple threads competing for the GPU.
+
+*** Thread-Local Dynamic Bindings
+
+Lisp dynamic (special) variable bindings established on one thread are not visible on
+other threads. This matters for:
+
+- Abort callbacks — run on a ggml worker thread; they see lexical closures but not
+  dynamic bindings from the thread that called =generate=
+- Log callbacks — similarly, run on the llama.cpp logging thread
+
+Use lexical closures to share state with callbacks:
+
+#+begin_src lisp
+;; OK: lexical variable in a closure
+(let ((abort-flag nil))
+  (cl-llama-cpp:set-abort-callback ctx (lambda () abort-flag))
+  ...)
+
+;; NOT OK: dynamic binding not visible from callback thread
+(defvar *abort* nil)
+(cl-llama-cpp:set-abort-callback ctx (lambda () *abort*))  ; may not see updates
+#+end_src
+
+** See Also
+
+- =examples/parallel.lisp= — complete =generate-parallel= example
+- =examples/parallel-threads.lisp= — complete multi-thread example
+- [[../api-reference.org#tokenization-and-generation][API Reference: generate-parallel]]
+- [[../api-reference.org#backend-lifecycle][API Reference: Backend Lifecycle]]

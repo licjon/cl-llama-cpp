@@ -1,0 +1,172 @@
+* KV Cache Guide
+
+The KV (key-value) cache stores the attention state for previously decoded tokens. By
+managing it directly you can share prefixes across sequences, implement sliding windows,
+fork contexts, and persist state across process restarts.
+
+This guide covers the cache manipulation primitives and the session state save/load
+API. For the higher-level incremental chat abstraction that manages the cache
+automatically, see the [[../getting-started.org][Getting Started]] guide.
+
+** Concepts
+
+Each token decoded by a context occupies a position in the KV cache. Positions are
+integers starting from 0. Multiple sequences can coexist in the same cache, identified
+by a sequence ID (a non-negative integer). By default, generation uses sequence 0.
+
+Most cache operations take a position range =[p0, p1)=. Passing =-1= for =p0= means
+"from the beginning"; =-1= for =p1= means "to the end".
+
+** Basic Operations
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+
+    ;; Clear all cached tokens for all sequences
+    (cl-llama-cpp:clear-kv-cache ctx)
+
+    ;; Remove tokens at positions [0, 128) from sequence 0
+    (cl-llama-cpp:kv-cache-seq-rm ctx 0 0 128)
+
+    ;; Query the range of cached positions for a sequence
+    (multiple-value-bind (min max)
+        (cl-llama-cpp:kv-cache-pos ctx 0)
+      (format t "Sequence 0 cached: [~D .. ~D]~%" min max))
+
+    ;; Check whether this context supports position shifting
+    (when (cl-llama-cpp:kv-cache-can-shift-p ctx)
+      (format t "Position shifting supported~%"))))
+#+end_src
+
+** Sharing a Prefix Across Sequences
+
+A common pattern for multi-user or multi-branch scenarios: decode a shared prefix once
+(e.g. a system prompt) on sequence 0, then copy it to additional sequences. Each
+sequence then continues independently from that shared starting point.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 8192 :n-seq-max 4)
+
+    ;; Decode the system prompt on sequence 0
+    (let ((system-tokens (cl-llama-cpp:tokenize model "You are a helpful assistant. "
+                                                :add-special t)))
+      (cl-llama-cpp:generate ctx nil :prompt-tokens system-tokens
+                             :max-tokens 0))  ; prefill only, no generation
+
+    ;; Copy sequence 0's cache to sequences 1, 2, 3
+    ;; Arguments: ctx src-seq dst-seq p0 p1
+    (cl-llama-cpp:kv-cache-seq-cp ctx 0 1 0 -1)
+    (cl-llama-cpp:kv-cache-seq-cp ctx 0 2 0 -1)
+    (cl-llama-cpp:kv-cache-seq-cp ctx 0 3 0 -1)
+
+    ;; Each sequence now continues independently
+    ;; (use the batch API or generate-parallel to decode them)
+    ))
+#+end_src
+
+** Sliding Window
+
+When a context approaches its limit, remove old tokens and shift remaining positions
+back, effectively implementing a sliding window over a long conversation:
+
+#+begin_src lisp
+(defun maybe-slide-window (ctx seq-id current-pos window-size)
+  "If current-pos exceeds window-size, discard the oldest half and shift."
+  (when (>= current-pos window-size)
+    (let ((drop-to (floor window-size 2)))
+      ;; Remove tokens in positions [0, drop-to)
+      (cl-llama-cpp:kv-cache-seq-rm ctx seq-id 0 drop-to)
+      ;; Shift remaining tokens back by drop-to positions
+      (cl-llama-cpp:kv-cache-seq-add ctx seq-id drop-to -1 (- drop-to))
+      (- current-pos drop-to))))
+#+end_src
+
+=kv-cache-seq-add= shifts all positions in =[p0, p1)= by =delta=. After the shift,
+decoding continues at the adjusted position. The context must support position shifting
+(check with =kv-cache-can-shift-p=).
+
+=kv-cache-seq-div= divides positions in a range by a divisor — used in some attention
+scaling schemes. Signals =input-validation-error= if the divisor is zero.
+
+** Keeping One Sequence, Discarding Others
+
+After multi-sequence decoding, retain only the sequence you need:
+
+#+begin_src lisp
+;; Discard all sequences except seq 2
+(cl-llama-cpp:kv-cache-seq-keep ctx 2)
+#+end_src
+
+** Session State: File-Based Persistence
+
+Save the full context state (KV cache + internal state) to disk. On reload the context
+resumes exactly where it left off — no re-prefill needed.
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+
+    ;; Prefill a long system prompt
+    (let ((tokens (cl-llama-cpp:tokenize model "Long system prompt..." :add-special t)))
+      (cl-llama-cpp:generate ctx nil :prompt-tokens tokens :max-tokens 0))
+
+    ;; Save the state — store the tokens alongside so we know where we are
+    (let ((tokens (cl-llama-cpp:tokenize model "Long system prompt..." :add-special t)))
+      (cl-llama-cpp:save-session ctx "/tmp/prompt-cache.bin" tokens))
+
+    ;; Later (even after a process restart):
+    (cl-llama-cpp:clear-kv-cache ctx)
+    (let ((cached-tokens (cl-llama-cpp:load-session ctx "/tmp/prompt-cache.bin")))
+      (format t "Restored ~D cached tokens~%" (length cached-tokens)))))
+#+end_src
+
+=save-session= and =load-session= operate on the full context. For per-sequence
+granularity, use =save-session-seq= / =load-session-seq=.
+
+** Session State: In-Memory Snapshotting (Context Forking)
+
+Serialize the context state to an octet vector. This enables branching from a single
+decoded prefix to explore multiple continuations:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+
+    ;; Decode a shared prefix
+    (let ((tokens (cl-llama-cpp:tokenize model "Once upon a time" :add-special t)))
+      (cl-llama-cpp:generate ctx nil :prompt-tokens tokens :max-tokens 0))
+
+    ;; Snapshot the state
+    (let ((snapshot (cl-llama-cpp:save-state ctx)))
+
+      ;; Branch A: low temperature
+      (cl-llama-cpp:load-state ctx snapshot)
+      (format t "Branch A: ~A~%"
+              (cl-llama-cpp:generate ctx nil
+                                     :prompt-tokens #()  ; already in cache
+                                     :max-tokens 64 :temp 0.1 :seed 1
+                                     :reset-context nil))
+
+      ;; Branch B: high temperature
+      (cl-llama-cpp:load-state ctx snapshot)
+      (format t "Branch B: ~A~%"
+              (cl-llama-cpp:generate ctx nil
+                                     :prompt-tokens #()
+                                     :max-tokens 64 :temp 1.2 :seed 1
+                                     :reset-context nil)))))
+#+end_src
+
+=:reset-context nil= tells =generate= not to clear the KV cache before decoding —
+critical here since we just restored it from the snapshot.
+
+For per-sequence snapshots use =save-state-seq= / =load-state-seq=, which accept an
+optional =:flags= argument for extended variants.
+
+** See Also
+
+- =examples/kv-cache.lisp= — cache ops with assert-driven verification
+- =examples/context-fork.lisp= — in-memory snapshotting with file persistence
+- [[../api-reference.org#kv-cache][API Reference: KV Cache]]
+- [[../api-reference.org#session-state][API Reference: Session State]]
