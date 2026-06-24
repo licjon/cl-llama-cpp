@@ -118,11 +118,13 @@ Signals DECODE-ERROR if the context runs out of space (n-ctx exceeded)."
           (dotimes (i delta-len)
             (declare (type fixnum i))
             (setf (aref delta i) (aref rendered (the fixnum (+ k i)))))
-          ;; 6. Decode only the delta, continuing from the cache's current
-          ;;    position.  :RESET-CONTEXT NIL is mandatory here.
+          ;; 6. Decode only the delta into the KV cache, then sample the reply.
+          ;;    PREFILL handles the decode; GENERATE is called with empty
+          ;;    :PROMPT-TOKENS so it skips re-decode and goes straight to sampling.
+          (prefill ctx delta)
           (let* ((safe-keys (%strip-keys generate-keys
                                          '(:prompt-tokens :reset-context)))
-                 (reply-keys (list* :prompt-tokens delta
+                 (reply-keys (list* :prompt-tokens (make-array 0 :element-type 'fixnum)
                                     :reset-context nil
                                     safe-keys)))
             (handler-case
