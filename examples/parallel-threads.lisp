@@ -12,11 +12,14 @@
 ;;;   - ENSURE-BACKEND called once from the main thread before spawning workers.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/parallel-threads.lisp")
+;;;   (setf cl-llama-cpp/examples/parallel-threads::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/parallel-threads:run :n-threads 3)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/parallel-threads
   (:use #:cl #:cl-llama-cpp)

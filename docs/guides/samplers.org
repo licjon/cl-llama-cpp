@@ -17,7 +17,13 @@ parameters:
                        :top-k 40       ; restrict to top-40 tokens
                        :top-p 0.95     ; nucleus sampling threshold
                        :min-p 0.05     ; minimum relative probability cutoff
-                       :seed 42)       ; reproducible output
+                       :seed 42)       ; reproducible output (default)
+
+;; For nondeterministic output, pass :random or nil:
+(cl-llama-cpp:generate ctx "Tell me about the moon"
+                       :max-tokens 128
+                       :temp 0.8
+                       :seed :random)  ; fresh random seed each call
 #+end_src
 
 Omitting a parameter means that sampler is not added to the chain. Omitting =:temp=
@@ -155,6 +161,19 @@ sampling settings are shared across many calls:
 
 The config contains *only the keys explicitly provided* — absent keys carry no default
 and are simply not in the plist. =getf= works directly on the returned value.
+
+=:seed= accepts the sentinels =:random= and =nil= (both mean "nondeterministic"). The
+sentinel is stored verbatim in the config and resolved when the config is consumed — so
+a single config with =:seed :random= draws a fresh seed on every =generate= call:
+
+#+begin_src lisp
+(let ((chatty (cl-llama-cpp:make-sampler-config :temp 1.2 :seed :random)))
+  ;; Each call gets a different random seed — different output every time
+  (cl-llama-cpp:generate ctx "Tell me a joke:" :max-tokens 64
+                         :sampler-config chatty)
+  (cl-llama-cpp:generate ctx "Tell me a joke:" :max-tokens 64
+                         :sampler-config chatty))
+#+end_src
 
 =make-sampler-config= also works with =with-sampler-chain=:
 

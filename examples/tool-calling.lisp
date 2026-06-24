@@ -29,9 +29,16 @@
 ;;;; Qwen-2.5) you can instead rely on the chat template and parse its
 ;;;; output directly — see the "Native chat-template tool calling" note below.
 ;;;;
-;;;; Run from a shell:
+;;;; Run from the REPL:
+;;;;   (ql:quickload :cl-llama-cpp/examples)
+;;;;   (cl-llama-cpp/examples/tool-calling:main
+;;;;     :model-path "/path/to/model.gguf"
+;;;;     :n-gpu-layers 99)
+;;;;
+;;;; Or from a shell:
 ;;;;   ros -e '(ql:quickload :cl-llama-cpp/examples)' \
-;;;;       -e '(cl-llama-cpp/examples/tool-calling:main :model-path "/path/to/model.gguf")' -q
+;;;;       -e '(cl-llama-cpp/examples/tool-calling:main
+;;;;             :model-path "/path/to/model.gguf")' -q
 
 (defpackage #:cl-llama-cpp/examples/tool-calling
   (:use #:cl #:cl-llama-cpp)

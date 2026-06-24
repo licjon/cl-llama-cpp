@@ -191,6 +191,10 @@ underlying objects and no =free= is ever needed.
     it without freeing. A warning is issued if other sampler keywords are also supplied.
   - =:sampler-config= — a plist from =make-sampler-config=; supplies defaults for any
     sampler parameter not given explicitly; explicit keywords always take priority.
+  - =:seed= — an integer for deterministic output (default =42=), =:random= for
+    nondeterministic sampling (the C layer draws a fresh seed internally), or =nil=
+    (same as =:random=). When =:random= is used, the exact chosen seed is not observable
+    to the caller.
 
   See Extended Sampler Keywords below for the full sampler keyword list.
 
@@ -199,9 +203,10 @@ underlying objects and no =free= is ever needed.
   =prompts= simultaneously in shared forward passes using the batch API. Each element
   of =prompts= is a string or a pre-tokenized token vector. All sequences share the
   same sampler configuration; each gets a unique seed derived from =seed= +
-  sequence-index. The context must be created with =:n-seq-max= >= =(length prompts)=.
-  Returns two values: a list of generated strings and a list of stop reasons (=:eog=
-  or =:length=).
+  sequence-index. When =:seed= is =:random= or =nil=, each sequence gets an independent
+  nondeterministic seed from the C layer instead. The context must be created with
+  =:n-seq-max= >= =(length prompts)=. Returns two values: a list of generated strings
+  and a list of stop reasons (=:eog= or =:length=).
 
 - =embed ctx text &key normalize= --- Compute embeddings for =text=. Returns a vector
   of single-floats. The context must be created with =:embeddings t= (or =1=).
@@ -266,9 +271,10 @@ DRY → grammar → sampling strategy.
   plist containing *only the keys explicitly provided* — absent parameters carry no
   default. Pass the result as =:sampler-config= to =generate= or =with-sampler-chain=;
   explicit keyword arguments at the call site always take priority over the config.
-  Unknown keywords signal =PROGRAM-ERROR=. Does not accept =:model= — resource handles
-  have independent lifetimes and belong at the call site. The returned value is a plain
-  plist; =getf= works directly on it.
+  =:seed= accepts integers, =:random=, or =nil= — sentinels are stored verbatim and
+  resolved when the config is consumed. Unknown keywords signal =PROGRAM-ERROR=. Does
+  not accept =:model= — resource handles have independent lifetimes and belong at the
+  call site. The returned value is a plain plist; =getf= works directly on it.
 
 *** Sampler Utilities
 
@@ -277,6 +283,11 @@ DRY → grammar → sampling strategy.
   freeing the chain frees all added samplers. Returns =NIL=.
 
 - =sampler-seed sampler= --- Return the current RNG seed from =sampler= as an integer.
+
+- =resolve-seed seed= --- Resolve a seed argument: integers pass through, =:random= or
+  =nil= map to =LLAMA_DEFAULT_SEED= (=0xFFFFFFFF=, telling the C layer to draw a fresh
+  random seed). Other types signal =input-validation-error=. Used internally by
+  =generate= and =build-sampler-chain=; exported for callers building custom chains.
 
 - =free-sampler sampler= --- Free a =llama-sampler= handle created by any
   =make-*-sampler= function. Do not call on samplers that have been added to a chain —
@@ -291,6 +302,7 @@ without any =%llama:= calls.
 
 - =make-greedy-sampler= --- Always picks the highest-probability token.
 - =make-dist-sampler &optional (seed 42)= --- Random sampling weighted by softmax probabilities.
+  =seed= may be an integer, =:random=, or =nil=.
 - =make-top-k-sampler k= --- Restrict candidates to the =k= highest-probability tokens.
 - =make-top-p-sampler p &optional (min-keep 1)= --- Keep tokens until cumulative probability >= =p= (nucleus sampling).
 - =make-min-p-sampler p &optional (min-keep 1)= --- Remove tokens with probability < =p= × max-prob.
@@ -298,8 +310,10 @@ without any =%llama:= calls.
 - =make-temp-sampler temp= --- Scale logits by =temp= before softmax.
 - =make-temp-ext-sampler temp delta &optional (exponent 1.0)= --- Dynamic temperature: base =temp=, range =delta=, curve =exponent=.
 - =make-xtc-sampler probability threshold &optional (min-keep 1) (seed 42)= --- XTC: trim high-probability tokens above =threshold= with probability =probability= per step.
+  =seed= may be an integer, =:random=, or =nil=.
 - =make-top-n-sigma-sampler sigma= --- Keep tokens within =sigma= standard deviations of the max logit.
 - =make-mirostat-v2-sampler seed tau eta= --- Mirostat V2 targeting perplexity =tau= with learning rate =eta=.
+  =seed= may be an integer, =:random=, or =nil=.
 
 ** Chat Templates
 

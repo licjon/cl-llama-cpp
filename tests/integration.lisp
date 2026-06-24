@@ -3014,3 +3014,83 @@ ws     ::= [ \\t\\n]*")
               (ok (stringp reply2) "second reply is a string")
               (ok (= 4 (length (cl-llama-cpp:chat-session-messages session)))
                   "four messages after two turns"))))))))
+
+;;; ---------- Issue #81: :seed :random sentinel ----------
+
+(deftest seed-random-produces-different-output
+  (when-model-available
+    (testing ":seed :random produces differing output across calls"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          ;; Use high temp + long output to maximize divergence probability
+          (let ((text1 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 32 :temp 1.5
+                                              :seed :random))
+                (text2 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 32 :temp 1.5
+                                              :seed :random)))
+            (ok (stringp text1) "first call returns a string")
+            (ok (stringp text2) "second call returns a string")
+            (ok (string/= text1 text2)
+                (format nil "two :random calls diverged: ~S vs ~S"
+                        text1 text2))))))))
+
+(deftest seed-integer-unchanged
+  (when-model-available
+    (testing ":seed <integer> still produces deterministic output"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((text1 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 16 :temp 0.8
+                                              :seed 42))
+                (text2 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 16 :temp 0.8
+                                              :seed 42)))
+            (ok (string= text1 text2)
+                (format nil "same seed → same output: ~S" text1))))))))
+
+(deftest seed-nil-means-random
+  (when-model-available
+    (testing ":seed nil behaves like :seed :random"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((text1 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 32 :temp 1.5
+                                              :seed nil))
+                (text2 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 32 :temp 1.5
+                                              :seed nil)))
+            (ok (stringp text1) "first call returns a string")
+            (ok (string/= text1 text2)
+                (format nil "two nil-seed calls diverged: ~S vs ~S"
+                        text1 text2))))))))
+
+(deftest seed-random-in-sampler-config
+  (when-model-available
+    (testing ":seed :random in sampler-config produces nondeterministic output"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let* ((cfg (cl-llama-cpp:make-sampler-config :seed :random :temp 1.5))
+                 (text1 (cl-llama-cpp:generate ctx "Once upon a time"
+                                               :sampler-config cfg
+                                               :max-tokens 32))
+                 (text2 (cl-llama-cpp:generate ctx "Once upon a time"
+                                               :sampler-config cfg
+                                               :max-tokens 32)))
+            (ok (stringp text1) "first call returns a string")
+            (ok (string/= text1 text2)
+                (format nil "sampler-config :random diverged: ~S vs ~S"
+                        text1 text2))))))))
+
+(deftest seed-default-still-42
+  (when-model-available
+    (testing "default seed (no :seed arg) is still 42 and deterministic"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          ;; Call with no :seed — should use default 42
+          (let ((text1 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 16 :temp 0.8))
+                (text2 (cl-llama-cpp:generate ctx "Once upon a time"
+                                              :max-tokens 16 :temp 0.8)))
+            (ok (string= text1 text2)
+                "default seed produces identical output")))))))

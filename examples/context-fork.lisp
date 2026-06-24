@@ -7,11 +7,14 @@
 ;;; decoding, and "choose your own adventure" style branching.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/context-fork.lisp")
+;;;   (setf cl-llama-cpp/examples/context-fork::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/context-fork:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/context-fork
   (:use #:cl #:cl-llama-cpp)

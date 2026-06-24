@@ -6,11 +6,14 @@
 ;;; better use of GPU compute.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/parallel.lisp")
+;;;   (setf cl-llama-cpp/examples/parallel::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/parallel:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/parallel
   (:use #:cl #:cl-llama-cpp)

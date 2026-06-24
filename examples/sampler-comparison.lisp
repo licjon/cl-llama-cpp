@@ -7,11 +7,14 @@
 ;;; adaptive-p, sampler-seed, and make-sampler-config (reusable configs).
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/sampler-comparison.lisp")
+;;;   (setf cl-llama-cpp/examples/sampler-comparison::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/sampler-comparison:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/sampler-comparison
   (:use #:cl #:cl-llama-cpp)
@@ -255,7 +258,17 @@ Strips leading whitespace from output for cleaner display."
     (gen ctx prompt :temp 0.8 :seed 999 :max-tokens 48)
     (format t "Run 2: ")
     (gen ctx prompt :temp 0.8 :seed 999 :max-tokens 48))
-  (format t "~%Identical seeds produce identical output (deterministic sampling).~%"))
+  (format t "~%Identical seeds produce identical output (deterministic sampling).~%")
+
+  (section "7c: Nondeterministic sampling with :seed :random")
+  (let ((prompt "Once upon a time,"))
+    (format t "Prompt: ~S  (seed=:random)~%" prompt)
+    (format t "Run 1: ")
+    (gen ctx prompt :temp 0.8 :seed :random :max-tokens 48)
+    (format t "Run 2: ")
+    (gen ctx prompt :temp 0.8 :seed :random :max-tokens 48))
+  (format t "~%:seed :random draws a fresh seed each call — different output every time.~%")
+  (format t ":seed nil is an alias for :random.~%"))
 
 ;;; ── Demo 8: Kitchen sink — combining multiple strategies ───────────
 

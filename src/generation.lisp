@@ -1,5 +1,19 @@
 (in-package #:cl-llama-cpp)
 
+(defun resolve-seed (seed)
+  "Resolve a seed argument to a uint32 integer for the C sampler layer.
+INTEGER → passed through unchanged.
+:RANDOM or NIL → %LLAMA:+DEFAULT-SEED+ (0xFFFFFFFF), telling the C layer
+to draw a nondeterministic seed internally.
+Any other type signals INPUT-VALIDATION-ERROR."
+  (declare (optimize (speed 3)))
+  (cond
+    ((typep seed '(integer 0 4294967295)) seed)
+    ((or (eq seed :random) (null seed)) %llama:+default-seed+)
+    (t (error 'input-validation-error
+              :function-name 'resolve-seed :argument :seed :value seed
+              :reason "seed must be an integer (0–4294967295), :RANDOM, or NIL"))))
+
 (defun make-sampler-config (&rest kwargs
                             &key temp top-k top-p min-p seed greedy
                                  grammar grammar-root grammar-lazy
@@ -21,7 +35,10 @@ BUILD-SAMPLER-CHAIN, or WITH-SAMPLER-CHAIN.  The config provides
 defaults; any keyword supplied at the call site overrides the
 corresponding config entry.  Only the parameters you explicitly supply
 here are stored — the rest continue to use each function's own
-built-in defaults."
+built-in defaults.
+
+SEED may be an integer, :RANDOM, or NIL.  Sentinels are stored verbatim;
+resolution to a concrete seed happens when the config is consumed."
   (declare (ignore temp top-k top-p min-p seed greedy
                    grammar grammar-root grammar-lazy
                    grammar-trigger-words grammar-trigger-patterns
@@ -63,7 +80,10 @@ When INFILL is true, an infill sampler is added (requires MODEL).
 When MIROSTAT or MIROSTAT-V2 is true, the normal top-k/top-p/min-p/temp/dist
 chain is replaced with the mirostat sampler.
 When SAMPLER-CONFIG is a plist (from MAKE-SAMPLER-CONFIG), it provides default
-values for any sampler parameter not supplied explicitly at this call site."
+values for any sampler parameter not supplied explicitly at this call site.
+
+SEED may be an integer (deterministic), :RANDOM (nondeterministic — the C layer
+draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42."
   ;; Merge sampler-config as defaults: caller-supplied kwargs take precedence
   ;; because they appear first in the appended plist and GETF finds the first match.
   (when sampler-config
@@ -115,6 +135,7 @@ values for any sampler parameter not supplied explicitly at this call site."
     (error ":DRY-MULTIPLIER requires :MODEL"))
   (when (and logit-bias (not model))
     (error ":LOGIT-BIAS requires :MODEL"))
+  (setf seed (resolve-seed seed))
   (let* ((model-ptr (when model (llama-model-pointer model)))
          (chain (%llama:sampler-chain-init
                  (%llama:sampler-chain-default-params))))
@@ -315,9 +336,9 @@ samplers."
 
 (defun make-dist-sampler (&optional (seed 42))
   "Create a distribution sampler (random sampling weighted by probabilities).
-SEED is a uint32 random seed."
+SEED is a uint32 random seed, :RANDOM, or NIL (nondeterministic)."
   (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-dist seed))))
+    (%make-llama-sampler :pointer (%llama:sampler-init-dist (resolve-seed seed)))))
 
 (defun make-top-k-sampler (k)
   "Create a top-k sampler restricting candidates to the K highest-probability tokens."
@@ -355,12 +376,13 @@ TEMP is the base temperature, DELTA the range, EXPONENT the curve shape."
 
 (defun make-xtc-sampler (probability threshold &optional (min-keep 1) (seed 42))
   "Create an XTC sampler that trims high-probability tokens exceeding THRESHOLD.
-PROBABILITY is the chance of applying XTC per sampling step."
+PROBABILITY is the chance of applying XTC per sampling step.
+SEED may be an integer, :RANDOM, or NIL (nondeterministic)."
   (with-llama-compatible-fp-environment
     (%make-llama-sampler :pointer (%llama:sampler-init-xtc
                                    (coerce probability 'single-float)
                                    (coerce threshold 'single-float)
-                                   min-keep seed))))
+                                   min-keep (resolve-seed seed)))))
 
 (defun make-top-n-sigma-sampler (sigma)
   "Create a top-n-sigma sampler keeping tokens within SIGMA standard deviations of the max logit."
@@ -368,10 +390,11 @@ PROBABILITY is the chance of applying XTC per sampling step."
     (%make-llama-sampler :pointer (%llama:sampler-init-top-n-sigma (coerce sigma 'single-float)))))
 
 (defun make-mirostat-v2-sampler (seed tau eta)
-  "Create a Mirostat v2 sampler targeting perplexity TAU with learning rate ETA."
+  "Create a Mirostat v2 sampler targeting perplexity TAU with learning rate ETA.
+SEED may be an integer, :RANDOM, or NIL (nondeterministic)."
   (with-llama-compatible-fp-environment
     (%make-llama-sampler :pointer (%llama:sampler-init-mirostat-v2
-                                   seed
+                                   (resolve-seed seed)
                                    (coerce tau 'single-float)
                                    (coerce eta 'single-float)))))
 
@@ -455,6 +478,11 @@ Uses the context's model for tokenization. Blocks until EOS or MAX-TOKENS.
 Supports extended sampler keywords: :TYPICAL-P, :XTC-PROBABILITY, :XTC-THRESHOLD,
 :MIROSTAT, :MIROSTAT-V2, :REPEAT-PENALTY, :FREQUENCY-PENALTY, :PRESENCE-PENALTY,
 :DRY-MULTIPLIER, :LOGIT-BIAS, :TOP-N-SIGMA, :DYNAMIC-TEMP-RANGE, :ADAPTIVE-P, etc.
+
+SEED may be an integer (deterministic), :RANDOM (nondeterministic — the C layer
+draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42.  When
+:RANDOM is used, the exact seed chosen by the C layer is not observable to the
+caller.
 
 When :SAMPLER is provided (a LLAMA-SAMPLER handle, typically from WITH-SAMPLER-CHAIN),
 GENERATE borrows the chain and does not free it — the caller owns the lifetime.

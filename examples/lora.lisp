@@ -34,15 +34,20 @@
 ;;;        mv ~/models/pirate-gemma3-1b/model.safetensors.bak \
 ;;;           ~/models/pirate-gemma3-1b/model.safetensors
 ;;;
-;;;   4. Set environment variables and run:
-;;;
-;;;        export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
-;;;        export LLAMA_LORA=~/models/pirate-lora.gguf
+;;;   4. Load and run:
 ;;;
 ;;;        (ql:quickload :cl-llama-cpp)
 ;;;        (load "examples/lora.lisp")
+;;;        (setf cl-llama-cpp/examples/lora::*model-path*
+;;;              "~/models/gemma-3-1b-it-Q4_K_M.gguf")
+;;;        (setf cl-llama-cpp/examples/lora::*lora-path*
+;;;              "~/models/pirate-lora.gguf")
 ;;;        (cl-llama-cpp/examples/lora:run)
 ;;;        (cl-llama-cpp/examples/lora:compare)
+;;;
+;;;      Or via environment variables:
+;;;        export LLAMA_MODEL=~/models/gemma-3-1b-it-Q4_K_M.gguf
+;;;        export LLAMA_LORA=~/models/pirate-lora.gguf
 
 (defpackage #:cl-llama-cpp/examples/lora
   (:use #:cl #:cl-llama-cpp)

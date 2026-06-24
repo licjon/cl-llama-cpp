@@ -224,7 +224,10 @@ All sequences share the same sampler configuration; each gets a unique
 seed derived from SEED + sequence-index for independent sampling.
 The context must be created with :N-SEQ-MAX >= (length prompts).
 Returns two values: a list of generated strings and a list of stop
-reasons (:eog or :length) corresponding to each prompt."
+reasons (:eog or :length) corresponding to each prompt.
+
+SEED may be an integer (each sequence gets SEED+index), :RANDOM or NIL
+(each sequence gets an independent nondeterministic seed from the C layer)."
   (declare (optimize (speed 3)))
   (when (endp prompts)
     (return-from generate-parallel (values nil nil)))
@@ -252,11 +255,15 @@ reasons (:eog or :length) corresponding to each prompt."
       (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
       (unwind-protect
            (progn
-             (dotimes (seq n-seq)
-               (push (build-sampler-chain
-                      :temp temp :top-k top-k :top-p top-p
-                      :min-p min-p :seed (+ seed seq)
-                      :model model
+             (let ((resolved-seed (resolve-seed seed)))
+               (dotimes (seq n-seq)
+                 (push (build-sampler-chain
+                        :temp temp :top-k top-k :top-p top-p
+                        :min-p min-p
+                        :seed (if (= resolved-seed %llama:+default-seed+)
+                                  resolved-seed
+                                  (+ resolved-seed seq))
+                        :model model
                       :typical-p typical-p
                       :xtc-probability xtc-probability
                       :xtc-threshold xtc-threshold
@@ -275,8 +282,8 @@ reasons (:eog or :length) corresponding to each prompt."
                       :dynamic-temp-range dynamic-temp-range
                       :dynamic-temp-exponent dynamic-temp-exponent
                       :adaptive-p adaptive-p
-                      :adaptive-p-decay adaptive-p-decay)
-                     samplers))
+                        :adaptive-p-decay adaptive-p-decay)
+                       samplers)))
              (setf samplers (nreverse samplers))
              (with-batch (batch total-prompt-tokens)
                (loop for tokens in token-vecs
