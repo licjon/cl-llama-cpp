@@ -161,6 +161,13 @@ underlying objects and no =free= is ever needed.
 - =detokenize model tokens &key remove-special unparse-special= --- Convert a token
   vector back to a string. Signals =type-error= if =tokens= is not a vector.
 
+- =prefill ctx tokens &key (seq-id 0)= --- Decode =tokens= into the KV cache of =ctx=
+  without sampling. Returns the number of tokens decoded as a fixnum. Does not clear
+  the cache first — the caller controls that. When =seq-id= is 0, uses the fast
+  =batch-get-one= path (auto-advancing positions). For non-zero =seq-id=, uses the full
+  batch API with explicit position management. Signals =input-validation-error= if
+  =tokens= is not a non-empty, non-string vector.
+
 - =generate ctx prompt &key max-tokens temp top-k top-p min-p seed parse-special
   prompt-tokens token-callback grammar grammar-root typical-p xtc-probability
   xtc-threshold top-n-sigma mirostat mirostat-v2 mirostat-tau mirostat-eta
