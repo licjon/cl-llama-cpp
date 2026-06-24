@@ -515,6 +515,78 @@
                     (format nil "incremental ~S equals full ~S"
                             inc-reply full-reply))))))))))
 
+;;; --- Issue #82: external messages mutation reconciles KV cache ---
+
+(deftest chat-session-external-append-reconciles
+  (when-model-available
+    (testing "externally appending an assistant turn reconciles on next send"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx-mut model :n-ctx 512)
+          (cl-llama-cpp:with-context (ctx-ref model :n-ctx 512)
+            (cl-llama-cpp:with-sampler-chain (greedy :greedy t)
+              ;; Mutated path: send a turn, then externally append an assistant
+              ;; message as if it were generated elsewhere.
+              (let ((session (cl-llama-cpp:make-chat-session ctx-mut)))
+                (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 4 :sampler greedy)
+                ;; Externally append a fabricated assistant turn.
+                (setf (cl-llama-cpp:chat-session-messages session)
+                      (append (cl-llama-cpp:chat-session-messages session)
+                              (list (list :role "user" :content "What is 2+2?")
+                                    (list :role "assistant" :content "4."))))
+                ;; Next send must reconcile the cache and produce a reply.
+                (multiple-value-bind (reply stop-reason)
+                    (cl-llama-cpp:chat-session-send session "Why?" :max-tokens 8 :sampler greedy)
+                  ;; Reference path: fresh session with the same messages built
+                  ;; up through normal sends, then same final question.
+                  (let ((ref-session (cl-llama-cpp:make-chat-session ctx-ref)))
+                    (cl-llama-cpp:chat-session-send ref-session "Hi" :max-tokens 4 :sampler greedy)
+                    (cl-llama-cpp:chat-session-send ref-session "What is 2+2?" :max-tokens 4 :sampler greedy)
+                    ;; Replace the ref assistant reply with the same fabricated
+                    ;; one so the prefixes are identical.
+                    (setf (cl-llama-cpp:chat-session-messages ref-session)
+                          (append (butlast (cl-llama-cpp:chat-session-messages ref-session))
+                                  (list (list :role "assistant" :content "4."))))
+                    (let ((ref-reply (cl-llama-cpp:chat-session-send
+                                     ref-session "Why?" :max-tokens 8 :sampler greedy)))
+                      (ok (string= reply ref-reply)
+                          (format nil "mutated ~S equals reference ~S" reply ref-reply))))
+                  (ok (keywordp stop-reason) "stop-reason is a keyword")
+                  (ok (= 6 (length (cl-llama-cpp:chat-session-messages session)))
+                      "six messages after append + send"))))))))))
+
+(deftest chat-session-truncate-reconciles
+  (when-model-available
+    (testing "truncating messages reconciles the KV cache on next send"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx-mut model :n-ctx 512)
+          (cl-llama-cpp:with-context (ctx-ref model :n-ctx 512)
+            (cl-llama-cpp:with-sampler-chain (greedy :greedy t)
+              ;; Mutated path: two turns, then truncate back to one turn.
+              (let ((session (cl-llama-cpp:make-chat-session ctx-mut)))
+                (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 4 :sampler greedy)
+                (cl-llama-cpp:chat-session-send session "What is 2+2?" :max-tokens 4 :sampler greedy)
+                ;; Truncate: keep only the first user+assistant turn.
+                (setf (cl-llama-cpp:chat-session-messages session)
+                      (list (first (cl-llama-cpp:chat-session-messages session))
+                            (second (cl-llama-cpp:chat-session-messages session))))
+                ;; Next send must evict the stale suffix and produce a reply.
+                (multiple-value-bind (reply stop-reason)
+                    (cl-llama-cpp:chat-session-send session "Tell me a joke" :max-tokens 8 :sampler greedy)
+                  ;; Reference path: fresh session, same first turn, same question.
+                  (let ((ref-session (cl-llama-cpp:make-chat-session ctx-ref)))
+                    (cl-llama-cpp:chat-session-send ref-session "Hi" :max-tokens 4 :sampler greedy)
+                    ;; Align the ref first-turn reply to match the mutated session's.
+                    (setf (cl-llama-cpp:chat-session-messages ref-session)
+                          (list (first (cl-llama-cpp:chat-session-messages session))
+                                (second (cl-llama-cpp:chat-session-messages session))))
+                    (let ((ref-reply (cl-llama-cpp:chat-session-send
+                                     ref-session "Tell me a joke" :max-tokens 8 :sampler greedy)))
+                      (ok (string= reply ref-reply)
+                          (format nil "truncated ~S equals reference ~S" reply ref-reply))))
+                  (ok (keywordp stop-reason) "stop-reason is a keyword")
+                  (ok (= 4 (length (cl-llama-cpp:chat-session-messages session)))
+                      "four messages after truncate + send"))))))))))
+
 ;;; Model / context introspection integration tests
 
 (deftest model-description-returns-string

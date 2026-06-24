@@ -15,7 +15,14 @@
   "Stateful multi-turn chat that reuses the KV cache across turns.
 CTX and MODEL are borrowed (not owned) — the caller is responsible for their
 lifetime.  DECODED is the exact token vector currently resident in sequence 0
-of the KV cache, maintained as an invariant by CHAT-SESSION-SEND."
+of the KV cache, maintained as an invariant by CHAT-SESSION-SEND.
+
+MESSAGES is the source of truth for the conversation.  Callers may append to,
+truncate, or otherwise edit MESSAGES between turns; the next CHAT-SESSION-SEND
+reconciles the KV cache by re-rendering the full prompt, diffing against the
+decoded prefix, evicting any divergent suffix, and decoding only the delta.
+Editing earlier turns invalidates the cache from the first changed token onward
+\(correct, but requires re-decoding from that point)."
   (context  nil :type (or llama-context null) :read-only t)
   (model    nil :type (or llama-model null)   :read-only t)
   (template nil :type (or string null))
@@ -72,6 +79,11 @@ Signals INPUT-VALIDATION-ERROR if CTX is not a LLAMA-CONTEXT."
 Returns two values: the reply string and a stop reason (:eog, :length, or
 :callback).  Only the *new* tokens are decoded each turn — the KV cache is
 reused for the already-decoded prefix, keeping prefill cost constant per turn.
+
+MESSAGES is the source of truth: if the caller has modified CHAT-SESSION-MESSAGES
+since the last call (appending, truncating, or editing turns), SEND reconciles
+the KV cache automatically — it re-renders the full prompt, finds the common
+prefix with what is cached, evicts any stale suffix, and decodes only the delta.
 
 Additional keyword arguments are forwarded to GENERATE (e.g. :max-tokens,
 :temp, :seed, :greedy, :sampler).  :PROMPT-TOKENS and :RESET-CONTEXT are
