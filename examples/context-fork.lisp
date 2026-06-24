@@ -49,13 +49,11 @@ alternative continuations from the same point."
 
         (format t "Prompt: ~S~2%" prompt)
 
-        ;; Tokenize and decode the prompt into the KV cache
+        ;; Tokenize and prefill the prompt into the KV cache
         (let ((tokens (tokenize model prompt :parse-special t)))
           (format t "Tokenized to ~D tokens.~%" (length tokens))
-          (with-batch (batch (length tokens))
-            (batch-add-sequence batch tokens 0 :logits :last)
-            (batch-decode ctx batch))
-          (format t "Decoded into KV cache.~%")
+          (prefill ctx tokens)
+          (format t "Prefilled ~D tokens into KV cache.~%" (length tokens))
 
           ;; Snapshot the context state to memory
           (let ((snapshot (save-state ctx)))

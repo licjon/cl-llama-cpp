@@ -2842,3 +2842,175 @@ ws     ::= [ \\t\\n]*")
                                                               :sampler chain)))
                 (ok (stringp result)
                     "generate with chain from config returns a string")))))))))
+
+;;; prefill integration tests (issue #80)
+
+(deftest prefill-returns-token-count
+  (when-model-available
+    (testing "prefill returns a fixnum equal to the number of tokens decoded"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let* ((tokens (cl-llama-cpp:tokenize model "Hello world"))
+                 (n (cl-llama-cpp:prefill ctx tokens)))
+            (ok (typep n 'fixnum)
+                (format nil "prefill returned a fixnum: ~A" n))
+            (ok (= n (length tokens))
+                (format nil "prefill returned ~A = token count ~A" n (length tokens)))))))))
+
+(deftest prefill-nil-tokens-signals-error
+  (when-model-available
+    (testing "prefill signals input-validation-error for nil tokens"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:prefill ctx nil) nil)
+                (cl-llama-cpp:input-validation-error (c)
+                  (eq :tokens (cl-llama-cpp:input-validation-error-argument c))))
+              "input-validation-error with :tokens argument for nil tokens"))))))
+
+(deftest prefill-non-vector-tokens-signals-error
+  (when-model-available
+    (testing "prefill signals input-validation-error for a non-vector tokens arg"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:prefill ctx "not a vector") nil)
+                (cl-llama-cpp:input-validation-error (c)
+                  (eq :tokens (cl-llama-cpp:input-validation-error-argument c))))
+              "input-validation-error with :tokens argument for string tokens"))))))
+
+(deftest prefill-empty-tokens-signals-error
+  (when-model-available
+    (testing "prefill signals input-validation-error for an empty token vector"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (ok (handler-case
+                  (progn (cl-llama-cpp:prefill ctx #()) nil)
+                (cl-llama-cpp:input-validation-error (c)
+                  (eq :tokens (cl-llama-cpp:input-validation-error-argument c))))
+              "input-validation-error with :tokens argument for empty vector"))))))
+
+(deftest prefill-advances-kv-cache-position
+  (when-model-available
+    (testing "prefill advances KV cache max position to (length tokens) - 1"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let* ((tokens (cl-llama-cpp:tokenize model "The quick brown fox"))
+                 (n (length tokens)))
+            (cl-llama-cpp:prefill ctx tokens)
+            (multiple-value-bind (mn mx)
+                (cl-llama-cpp:kv-cache-pos ctx 0)
+              (declare (ignore mn))
+              (ok (= mx (1- n))
+                  (format nil "KV cache max position ~A = ~A (n-1 for ~A tokens)"
+                          mx (1- n) n)))))))))
+
+(deftest prefill-sets-compute-pending-p
+  (when-model-available
+    (testing "prefill sets compute-pending-p to T on the context"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens (cl-llama-cpp:tokenize model "Hello")))
+            (cl-llama-cpp:prefill ctx tokens)
+            (ok (cl-llama-cpp::llama-context-compute-pending-p ctx)
+                "compute-pending-p is T after prefill")))))))
+
+(deftest prefill-does-not-clear-kv-cache
+  (when-model-available
+    (testing "prefill appends to existing cache rather than clearing"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((tokens1 (cl-llama-cpp:tokenize model "Hello")))
+            (cl-llama-cpp:prefill ctx tokens1)
+            (multiple-value-bind (_ mx1)
+                (cl-llama-cpp:kv-cache-pos ctx 0)
+              (declare (ignore _))
+              (let ((tokens2 (cl-llama-cpp:tokenize model " world")))
+                (cl-llama-cpp:prefill ctx tokens2)
+                (multiple-value-bind (_ mx2)
+                    (cl-llama-cpp:kv-cache-pos ctx 0)
+                  (declare (ignore _))
+                  (ok (> mx2 mx1)
+                      (format nil "cache advanced from ~A to ~A (not reset)" mx1 mx2)))))))))))
+
+(deftest prefill-non-zero-seq-id
+  (when-model-available
+    (testing "prefill with :seq-id 1 writes into sequence 1, leaving sequence 0 empty"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512 :n-seq-max 2)
+          (let* ((tokens (cl-llama-cpp:tokenize model "Test"))
+                 (n (cl-llama-cpp:prefill ctx tokens :seq-id 1)))
+            (ok (= n (length tokens))
+                (format nil "prefill seq-id 1 returned correct count: ~A" n))
+            (multiple-value-bind (mn0 mx0)
+                (cl-llama-cpp:kv-cache-pos ctx 0)
+              (ok (>= mn0 mx0)
+                  (format nil "seq 0 still empty after seq-id 1 prefill (min ~A >= max ~A)"
+                          mn0 mx0)))
+            (multiple-value-bind (_ mx1)
+                (cl-llama-cpp:kv-cache-pos ctx 1)
+              (declare (ignore _))
+              (ok (= mx1 (1- (length tokens)))
+                  (format nil "seq 1 max ~A = ~A (n-1)" mx1 (1- (length tokens)))))))))))
+
+(deftest prefill-save-state-generate-twice-diverges
+  (when-model-available
+    (testing "prefill + save-state enables two different-seed generates from the same snapshot"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let* ((prompt "Once upon a time in a land far away,")
+                 (tokens (cl-llama-cpp:tokenize model prompt :parse-special t))
+                 (n-tokens (length tokens)))
+            ;; prefill the prompt
+            (let ((n-decoded (cl-llama-cpp:prefill ctx tokens)))
+              (ok (= n-decoded n-tokens)
+                  (format nil "prefill decoded ~A tokens" n-decoded)))
+            ;; snapshot after prefill
+            (let ((snapshot (cl-llama-cpp:save-state ctx)))
+              (ok (> (length snapshot) 0) "snapshot is non-empty after prefill")
+              ;; branch 1: restore and generate with seed 1
+              (cl-llama-cpp:load-state ctx snapshot)
+              (multiple-value-bind (text1 stop1)
+                  (cl-llama-cpp:generate ctx nil
+                                         :prompt-tokens tokens
+                                         :max-tokens 16 :temp 1.5 :seed 1)
+                (ok (stringp text1) (format nil "branch 1 produced text: ~S" text1))
+                (ok (member stop1 '(:eog :length)) "branch 1 stop reason is valid")
+                ;; branch 2: restore and generate with different seed
+                (cl-llama-cpp:load-state ctx snapshot)
+                (multiple-value-bind (text2 stop2)
+                    (cl-llama-cpp:generate ctx nil
+                                           :prompt-tokens tokens
+                                           :max-tokens 16 :temp 1.5 :seed 99999)
+                  (ok (stringp text2) (format nil "branch 2 produced text: ~S" text2))
+                  (ok (member stop2 '(:eog :length)) "branch 2 stop reason is valid")
+                  ;; different seeds + high temp → different outputs
+                  (ok (string/= text1 text2)
+                      (format nil "branches diverged: ~S vs ~S" text1 text2))
+                  ;; cache consistency: position reflects prompt + generated tokens
+                  (multiple-value-bind (_ mx)
+                      (cl-llama-cpp:kv-cache-pos ctx 0)
+                    (declare (ignore _))
+                    (ok (>= mx (1- n-tokens))
+                        (format nil "cache max ~A >= last prompt position ~A"
+                                mx (1- n-tokens)))))))))))))
+
+(deftest chat-session-send-unchanged-after-prefill-refactor
+  (when-model-available
+    (testing "chat-session-send behavior is unchanged after prefill refactoring"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((session (cl-llama-cpp:make-chat-session ctx)))
+            (multiple-value-bind (reply stop-reason)
+                (cl-llama-cpp:chat-session-send session "Hi" :max-tokens 8 :temp 0.0 :seed 42)
+              (ok (stringp reply) "first reply is a string")
+              (ok (plusp (length reply)) "first reply is non-empty")
+              (ok (keywordp stop-reason) "stop-reason is a keyword"))
+            ;; second turn verifies incremental cache behavior
+            (multiple-value-bind (reply2 _)
+                (cl-llama-cpp:chat-session-send session "What is 2 plus 2?" :max-tokens 8
+                                                :temp 0.0 :seed 42)
+              (declare (ignore _))
+              (ok (stringp reply2) "second reply is a string")
+              (ok (= 4 (length (cl-llama-cpp:chat-session-messages session)))
+                  "four messages after two turns"))))))))

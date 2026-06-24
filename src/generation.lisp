@@ -382,6 +382,48 @@ Do not call on samplers that have been added to a chain — the chain owns those
     (%llama:sampler-free (llama-sampler-pointer sampler)))
   nil)
 
+(defun prefill (ctx tokens &key (seq-id 0))
+  "Decode TOKENS into sequence SEQ-ID of CTX's KV cache without sampling.
+Returns the number of tokens decoded as a fixnum.
+Does NOT clear the KV cache first — caller controls that (consistent with
+GENERATE's :RESET-CONTEXT NIL semantics).
+Signals INPUT-VALIDATION-ERROR if TOKENS is not a non-empty vector."
+  (declare (optimize (speed 3))
+           (type fixnum seq-id))
+  (unless (and (vectorp tokens) (not (stringp tokens)))
+    (error 'input-validation-error
+           :function-name 'prefill :argument :tokens :value tokens
+           :reason "tokens must be a non-string vector of token ids"))
+  (when (zerop (length tokens))
+    (error 'input-validation-error
+           :function-name 'prefill :argument :tokens :value tokens
+           :reason "tokens must be non-empty"))
+  (let ((n (length tokens))
+        (ctx-ptr (llama-context-pointer ctx)))
+    (declare (type fixnum n))
+    (with-llama-compatible-fp-environment
+      (if (zerop seq-id)
+          ;; Fast path for seq-id 0: batch-get-one uses null positions (auto-advances
+          ;; from current KV cache end) and null seq_id (defaults to 0).
+          (cffi:with-foreign-object (tok-buf '%llama:token n)
+            (dotimes (i n)
+              (declare (type fixnum i))
+              (setf (cffi:mem-aref tok-buf '%llama:token i)
+                    (aref tokens i)))
+            (let* ((batch (%llama:batch-get-one tok-buf n))
+                   (rc (%llama:decode ctx-ptr batch)))
+              (unless (zerop rc)
+                (error 'decode-error :code rc))))
+          ;; Full batch path for non-zero seq-id: supply explicit start position.
+          (let ((start-pos (multiple-value-bind (mn mx)
+                               (kv-cache-pos ctx seq-id)
+                             (if (>= mn mx) 0 (1+ mx)))))
+            (with-batch (batch n)
+              (batch-add-sequence batch tokens seq-id :start-pos start-pos :logits :last)
+              (batch-decode ctx batch))))
+      (setf (llama-context-compute-pending-p ctx) t))
+    n))
+
 (defun generate (ctx prompt &rest all-kwargs
                              &key sampler-config
                                   (max-tokens 256) (temp 0.8)
@@ -483,16 +525,9 @@ PROMPT is neither a string nor a vector."
                (type (vector fixnum) generated))
       (when reset-context
         (%llama:memory-clear (%llama:get-memory ctx-ptr) 1))
-      ;; Decode the prompt
-      (cffi:with-foreign-object (tok-buf '%llama:token n-prompt)
-        (dotimes (i n-prompt)
-          (declare (type fixnum i))
-          (setf (cffi:mem-aref tok-buf '%llama:token i) (aref prompt-tokens i)))
-        (let* ((batch (%llama:batch-get-one tok-buf n-prompt))
-               (rc (%llama:decode ctx-ptr batch)))
-          (unless (zerop rc)
-            (error 'decode-error :code rc)))
-        (setf (llama-context-compute-pending-p ctx) t))
+      ;; Decode the prompt via prefill (skip if empty — caller already prefilled)
+      (when (plusp n-prompt)
+        (prefill ctx prompt-tokens))
       ;; Warn if caller supplied a chain but also passed sampler-building kwargs
       (when (and sampler
                  (or sampler-config

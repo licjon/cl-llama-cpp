@@ -75,6 +75,7 @@ New wrappers must follow this convention.")
    ;; Operations
    #:tokenize
    #:detokenize
+   #:prefill
    #:generate
    #:generate-parallel
    #:embed

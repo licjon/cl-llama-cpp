@@ -97,7 +97,9 @@ Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
   shared forward passes. Independent contexts can run concurrently on separate threads.
 - *Embeddings* — =embed= with optional normalization; context created with =:embeddings t=.
 - *LoRA adapters* — =with-lora= / =apply-lora= with scale control.
-- *KV cache* — clear, copy, shift, divide, per-sequence position queries.
+- *KV cache* — =prefill= decodes tokens into the cache without sampling (the
+  primitive for context forking); clear, copy, shift, divide, per-sequence
+  position queries.
 - *Session state* — save/load to disk (survives process restarts) or to in-memory octet
   vectors (context forking, snapshotting).
 - *GGUF inspection* — =with-gguf= reads file-level metadata, typed KV entries (including

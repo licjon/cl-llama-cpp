@@ -49,11 +49,10 @@ sequence then continues independently from that shared starting point.
 (cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
   (cl-llama-cpp:with-context (ctx model :n-ctx 8192 :n-seq-max 4)
 
-    ;; Decode the system prompt on sequence 0
+    ;; Decode the system prompt into sequence 0's KV cache
     (let ((system-tokens (cl-llama-cpp:tokenize model "You are a helpful assistant. "
                                                 :add-special t)))
-      (cl-llama-cpp:generate ctx nil :prompt-tokens system-tokens
-                             :max-tokens 0))  ; prefill only, no generation
+      (cl-llama-cpp:prefill ctx system-tokens))
 
     ;; Copy sequence 0's cache to sequences 1, 2, 3
     ;; Arguments: ctx src-seq dst-seq p0 p1
@@ -134,31 +133,32 @@ decoded prefix to explore multiple continuations:
 (cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
   (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
 
-    ;; Decode a shared prefix
+    ;; Prefill the shared prefix into the KV cache
     (let ((tokens (cl-llama-cpp:tokenize model "Once upon a time" :add-special t)))
-      (cl-llama-cpp:generate ctx nil :prompt-tokens tokens :max-tokens 0))
+      (cl-llama-cpp:prefill ctx tokens)
 
-    ;; Snapshot the state
-    (let ((snapshot (cl-llama-cpp:save-state ctx)))
+      ;; Snapshot the state
+      (let ((snapshot (cl-llama-cpp:save-state ctx)))
 
-      ;; Branch A: low temperature
-      (cl-llama-cpp:load-state ctx snapshot)
-      (format t "Branch A: ~A~%"
-              (cl-llama-cpp:generate ctx nil
-                                     :prompt-tokens #()  ; already in cache
-                                     :max-tokens 64 :temp 0.1 :seed 1
-                                     :reset-context nil))
+        ;; Branch A: low temperature
+        (cl-llama-cpp:load-state ctx snapshot)
+        (format t "Branch A: ~A~%"
+                (cl-llama-cpp:generate ctx nil
+                                       :prompt-tokens tokens
+                                       :max-tokens 64 :temp 0.1 :seed 1
+                                       :reset-context nil))
 
-      ;; Branch B: high temperature
-      (cl-llama-cpp:load-state ctx snapshot)
-      (format t "Branch B: ~A~%"
-              (cl-llama-cpp:generate ctx nil
-                                     :prompt-tokens #()
-                                     :max-tokens 64 :temp 1.2 :seed 1
-                                     :reset-context nil)))))
+        ;; Branch B: high temperature
+        (cl-llama-cpp:load-state ctx snapshot)
+        (format t "Branch B: ~A~%"
+                (cl-llama-cpp:generate ctx nil
+                                       :prompt-tokens tokens
+                                       :max-tokens 64 :temp 1.2 :seed 1
+                                       :reset-context nil))))))
 #+end_src
 
-=:reset-context nil= tells =generate= not to clear the KV cache before decoding —
+=prefill= decodes the tokens into the KV cache without sampling.
+=:reset-context nil= tells =generate= not to clear the cache before sampling —
 critical here since we just restored it from the snapshot.
 
 For per-sequence snapshots use =save-state-seq= / =load-state-seq=, which accept an
