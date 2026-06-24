@@ -38,7 +38,8 @@ Key =generate= options:
 - =:max-tokens= — hard cap on output length; =generate= also stops at end-of-generation
   token, whichever comes first
 - =:temp= — sampling temperature; lower is more deterministic, 0.0 is greedy
-- =:seed= — for reproducible output; defaults to a random seed
+- =:seed= — for reproducible output; defaults to =42=.  Pass =:random= or =nil= for
+  nondeterministic sampling
 - =:top-k=, =:top-p=, =:min-p= — nucleus and min-p sampling filters
 
 =generate= returns three values: the generated string, a stop reason (=:eog=,

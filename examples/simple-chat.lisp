@@ -15,6 +15,17 @@
 ;;;; That is fine for a short demo, but for long sessions you would want
 ;;;; incremental decoding that reuses the KV cache and only processes the new
 ;;;; tokens each turn.
+;;;;
+;;;; Run from the REPL:
+;;;;   (ql:quickload :cl-llama-cpp/examples)
+;;;;   (cl-llama-cpp/examples/simple-chat:main
+;;;;     :model-path "/path/to/model.gguf"
+;;;;     :n-gpu-layers 99)
+;;;;
+;;;; Or from a shell:
+;;;;   ros -e '(ql:quickload :cl-llama-cpp/examples)' \
+;;;;       -e '(cl-llama-cpp/examples/simple-chat:main
+;;;;             :model-path "/path/to/model.gguf")' -q
 
 (defpackage #:cl-llama-cpp/examples/simple-chat
   (:use #:cl #:cl-llama-cpp)

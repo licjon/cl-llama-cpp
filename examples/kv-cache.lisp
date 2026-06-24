@@ -5,11 +5,14 @@
 ;;; This script doubles as a regression test — run it top-to-bottom.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/kv-cache.lisp")
+;;;   (setf cl-llama-cpp/examples/kv-cache::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/kv-cache:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/kv-cache
   (:use #:cl #:cl-llama-cpp)

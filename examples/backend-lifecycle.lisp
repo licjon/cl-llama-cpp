@@ -8,11 +8,14 @@
 ;;; set-abort-callback — interrupt long-running inference via a deadline
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/backend-lifecycle.lisp")
+;;;   (setf cl-llama-cpp/examples/backend-lifecycle::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/backend-lifecycle:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/backend-lifecycle
   (:use #:cl #:cl-llama-cpp)

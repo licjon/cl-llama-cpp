@@ -141,6 +141,7 @@ New wrappers must follow this convention.")
    ;; Sampler utilities
    #:sampler-chain-add
    #:sampler-seed
+   #:resolve-seed
    ;; Individual sampler constructors / destructor
    #:make-greedy-sampler
    #:make-dist-sampler

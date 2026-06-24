@@ -3,11 +3,14 @@
 ;;; alternatives when a budget is too tight.
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/resource-planning.lisp")
+;;;   (setf cl-llama-cpp/examples/resource-planning::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/resource-planning:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 ;;;
 ;;; All sections share a single model load. The runtime-guardrails demo
 ;;; creates real contexts in addition to the loaded model — it is OFF by

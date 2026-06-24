@@ -16,13 +16,18 @@
 ;;;;   position.  Per-turn prefill cost is therefore proportional to the number
 ;;;;   of *new* tokens added each turn — not the total conversation length.
 ;;;;
-;;;; Run it from a shell:
-;;;;   ros -e '(ql:quickload :cl-llama-cpp/examples)' \
-;;;;       -e '(cl-llama-cpp/examples/incremental-chat:main)' -q
-;;;; Type "exit" or "quit" to end the session.
+;;;; Run from the REPL:
+;;;;   (ql:quickload :cl-llama-cpp/examples)
+;;;;   (cl-llama-cpp/examples/incremental-chat:main
+;;;;     :model-path "/path/to/model.gguf"
+;;;;     :n-gpu-layers 99)
 ;;;;
-;;;; For REPL use, call CHAT-SESSION-SEND directly instead of MAIN —
-;;;; the REPL itself is the interactive loop.
+;;;; Or from a shell:
+;;;;   ros -e '(ql:quickload :cl-llama-cpp/examples)' \
+;;;;       -e '(cl-llama-cpp/examples/incremental-chat:main
+;;;;             :model-path "/path/to/model.gguf")' -q
+;;;;
+;;;; Type "exit" or "quit" to end the session.
 
 (defpackage #:cl-llama-cpp/examples/incremental-chat
   (:use #:cl #:cl-llama-cpp)

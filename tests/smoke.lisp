@@ -1587,3 +1587,51 @@
            (effective (append caller-sampler cfg)))
       (ok (= 0.9 (getf effective :temp)) "caller temp (0.9) wins over config temp (0.3)")
       (ok (= 40  (getf effective :top-k)) "config top-k (40) used when caller omits it"))))
+
+;;; ---------- Issue #81: :seed :random sentinel ----------
+
+(deftest resolve-seed-integer-passthrough
+  (testing "resolve-seed passes integer seeds through unchanged"
+    (ok (= 42 (cl-llama-cpp:resolve-seed 42)) "42 → 42")
+    (ok (= 0 (cl-llama-cpp:resolve-seed 0)) "0 → 0")
+    (ok (= 12345 (cl-llama-cpp:resolve-seed 12345)) "12345 → 12345")))
+
+(deftest resolve-seed-random-returns-default-seed
+  (testing "resolve-seed maps :random to %llama:+default-seed+"
+    (let ((result (cl-llama-cpp:resolve-seed :random)))
+      (ok (integerp result) ":random resolves to an integer")
+      (ok (= %llama:+default-seed+ result)
+          ":random maps to LLAMA_DEFAULT_SEED (0xFFFFFFFF)"))))
+
+(deftest resolve-seed-nil-means-random
+  (testing "resolve-seed treats nil as :random"
+    (let ((result (cl-llama-cpp:resolve-seed nil)))
+      (ok (integerp result) "nil resolves to an integer")
+      (ok (= %llama:+default-seed+ result)
+          "nil maps to LLAMA_DEFAULT_SEED same as :random"))))
+
+(deftest resolve-seed-rejects-invalid-types
+  (testing "resolve-seed signals error for invalid seed types"
+    (ok (handler-case (progn (cl-llama-cpp:resolve-seed "random") nil)
+          (type-error () t)
+          (cl-llama-cpp:input-validation-error () t))
+        "string signals error")
+    (ok (handler-case (progn (cl-llama-cpp:resolve-seed t) nil)
+          (type-error () t)
+          (cl-llama-cpp:input-validation-error () t))
+        "t signals error")
+    (ok (handler-case (progn (cl-llama-cpp:resolve-seed 3.14) nil)
+          (type-error () t)
+          (cl-llama-cpp:input-validation-error () t))
+        "float signals error")))
+
+(deftest sampler-config-stores-random-sentinel
+  (testing "make-sampler-config stores :seed :random verbatim"
+    (let ((cfg (cl-llama-cpp:make-sampler-config :seed :random)))
+      (ok (eq :random (getf cfg :seed)) ":random stored as-is in config"))))
+
+(deftest sampler-config-stores-nil-seed
+  (testing "make-sampler-config stores :seed nil verbatim"
+    (let ((cfg (cl-llama-cpp:make-sampler-config :seed nil)))
+      (ok (= 2 (length cfg)) "plist has one key-value pair")
+      (ok (eq nil (getf cfg :seed :not-found)) "nil stored as-is in config"))))

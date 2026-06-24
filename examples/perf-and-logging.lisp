@@ -11,11 +11,14 @@
 ;;; with-perf            — reset before body, print after (even on error)
 ;;;
 ;;; Setup:
-;;;   export LLAMA_MODEL=/path/to/model.gguf    ; or set *model-path* in the REPL
-;;;
 ;;;   (ql:quickload :cl-llama-cpp)
 ;;;   (load "examples/perf-and-logging.lisp")
+;;;   (setf cl-llama-cpp/examples/perf-and-logging::*model-path*
+;;;         "/path/to/model.gguf")
 ;;;   (cl-llama-cpp/examples/perf-and-logging:run)
+;;;
+;;; Or via environment variable:
+;;;   export LLAMA_MODEL=/path/to/model.gguf
 
 (defpackage #:cl-llama-cpp/examples/perf-and-logging
   (:use #:cl #:cl-llama-cpp)
