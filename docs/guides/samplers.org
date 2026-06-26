@@ -231,19 +231,19 @@ If you create a sampler but decide not to add it to a chain, free it with
 
 *** Available Constructors
 
-| Constructor                              | Equivalent keyword(s)                     |
-|------------------------------------------+-------------------------------------------|
-| =make-greedy-sampler=                      | =:greedy t=                                 |
-| =make-dist-sampler &optional seed=         | (default distribution sampler)            |
-| =make-top-k-sampler k=                     | =:top-k k=                                  |
-| =make-top-p-sampler p &optional min-keep=  | =:top-p p=                                  |
-| =make-min-p-sampler p &optional min-keep=  | =:min-p p=                                  |
-| =make-typical-sampler p=                   | =:typical-p p=                              |
-| =make-temp-sampler temp=                   | =:temp temp=                                |
-| =make-temp-ext-sampler temp delta exp=     | =:dynamic-temp-range= / =:dynamic-temp-exponent= |
-| =make-xtc-sampler prob thresh=             | =:xtc-probability= / =:xtc-threshold=         |
-| =make-top-n-sigma-sampler sigma=           | =:top-n-sigma sigma=                        |
-| =make-mirostat-v2-sampler seed tau eta=    | =:mirostat-v2 t= + =:mirostat-tau= / =:eta=   |
+| Constructor                             | Equivalent keyword(s)                        |
+|-----------------------------------------+----------------------------------------------|
+| =make-greedy-sampler=                     | =:greedy t=                                    |
+| =make-dist-sampler &optional seed=        | (default distribution sampler)               |
+| =make-top-k-sampler k=                    | =:top-k k=                                     |
+| =make-top-p-sampler p &optional min-keep= | =:top-p p=                                     |
+| =make-min-p-sampler p &optional min-keep= | =:min-p p=                                     |
+| =make-typical-sampler p=                  | =:typical-p p=                                 |
+| =make-temp-sampler temp=                  | =:temp temp=                                   |
+| =make-temp-ext-sampler temp delta exp=    | =:dynamic-temp-range= / =:dynamic-temp-exponent= |
+| =make-xtc-sampler prob thresh=            | =:xtc-probability= / =:xtc-threshold=            |
+| =make-top-n-sigma-sampler sigma=          | =:top-n-sigma sigma=                           |
+| =make-mirostat-v2-sampler seed tau eta=   | =:mirostat-v2 t= + =:mirostat-tau= / =:eta=        |
 
 The constructors are useful when the keyword shortcuts don't provide enough ordering
 control — for example, placing temperature before top-k rather than after.
