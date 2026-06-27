@@ -9,4 +9,6 @@
 .#*
 llama.cpp/build/
 examples/my-*.lisp
+examples/example-output/
 my-build-system.org
+*.deb

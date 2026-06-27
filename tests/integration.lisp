@@ -38,6 +38,19 @@
           (ok (search "Hello" result)
               (format nil "detokenized back to: ~s" result)))))))
 
+(deftest tokenize-roundtrip-non-ascii
+  (when-model-available
+    (testing "tokenize and detokenize roundtrip for non-ASCII text"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (dolist (text '("café" "你好世界" "über" "Hello 😀 world"))
+          (let* ((tokens (cl-llama-cpp:tokenize model text))
+                 (result (cl-llama-cpp:detokenize model tokens
+                           :remove-special t)))
+            (ok (> (length tokens) 0)
+                (format nil "~S tokenized to ~D tokens" text (length tokens)))
+            (ok (search text result)
+                (format nil "~S roundtrips through: ~S" text result))))))))
+
 (deftest generate-text
   (when-model-available
     (testing "generate produces text from a prompt"

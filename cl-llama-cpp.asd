@@ -36,6 +36,7 @@
                 ((:file "simple-chat")
                  (:file "incremental-chat")
                  (:file "backend-lifecycle")
+		 (:file "benchmark-hotpaths")
                  (:file "context-fork")
                  (:file "introspection")
                  (:file "kv-cache")
