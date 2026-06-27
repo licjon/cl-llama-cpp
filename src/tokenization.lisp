@@ -1,5 +1,19 @@
 (in-package #:cl-llama-cpp)
 
+(defun %utf-8-byte-length (string)
+  "Return the number of bytes needed to encode STRING as UTF-8."
+  (declare (optimize (speed 3)) (type string string))
+  (let ((n 0))
+    (declare (type fixnum n))
+    (dotimes (i (length string) n)
+      (declare (type fixnum i))
+      (let ((code (char-code (char string i))))
+        (declare (type fixnum code))
+        (incf n (cond ((<= code #x7F) 1)
+                      ((<= code #x7FF) 2)
+                      ((<= code #xFFFF) 3)
+                      (t 4)))))))
+
 (defun tokenize (model text &key (add-special t) (parse-special nil))
   "Tokenize TEXT using MODEL's vocabulary. Returns a vector of token integers.
 Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
@@ -7,7 +21,7 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a string."
   (check-type text string)
   (with-llama-compatible-fp-environment
     (let* ((vocab (%llama:model-get-vocab (llama-model-pointer model)))
-           (text-len (length text))
+           (text-len (%utf-8-byte-length text))
            (add-sp (if add-special 1 0))
            (parse-sp (if parse-special 1 0))
            ;; First pass: get required token count

@@ -1635,3 +1635,47 @@
     (let ((cfg (cl-llama-cpp:make-sampler-config :seed nil)))
       (ok (= 2 (length cfg)) "plist has one key-value pair")
       (ok (eq nil (getf cfg :seed :not-found)) "nil stored as-is in config"))))
+
+;;; UTF-8 byte length calculation (security fix for tokenize)
+
+(deftest utf-8-byte-length-ascii
+  (testing "%utf-8-byte-length matches character count for ASCII"
+    (ok (= 0 (cl-llama-cpp::%utf-8-byte-length ""))
+        "empty string → 0")
+    (ok (= 5 (cl-llama-cpp::%utf-8-byte-length "Hello"))
+        "ASCII string → same as length")
+    (ok (= 13 (cl-llama-cpp::%utf-8-byte-length "Hello, world!"))
+        "ASCII with punctuation")))
+
+(deftest utf-8-byte-length-2byte
+  (testing "%utf-8-byte-length for 2-byte characters (U+0080–U+07FF)"
+    (ok (= 2 (cl-llama-cpp::%utf-8-byte-length "é"))
+        "é (U+00E9) is 2 bytes")
+    (ok (= 5 (cl-llama-cpp::%utf-8-byte-length "café"))
+        "café: c(1)+a(1)+f(1)+é(2) = 5")
+    (ok (= 5 (cl-llama-cpp::%utf-8-byte-length "über"))
+        "über: ü(2)+b(1)+e(1)+r(1) = 5")))
+
+(deftest utf-8-byte-length-3byte
+  (testing "%utf-8-byte-length for 3-byte characters (U+0800–U+FFFF)"
+    (ok (= 6 (cl-llama-cpp::%utf-8-byte-length "你好"))
+        "你好: 2×3 = 6 bytes")
+    (ok (= 9 (cl-llama-cpp::%utf-8-byte-length "日本語"))
+        "日本語: 3×3 = 9 bytes")))
+
+(deftest utf-8-byte-length-4byte
+  (testing "%utf-8-byte-length for 4-byte characters (U+10000+)"
+    (ok (= 4 (cl-llama-cpp::%utf-8-byte-length "😀"))
+        "😀 (U+1F600) is 4 bytes")
+    (ok (= 8 (cl-llama-cpp::%utf-8-byte-length "🎉🎊"))
+        "two emoji: 2×4 = 8 bytes")))
+
+(deftest utf-8-byte-length-mixed
+  (testing "%utf-8-byte-length for mixed ASCII and multi-byte"
+    (ok (= 10 (cl-llama-cpp::%utf-8-byte-length "Hi 你好!"))
+        "H(1)+i(1)+space(1)+你(3)+好(3)+!(1) = 10")
+    (ok (= 6 (cl-llama-cpp::%utf-8-byte-length "a😀b"))
+        "a(1)+😀(4)+b(1) = 6")
+    (ok (> (cl-llama-cpp::%utf-8-byte-length "こんにちは世界")
+           (length "こんにちは世界"))
+        "byte length > char length for CJK")))
