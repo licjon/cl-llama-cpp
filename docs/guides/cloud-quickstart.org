@@ -1,0 +1,149 @@
+* Cloud VM Quickstart
+
+This guide walks through setting up cl-llama-cpp from scratch on a clean cloud VM
+with GPU access. It was tested on a [[https://cloud.lambda.ai][Lambda Labs]] A10 instance running Ubuntu 24.04.
+
+The steps below are specific to Lambda Labs but adapt easily to any cloud provider
+with NVIDIA GPUs (AWS, GCP, RunPod, etc.). The key requirements are: an NVIDIA GPU
+with working drivers, a C/C++ toolchain, and CUDA development libraries.
+
+** Prerequisites
+
+Verify your GPU drivers are active:
+
+#+begin_src bash
+nvidia-smi
+#+end_src
+
+You should see a table showing your GPU. If the command is not found, install the
+drivers for your cloud provider and reboot before continuing.
+
+** System Dependencies
+
+#+begin_src bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+  git build-essential automake cmake pkg-config \
+  curl wget vim software-properties-common \
+  libcurl4-openssl-dev libffi-dev libzstd-dev zlib1g-dev \
+  libncurses5-dev libssl-dev
+#+end_src
+
+** Install Roswell and SBCL
+
+[[https://github.com/roswell/roswell][Roswell]] manages Common Lisp implementations. Build from source:
+
+#+begin_src bash
+git clone -b release https://github.com/roswell/roswell.git
+cd roswell
+sh bootstrap
+./configure
+make
+sudo make install
+ros setup
+ros install sbcl
+ros use sbcl
+#+end_src
+
+If you prefer to use SBCL directly without Roswell, install it from your package
+manager or from [[https://www.sbcl.org/getting.html][sbcl.org]] and set up [[https://www.quicklisp.org/][Quicklisp]] manually.
+
+** Download a Model
+
+Install the Hugging Face CLI to download GGUF models:
+
+#+begin_src bash
+sudo apt install -y pipx
+pipx install huggingface_hub
+pipx ensurepath
+#+end_src
+
+Start a new shell (or =source ~/.bashrc=) so the =huggingface-cli= command is on your
+PATH, then download a model:
+
+#+begin_src bash
+huggingface-cli download \
+  TheRains/Qwen2.5-14B-Instruct-Q4_K_M-GGUF \
+  qwen2.5-14b-instruct-q4_k_m.gguf \
+  --local-dir ~/models
+#+end_src
+
+The file lands at =~/models/qwen2.5-14b-instruct-q4_k_m.gguf=. Any GGUF model works;
+adjust the path in the examples below.
+
+** Clone and Build
+
+#+begin_src bash
+cd ~/.roswell/local-projects/
+git clone --recursive https://github.com/licjon/cl-llama-cpp
+cd cl-llama-cpp/llama.cpp
+mkdir build && cd build
+cmake .. -DBUILD_SHARED_LIBS=ON -DGGML_CUDA=ON
+make -j$(nproc)
+#+end_src
+
+The =-DGGML_CUDA=ON= flag enables GPU acceleration. If cmake cannot find your CUDA
+toolkit, you may need to set =-DCMAKE_CUDA_ARCHITECTURES= to your GPU's compute
+capability (e.g. =86= for A10/A100 Ampere, =89= for RTX 4090 Ada). See the
+[[https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md][llama.cpp build documentation]] for the full set of build options.
+
+Non-Roswell users: clone the repository into a directory on your ASDF source registry
+(e.g. =~/common-lisp/=) instead.
+
+** Load and Run
+
+Start a Lisp REPL:
+
+#+begin_src bash
+ros run
+#+end_src
+
+Register and load the system:
+
+#+begin_src lisp
+(ql:register-local-projects)
+(asdf:load-system "cl-llama-cpp")
+#+end_src
+
+Try a simple generation (adjust the model path to match your download):
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "~/models/qwen2.5-14b-instruct-q4_k_m.gguf"
+                          :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (princ (cl-llama-cpp:generate ctx "The capital of France is"
+                                  :max-tokens 64 :temp 0.7))))
+#+end_src
+
+Streaming:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "~/models/qwen2.5-14b-instruct-q4_k_m.gguf"
+                          :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (cl-llama-cpp:generate ctx "Once upon a time"
+                           :max-tokens 128 :temp 0.9
+                           :token-callback (lambda (tok)
+                                             (write-string tok)
+                                             (force-output)
+                                             t))))
+#+end_src
+
+Multi-turn chat:
+
+#+begin_src lisp
+(cl-llama-cpp:with-model (model "~/models/qwen2.5-14b-instruct-q4_k_m.gguf"
+                          :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
+    (let ((session (cl-llama-cpp:make-chat-session ctx
+                     :system-prompt "You are a helpful assistant.")))
+      (format t "~A~%"
+              (cl-llama-cpp:chat-session-send session "What is Common Lisp?"
+                                              :max-tokens 256))
+      (format t "~A~%"
+              (cl-llama-cpp:chat-session-send session "Tell me more about CLOS."
+                                              :max-tokens 256)))))
+#+end_src
+
+You're up and running. See [[../getting-started.org][Getting Started]] for more patterns (embeddings, error
+handling, long-lived handles) and the [[../api-reference.org][API Reference]] for the complete function list.
