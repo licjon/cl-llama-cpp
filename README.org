@@ -171,21 +171,21 @@ examples (including model quantization).
 (asdf:load-system "cl-llama-cpp/examples")
 #+end_src
 
-| File                             | Demonstrates                                            |
-|----------------------------------+---------------------------------------------------------|
+| File                             | Demonstrates                                               |
+|----------------------------------+------------------------------------------------------------|
 | =examples/incremental-chat.lisp=   | Multi-turn chat with KV-cache reuse: O(1) prefill per turn |
-| =examples/tool-calling.lisp=       | Tool calls via chat template + XML parsing              |
-| =examples/sampler-showcase.lisp=   | Grammars, lazy grammars, extended samplers              |
-| =examples/sampler-comparison.lisp= | Side-by-side comparison of all sampling strategies      |
-| =examples/parallel.lisp=           | =generate-parallel=: multiple prompts in shared passes    |
-| =examples/parallel-threads.lisp=   | Concurrent contexts on separate Lisp threads            |
-| =examples/kv-cache.lisp=           | KV cache ops with assert-driven verification            |
-| =examples/context-fork.lisp=       | In-memory state snapshotting and context forking        |
-| =examples/lora.lisp=               | LoRA adapter loading and application                    |
-| =examples/resource-planning.lisp=  | VRAM estimation and configuration validation            |
-| =examples/introspection.lisp=      | Model metadata, tensor listing, system info             |
-| =examples/backend-lifecycle.lisp=  | Thread tuning, abort callbacks, time-limited generation |
-| =examples/perf-and-logging.lisp=   | Timing, throughput calculation, log capture             |
+| =examples/tool-calling.lisp=       | Tool calls via chat template + XML parsing                 |
+| =examples/sampler-showcase.lisp=   | Grammars, lazy grammars, extended samplers                 |
+| =examples/sampler-comparison.lisp= | Side-by-side comparison of all sampling strategies         |
+| =examples/parallel.lisp=           | =generate-parallel=: multiple prompts in shared passes       |
+| =examples/parallel-threads.lisp=   | Concurrent contexts on separate Lisp threads               |
+| =examples/kv-cache.lisp=           | KV cache ops with assert-driven verification               |
+| =examples/context-fork.lisp=       | In-memory state snapshotting and context forking           |
+| =examples/lora.lisp=               | LoRA adapter loading and application                       |
+| =examples/resource-planning.lisp=  | VRAM estimation and configuration validation               |
+| =examples/introspection.lisp=      | Model metadata, tensor listing, system info                |
+| =examples/backend-lifecycle.lisp=  | Thread tuning, abort callbacks, time-limited generation    |
+| =examples/perf-and-logging.lisp=   | Timing, throughput calculation, log capture                |
 
 ** Documentation
 
