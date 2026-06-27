@@ -13,10 +13,11 @@ C function directly. A missing wrapper is never a blocker.
 
 ** Prerequisites
 
-This library assumes working familiarity with Common Lisp and llama.cpp. You should
-be comfortable in a CL REPL, understand ASDF system loading, and know how to build
-llama.cpp for your platform. The guides below cover cl-llama-cpp usage, not CL or
-llama.cpp fundamentals.
+This library is intended for developers who are already familiar with Common Lisp
+and llama.cpp. You should be comfortable working in a Common Lisp REPL, loading
+systems with ASDF, and building llama.cpp for your platform. The documentation
+focuses on using cl-llama-cpp; it does not attempt to teach Common Lisp or
+llama.cpp themselves.
 
 If you want to try it on a clean cloud environment, see the
 [[docs/guides/cloud-quickstart.org][Cloud VM Quickstart]] for step-by-step instructions starting from a bare Ubuntu GPU
@@ -33,6 +34,12 @@ instance.
 Tested on Linux. macOS should work (=.dylib= is handled). Windows is untested.
 
 ** Installation
+Tip: If you use an AI coding assistant such as Claude Code, Codex, or OpenCode,
+you can often ask it to install and verify cl-llama-cpp for you. For example:
+"Install cl-llama-cpp from this repository on this machine, build llama.cpp
+if needed, satisfy all Common Lisp dependencies, and verify the examples run."
+If the installation fails, compare the assistant's actions against the
+installation guide below.
 
 The repository includes llama.cpp as a git submodule:
 
