@@ -201,6 +201,11 @@ examples (including model quantization).
 - [[docs/upgrading-llama-cpp.org][Upgrading llama.cpp]] — keeping the submodule and bindings in sync
 - [[docs/contributing.org][Contributing]] — running tests, adding wrappers, PR guidelines
 
+** Built with cl-llama-cpp
+
+- [[https://github.com/licjon/cl-llama-chat][cl-llama-chat]] — terminal interface for cl-llama-cpp providing automatic model
+  configuration and dual-branch response selection across sampling configurations.
+
 ** Running Tests
 
 Smoke tests (no model required):
