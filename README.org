@@ -1,32 +1,29 @@
 * cl-llama-cpp
 
-Common Lisp bindings to [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via CFFI.
+Local LLM inference for Common Lisp. Run GGUF models in-process on your CPU or
+GPU — generate text, chat, embed, constrain output with grammars, fork context
+state, and compose sampler pipelines. Built on [[https://github.com/ggml-org/llama.cpp][llama.cpp]] via CFFI.
 
 The generated =%llama= layer covers the complete public C API (881 functions, 38 enums,
-59 structs). A higher-level =cl-llama-cpp= package wraps common workflows — text
-generation, chat, embeddings, constrained generation, and more — with idiomatic Lisp
-macros, typed handles, and structured conditions. =%llama= is a first-class escape
-hatch, not an implementation detail: when a high-level wrapper doesn't exist, call the
-C function directly. A missing wrapper is never a blocker.
+59 structs). A higher-level =cl-llama-cpp= package wraps common workflows with
+idiomatic Lisp macros, typed handles, and structured conditions. =%llama= is a
+first-class escape hatch, not an implementation detail: when a high-level wrapper
+doesn't exist, call the C function directly. A missing wrapper is never a blocker.
 
 *Active Development / Beta.* API is unstable and will change without notice.
 
-** Prerequisites
+** Getting Set Up
 
-This library is intended for developers who are already familiar with Common Lisp
-and llama.cpp. You should be comfortable working in a Common Lisp REPL, loading
-systems with ASDF, and building llama.cpp for your platform. The documentation
-focuses on using cl-llama-cpp; it does not attempt to teach Common Lisp or
-llama.cpp themselves.
-
-If you want to try it on a clean cloud environment, see the
-[[docs/guides/cloud-quickstart.org][Cloud VM Quickstart]] for step-by-step instructions starting from a bare Ubuntu GPU
-instance.
+Some familiarity with Common Lisp and llama.cpp will help, but if you're new to
+either, the [[docs/guides/cloud-quickstart.org][Cloud VM Quickstart]] walks through everything from a bare Ubuntu GPU
+instance. An AI coding assistant can also handle the initial setup — see the
+installation tip below.
 
 ** Requirements
 
 - *SBCL* (recommended) — llama.cpp triggers floating-point exceptions that SBCL masks
-  automatically. Other implementations are supported via a configurable wrapper.
+  automatically. Other implementations will need to handle FP masking and may require
+  additional work for multithreading. See =with-llama-compatible-fp-environment=.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 - [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
@@ -34,6 +31,7 @@ instance.
 Tested on Linux. macOS should work (=.dylib= is handled). Windows is untested.
 
 ** Installation
+
 Tip: If you use an AI coding assistant such as Claude Code, Codex, or OpenCode,
 you can often ask it to install and verify cl-llama-cpp for you. For example:
 "Install cl-llama-cpp from this repository on this machine, build llama.cpp
@@ -74,38 +72,40 @@ Quicklisp users: run =ql:register-local-projects= first.
 ** Quick Start
 
 #+begin_src lisp
-(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
-  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
-    (princ (cl-llama-cpp:generate ctx "The capital of France is"
-                                  :max-tokens 64 :temp 0.7))))
+(use-package :cl-llama-cpp)
+
+(with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 2048)
+    (princ (generate ctx "The capital of France is"
+                     :max-tokens 64 :temp 0.7))))
 #+end_src
 
 Streaming:
 
 #+begin_src lisp
-(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
-  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
-    (cl-llama-cpp:generate ctx "Once upon a time"
-                           :max-tokens 128 :temp 0.9
-                           :token-callback (lambda (tok)
-                                             (write-string tok)
-                                             (force-output)
-                                             t))))
+(with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 2048)
+    (generate ctx "Once upon a time"
+              :max-tokens 128 :temp 0.9
+              :token-callback (lambda (tok)
+                                (write-string tok)
+                                (force-output)
+                                t))))
 #+end_src
 
 Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
 
 #+begin_src lisp
-(cl-llama-cpp:with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
-  (cl-llama-cpp:with-context (ctx model :n-ctx 4096)
-    (let ((session (cl-llama-cpp:make-chat-session ctx
+(with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 4096)
+    (let ((session (make-chat-session ctx
                      :system-prompt "You are a helpful assistant.")))
       (format t "~A~%"
-              (cl-llama-cpp:chat-session-send session "What is Common Lisp?"
-                                              :max-tokens 256))
+              (chat-session-send session "What is Common Lisp?"
+                                 :max-tokens 256))
       (format t "~A~%"
-              (cl-llama-cpp:chat-session-send session "Tell me more about CLOS."
-                                              :max-tokens 256)))))
+              (chat-session-send session "Tell me more about CLOS."
+                                 :max-tokens 256)))))
 #+end_src
 
 ** High-Level API
