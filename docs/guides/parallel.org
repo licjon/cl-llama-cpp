@@ -123,15 +123,21 @@ This example uses =sb-thread= directly. Adapt =make-thread= / =join-thread= to
 bordeaux-threads, lparallel, or any threading library — cl-llama-cpp imposes no
 threading dependency.
 
-*** Thread Safety Summary
+*** Thread Safety Summary (SBCL only)
 
-| Resource        | Thread-safe?                             |
-|-----------------+------------------------------------------|
-| =llama-model=     | Yes — read-only after load; share freely |
-| =llama-context=   | No — one thread at a time                |
-| Backend init    | Yes — =ensure-backend= is atomic          |
-| Log callback    | Yes — dispatched atomically              |
-| Abort callback  | Yes — read atomically; runs on ggml thread |
+The thread-safety guarantees below are implemented with SBCL primitives
+(=sb-thread:make-mutex=, =sb-ext:cas=). On non-SBCL implementations the locks and
+atomic operations compile to no-ops — single-threaded usage works, but the
+concurrent safety properties in this table do not hold.
+
+| Resource       | Thread-safe? (SBCL)                                               |
+|----------------+-------------------------------------------------------------------|
+| =llama-model=    | Yes — read-only after load; share freely                         |
+| =llama-context=  | No — one thread at a time                                        |
+| Backend init   | Yes — =ensure-backend= is mutex-protected                          |
+| Log callback   | Yes — dispatched under mutex                                     |
+| Abort callback | Yes — read under mutex; runs on ggml thread                      |
+| Handle free    | Yes — CAS prevents double-free from GC finalizer + explicit free |
 
 *** GPU Contention
 

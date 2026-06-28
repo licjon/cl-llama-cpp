@@ -21,9 +21,13 @@ installation tip below.
 
 ** Requirements
 
-- *SBCL* (recommended) — llama.cpp triggers floating-point exceptions that SBCL masks
-  automatically. Other implementations will need to handle FP masking and may require
-  additional work for multithreading. See =with-llama-compatible-fp-environment=.
+- *SBCL* (recommended, *required for thread safety*) — llama.cpp triggers floating-point
+  exceptions that SBCL masks automatically via =with-llama-compatible-fp-environment=.
+  Thread-safety guarantees (backend lifecycle mutex, atomic handle deallocation via CAS,
+  abort/log callback locking) are implemented with SBCL primitives (=sb-thread:make-mutex=,
+  =sb-ext:cas=). On non-SBCL implementations these compile to no-ops: single-threaded
+  usage works, but concurrent access to the backend lifecycle or GC finalizers racing with
+  explicit =free-model= / =free-context= calls is unsafe.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 - [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
@@ -121,7 +125,8 @@ Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
   tokenization (=format-chat=, =tokenize-chat=).
 - *Constrained generation* — GBNF grammars, lazy grammars with trigger words, infill.
 - *Parallel decoding* — =generate-parallel= runs multiple prompts simultaneously in
-  shared forward passes. Independent contexts can run concurrently on separate threads.
+  shared forward passes. Independent contexts can run concurrently on separate threads
+  (SBCL only for thread-safety guarantees; see Requirements).
 - *Embeddings* — =embed= with optional normalization; context created with =:embeddings t=.
 - *LoRA adapters* — =with-lora= / =apply-lora= with scale control.
 - *KV cache* — =prefill= decodes tokens into the cache without sampling (the

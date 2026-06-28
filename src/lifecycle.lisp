@@ -17,10 +17,18 @@
 ;;;     and reference count: concurrent calls neither double-initialize nor free
 ;;;     the backend while another scope is active.
 ;;;   - SET-LOG-CALLBACK and the internal log dispatcher are thread-safe.
+;;;   - FREE-MODEL / FREE-CONTEXT use CAS to prevent double-free when a GC
+;;;     finalizer races with an explicit free call.
 ;;;   - Every C entry point is wrapped in WITH-LLAMA-COMPATIBLE-FP-ENVIRONMENT
 ;;;     on the calling Lisp thread; FP trap masking is per-thread.
 ;;;   - No Lisp concurrency library (bordeaux-threads, lparallel, etc.) is
 ;;;     imported or required; users supply their own threading tool.
+;;;
+;;; SBCL-only scope: all mutexes, CAS operations, and callback dispatch locks
+;;; use SBCL primitives (sb-thread:make-mutex, sb-ext:cas).  On non-SBCL
+;;; implementations these compile to no-ops (plain PROGN wrappers).
+;;; Single-threaded usage is safe on any implementation, but the concurrent
+;;; safety properties above require SBCL.
 
 ;;; --- Backend lifecycle lock (SBCL built-in; no-op on other implementations) --
 
