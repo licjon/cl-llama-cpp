@@ -751,7 +751,8 @@ PROMPT is neither a string nor a vector."
                                (error 'decode-error :code rc)))
                            (setf (llama-context-compute-pending-p ctx) t))
                          (incf n-past)
-                         (setf sampled (sample)))))))
+                         (setf sampled (sample))))
+                   (when stop-reason (return)))))
           (unless sampler
             (%llama:sampler-free chain-ptr)))
       ;; Convert generated tokens to string.  Always materialise result-tokens so
