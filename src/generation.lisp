@@ -613,6 +613,8 @@ PROMPT is neither a string nor a vector."
         (unwind-protect
             (let ((n-past (the fixnum n-prompt)))
               (declare (type fixnum n-past))
+              ;; sampler-sample calls sampler-accept internally — do NOT call
+              ;; sampler-accept again or the grammar FSM double-advances.
               (macrolet ((sample () '(%llama:sampler-sample chain-ptr ctx-ptr -1)))
                 (loop with sampled of-type fixnum = (sample)
                       while (< (length generated) max-tokens)
@@ -662,7 +664,8 @@ PROMPT is neither a string nor a vector."
                                    (batch-add-token batch (aref drafts i)
                                                     (+ n-past 1 i) 0 :logits t))
                                  (batch-decode ctx batch))
-                               (let ((n-accepted 0))
+                               (let ((n-accepted 0)
+                                     (mismatch-token nil))
                                  (declare (type fixnum n-accepted))
                                  ;; Verify each draft
                                  (block verify
@@ -710,8 +713,10 @@ PROMPT is neither a string nor a vector."
                                                        (>= (length generated)
                                                            max-tokens))
                                                (return-from verify)))
-                                           ;; Mismatch — stop verification
-                                           (return-from verify)))))
+                                           ;; Mismatch — save target's token, stop verification
+                                           (progn
+                                             (setf mismatch-token target)
+                                             (return-from verify))))))
                                  ;; Accept/evict
                                  (when accept-fn
                                    (funcall accept-fn 0 n-accepted))
@@ -722,10 +727,8 @@ PROMPT is neither a string nor a vector."
                                  (unless (or stop-reason
                                              (>= (length generated) max-tokens))
                                    (setf sampled
-                                         (if (< n-accepted k)
-                                             ;; Mismatch: use target's token at mismatch point
-                                             (%llama:sampler-sample chain-ptr ctx-ptr
-                                                                    n-accepted)
+                                         (if mismatch-token
+                                             mismatch-token
                                              ;; All accepted: sample from position after last
                                              (%llama:sampler-sample chain-ptr ctx-ptr k))))))
                              ;; No drafts available — single token decode

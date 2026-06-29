@@ -134,11 +134,11 @@ Signals DECODE-ERROR if the context runs out of space (n-ctx exceeded)."
           ;;    PREFILL handles the decode; GENERATE is called with empty
           ;;    :PROMPT-TOKENS so it skips re-decode and goes straight to sampling.
           (prefill ctx delta)
-          (let ((begin-fn (getf (getf generate-keys :speculative-fns) :begin-fn)))
-            (when begin-fn
-              (funcall begin-fn 0 rendered)))
           (let* ((spec-fns (getf generate-keys :speculative-fns))
-                 (safe-keys (%strip-keys generate-keys
+                 (begin-fn (getf spec-fns :begin-fn)))
+            (when begin-fn
+              (funcall begin-fn 0 rendered))
+          (let* ((safe-keys (%strip-keys generate-keys
                                          '(:prompt-tokens :reset-context
                                            :speculative-fns)))
                  (reply-keys (list* :prompt-tokens (make-array 0 :element-type 'fixnum)
@@ -166,7 +166,7 @@ Signals DECODE-ERROR if the context runs out of space (n-ctx exceeded)."
                 (kv-cache-seq-rm ctx 0 k -1)
                 (setf (fill-pointer decoded) k)
                 (setf (chat-session-messages session) saved-msgs)
-                (error e)))))))))
+                (error e))))))))))
 
 (defun chat-session-reset (session &key keep-system)
   "Clear the KV cache and reset SESSION to an empty conversation.
