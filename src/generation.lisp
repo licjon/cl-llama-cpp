@@ -611,7 +611,10 @@ PROMPT is neither a string nor a vector."
             (stop-reason nil))
         (declare (type fixnum emitted-len))
         (unwind-protect
-            (let ((n-past (the fixnum n-prompt)))
+            (let ((n-past (the fixnum
+                             (if (plusp n-prompt)
+                                 n-prompt
+                                 (1+ (nth-value 1 (kv-cache-pos ctx 0)))))))
               (declare (type fixnum n-past))
               ;; sampler-sample calls sampler-accept internally — do NOT call
               ;; sampler-accept again or the grammar FSM double-advances.
@@ -623,9 +626,9 @@ PROMPT is neither a string nor a vector."
                    (unless (zerop (%llama:token-is-eog vocab sampled))
                      (setf stop-reason :eog)
                      (return))
-                   ;; 2. Record token
+                   ;; 2. Record token (all-tokens updated after speculative branch
+                   ;;    so draft-fn sees history WITHOUT the current sampled)
                    (vector-push-extend sampled generated)
-                   (when all-tokens (vector-push-extend sampled all-tokens))
                    (when token-callback
                      (let* ((full (detokenize model generated :remove-special t))
                             (new-text (subseq full emitted-len)))
@@ -717,6 +720,9 @@ PROMPT is neither a string nor a vector."
                                            (progn
                                              (setf mismatch-token target)
                                              (return-from verify))))))
+                                 ;; Record sampled in all-tokens now that drafting is done
+                                 (when all-tokens
+                                   (vector-push-extend sampled all-tokens))
                                  ;; Accept/evict
                                  (when accept-fn
                                    (funcall accept-fn 0 n-accepted))
@@ -733,6 +739,8 @@ PROMPT is neither a string nor a vector."
                                              (%llama:sampler-sample chain-ptr ctx-ptr k))))))
                              ;; No drafts available — single token decode
                              (progn
+                               (when all-tokens
+                                 (vector-push-extend sampled all-tokens))
                                (cffi:with-foreign-object (tok-buf '%llama:token 1)
                                  (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
                                  (let* ((batch (%llama:batch-get-one tok-buf 1))
