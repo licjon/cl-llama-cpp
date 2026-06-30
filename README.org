@@ -116,13 +116,16 @@ Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
 
 - *Text generation* — =generate= accepts 15 sampling strategies (temperature, top-k/p,
   min-p, mirostat v1/v2, XTC, DRY, typical-p, top-n-sigma, dynamic temperature,
-  repetition/frequency/presence penalties, logit bias, greedy). Reusable sampler config
+  repetition/frequency/presence penalties, logit bias, greedy). Speculative decoding
+  via caller-supplied draft/verify/accept closures (=:speculative-fns=; see
+  [[https://github.com/licjon/cl-llama-cpp-extras][cl-llama-cpp-extras]] for ready-made primitives). Reusable sampler config
   objects (=make-sampler-config=) and explicit sampler chains (=with-sampler-chain=,
   individual =make-*-sampler= constructors).
 - *Chat* — Simple sessions (full-history prefill) and incremental sessions
   (=make-chat-session= / =chat-session-send=: KV-cache reuse keeps per-turn prefill
-  cost proportional to new tokens only). Chat template formatting and safe multi-turn
-  tokenization (=format-chat=, =tokenize-chat=).
+  cost proportional to new tokens only; supports =:speculative-fns= for speculative
+  decoding). Chat template formatting and safe multi-turn tokenization (=format-chat=,
+  =tokenize-chat=).
 - *Constrained generation* — GBNF grammars, lazy grammars with trigger words, infill.
 - *Parallel decoding* — =generate-parallel= runs multiple prompts simultaneously in
   shared forward passes. Independent contexts can run concurrently on separate threads
