@@ -469,7 +469,8 @@ Signals INPUT-VALIDATION-ERROR if TOKENS is not a non-empty vector."
                                   dynamic-temp-range (dynamic-temp-exponent 1.0)
                                   adaptive-p (adaptive-p-decay 0.0)
                                   sampler
-                                  (reset-context t))
+                                  (reset-context t)
+                                  speculative-fns)
   "Generate text by continuing PROMPT. Returns three values: the generated
 string, a stop reason (:eog, :length, or :callback), and a (simple-array
 fixnum (*)) of the sampled token ids (useful for callers that need to track
@@ -502,7 +503,8 @@ PROMPT is neither a string nor a vector."
   ;; appear first in the appended plist so they win over the config.
   (when (and sampler-config (not sampler))
     (let* ((skip '(:sampler-config :max-tokens :parse-special
-                   :prompt-tokens :token-callback :sampler :reset-context))
+                   :prompt-tokens :token-callback :sampler :reset-context
+                   :speculative-fns))
            (caller-sampler (loop for (k v) on all-kwargs by #'cddr
                                  unless (member k skip)
                                  nconc (list k v)))
@@ -556,7 +558,20 @@ PROMPT is neither a string nor a vector."
       ;; Decode the prompt via prefill (skip if empty — caller already prefilled)
       (when (plusp n-prompt)
         (prefill ctx prompt-tokens))
-      ;; Warn if caller supplied a chain but also passed sampler-building kwargs
+      ;; Speculative decoding setup
+      (let* ((begin-fn  (getf speculative-fns :begin-fn))
+             (draft-fn  (getf speculative-fns :draft-fn))
+             (accept-fn (getf speculative-fns :accept-fn))
+             (all-tokens (when draft-fn
+                           (let ((v (make-array n-prompt :element-type 'fixnum
+                                                         :adjustable t
+                                                         :fill-pointer n-prompt)))
+                             (dotimes (i n-prompt)
+                               (setf (aref v i) (aref prompt-tokens i)))
+                             v))))
+        (when (and begin-fn (plusp n-prompt))
+          (funcall begin-fn 0 prompt-tokens))
+        ;; Warn if caller supplied a chain but also passed sampler-building kwargs
       (when (and sampler
                  (or sampler-config
                      grammar top-k top-p min-p typical-p xtc-probability
@@ -596,42 +611,159 @@ PROMPT is neither a string nor a vector."
             (stop-reason nil))
         (declare (type fixnum emitted-len))
         (unwind-protect
-            ;; sampler-sample already calls sampler-accept internally — do NOT
-            ;; call sampler-accept again or the grammar FSM double-advances.
-            (loop for i of-type fixnum from 0 below max-tokens
-                  for new-token of-type fixnum = (%llama:sampler-sample chain-ptr ctx-ptr -1)
-                  until (not (zerop (%llama:token-is-eog vocab new-token)))
-                  do (vector-push-extend new-token generated)
-                     (when token-callback
-                       ;; detokenize is a library concern — errors propagate naturally
-                       (let* ((full (detokenize model generated :remove-special t))
-                              (new-text (subseq full emitted-len)))
-                         (when (plusp (length new-text))
-                           (setf emitted-len (length full))
-                           ;; callback is the user's concern — separate handler boundary
-                           (restart-case
-                               (handler-bind
-                                   ((error (lambda (c)
-                                             (declare (ignore c))
-                                             (invoke-restart 'abort-generation))))
-                                 (unless (funcall token-callback new-text)
-                                   (setf stop-reason :callback)
-                                   (loop-finish)))
-                             (ignore-callback-error ()
-                               :report "Ignore the callback error and continue generation"
-                               nil)
-                             (abort-generation ()
-                               :report "Abort generation due to token-callback error"
-                               (setf stop-reason :error)
-                               (loop-finish))))))
-                     (cffi:with-foreign-object (tok-buf '%llama:token 1)
-                       (setf (cffi:mem-aref tok-buf '%llama:token 0) new-token)
-                       (let* ((batch (%llama:batch-get-one tok-buf 1))
-                              (rc (%llama:decode ctx-ptr batch)))
-                         (declare (type fixnum rc))
-                         (unless (zerop rc)
-                           (error 'decode-error :code rc)))
-                       (setf (llama-context-compute-pending-p ctx) t)))
+            (let ((n-past (the fixnum
+                             (if (plusp n-prompt)
+                                 n-prompt
+                                 (1+ (nth-value 1 (kv-cache-pos ctx 0)))))))
+              (declare (type fixnum n-past))
+              ;; sampler-sample calls sampler-accept internally — do NOT call
+              ;; sampler-accept again or the grammar FSM double-advances.
+              (macrolet ((sample () '(%llama:sampler-sample chain-ptr ctx-ptr -1)))
+                (loop with sampled of-type fixnum = (sample)
+                      while (< (length generated) max-tokens)
+                      do
+                   ;; 1. EOG check
+                   (unless (zerop (%llama:token-is-eog vocab sampled))
+                     (setf stop-reason :eog)
+                     (return))
+                   ;; 2. Record token (all-tokens updated after speculative branch
+                   ;;    so draft-fn sees history WITHOUT the current sampled)
+                   (vector-push-extend sampled generated)
+                   (when token-callback
+                     (let* ((full (detokenize model generated :remove-special t))
+                            (new-text (subseq full emitted-len)))
+                       (when (plusp (length new-text))
+                         (setf emitted-len (length full))
+                         (restart-case
+                             (handler-bind
+                                 ((error (lambda (c)
+                                           (declare (ignore c))
+                                           (invoke-restart 'abort-generation))))
+                               (unless (funcall token-callback new-text)
+                                 (setf stop-reason :callback)
+                                 (return)))
+                           (ignore-callback-error ()
+                             :report "Ignore the callback error and continue generation"
+                             nil)
+                           (abort-generation ()
+                             :report "Abort generation due to token-callback error"
+                             (setf stop-reason :error)
+                             (return))))))
+                   (when (or stop-reason (>= (length generated) max-tokens))
+                     (return))
+                   ;; 3. Speculative branch
+                   (if draft-fn
+                       (let* ((drafts (funcall draft-fn
+                                               :seq-id 0 :n-past n-past
+                                               :id-last sampled
+                                               :prompt-tokens all-tokens))
+                              (k (length drafts)))
+                         (if (plusp k)
+                             ;; Batch decode: sampled + K drafts
+                             (progn
+                               (with-batch (batch (1+ k))
+                                 (batch-add-token batch sampled n-past 0 :logits t)
+                                 (dotimes (i k)
+                                   (batch-add-token batch (aref drafts i)
+                                                    (+ n-past 1 i) 0 :logits t))
+                                 (batch-decode ctx batch))
+                               (let ((n-accepted 0)
+                                     (mismatch-token nil))
+                                 (declare (type fixnum n-accepted))
+                                 ;; Verify each draft
+                                 (block verify
+                                   (dotimes (i k)
+                                     (let ((target (%llama:sampler-sample
+                                                    chain-ptr ctx-ptr i)))
+                                       (if (= target (aref drafts i))
+                                           (progn
+                                             (incf n-accepted)
+                                             ;; Check EOG on accepted draft
+                                             (unless (zerop (%llama:token-is-eog
+                                                             vocab (aref drafts i)))
+                                               (setf stop-reason :eog)
+                                               (return-from verify))
+                                             ;; Record accepted draft
+                                             (vector-push-extend (aref drafts i)
+                                                                 generated)
+                                             (when all-tokens
+                                               (vector-push-extend (aref drafts i)
+                                                                   all-tokens))
+                                             (when token-callback
+                                               (let* ((full (detokenize model generated
+                                                                        :remove-special t))
+                                                      (new-text (subseq full emitted-len)))
+                                                 (when (plusp (length new-text))
+                                                   (setf emitted-len (length full))
+                                                   (restart-case
+                                                       (handler-bind
+                                                           ((error (lambda (c)
+                                                                     (declare (ignore c))
+                                                                     (invoke-restart
+                                                                      'abort-generation))))
+                                                         (unless (funcall token-callback
+                                                                          new-text)
+                                                           (setf stop-reason :callback)
+                                                           (return-from verify)))
+                                                     (ignore-callback-error ()
+                                                       :report "Ignore callback error"
+                                                       nil)
+                                                     (abort-generation ()
+                                                       :report "Abort generation"
+                                                       (setf stop-reason :error)
+                                                       (return-from verify))))))
+                                             (when (or stop-reason
+                                                       (>= (length generated)
+                                                           max-tokens))
+                                               (return-from verify)))
+                                           ;; Mismatch — save target's token, stop verification
+                                           (progn
+                                             (setf mismatch-token target)
+                                             (return-from verify))))))
+                                 ;; Record sampled in all-tokens now that drafting is done
+                                 (when all-tokens
+                                   (vector-push-extend sampled all-tokens))
+                                 ;; Accept/evict
+                                 (when accept-fn
+                                   (funcall accept-fn 0 n-accepted))
+                                 (incf n-past (1+ n-accepted))
+                                 (when (< n-accepted k)
+                                   (kv-cache-seq-rm ctx 0 n-past -1))
+                                 ;; Next sample
+                                 (unless (or stop-reason
+                                             (>= (length generated) max-tokens))
+                                   (setf sampled
+                                         (if mismatch-token
+                                             mismatch-token
+                                             ;; All accepted: sample from position after last
+                                             (%llama:sampler-sample chain-ptr ctx-ptr k))))))
+                             ;; No drafts available — single token decode
+                             (progn
+                               (when all-tokens
+                                 (vector-push-extend sampled all-tokens))
+                               (cffi:with-foreign-object (tok-buf '%llama:token 1)
+                                 (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
+                                 (let* ((batch (%llama:batch-get-one tok-buf 1))
+                                        (rc (%llama:decode ctx-ptr batch)))
+                                   (declare (type fixnum rc))
+                                   (unless (zerop rc)
+                                     (error 'decode-error :code rc)))
+                                 (setf (llama-context-compute-pending-p ctx) t))
+                               (incf n-past)
+                               (setf sampled (sample)))))
+                       ;; No speculative fns — original single-token path
+                       (progn
+                         (cffi:with-foreign-object (tok-buf '%llama:token 1)
+                           (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
+                           (let* ((batch (%llama:batch-get-one tok-buf 1))
+                                  (rc (%llama:decode ctx-ptr batch)))
+                             (declare (type fixnum rc))
+                             (unless (zerop rc)
+                               (error 'decode-error :code rc)))
+                           (setf (llama-context-compute-pending-p ctx) t))
+                         (incf n-past)
+                         (setf sampled (sample))))
+                   (when stop-reason (return)))))
           (unless sampler
             (%llama:sampler-free chain-ptr)))
       ;; Convert generated tokens to string.  Always materialise result-tokens so
@@ -651,7 +783,7 @@ PROMPT is neither a string nor a vector."
         (values text
                 (or stop-reason
                     (if (= n-gen max-tokens) :length :eog))
-                result-tokens))))))
+                result-tokens)))))))
 
 (defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.
