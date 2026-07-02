@@ -99,8 +99,9 @@ that SBCL traps by default. All =%llama= calls that enter C code must run inside
   )
 #+end_src
 
-The *high-level API handles this automatically* — you only need it when calling =%llama=
-directly outside of a =with-model= / =with-context= scope.
+The *high-level API handles this automatically* via =llama-defun= (a custom definer that
+wraps the function body in =with-llama-compatible-fp-environment=). You only need the
+explicit =with-= macro when calling =%llama= directly outside of a high-level wrapper.
 
 On non-SBCL implementations, =with-llama-compatible-fp-environment= expands to the
 configured FP-trap masking wrapper. See =src/library.lisp= for details.
