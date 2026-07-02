@@ -10,7 +10,7 @@ If NAME is given, look up a specific named template."
     (unless (cffi:null-pointer-p res-ptr)
       (cffi:foreign-string-to-lisp res-ptr))))
 
-(defun list-chat-templates ()
+(llama-defun list-chat-templates ()
   "Return a list of built-in chat template name strings."
   (let ((n (%llama:chat-builtin-templates (cffi:null-pointer) 0)))
     (when (> n 0)
@@ -77,7 +77,7 @@ Signals INPUT-VALIDATION-ERROR if MESSAGES is empty or malformed."
         (dolist (ptr foreign-strings)
           (cffi:foreign-string-free ptr))))))
 
-(defun tokenize-chat (model messages &key template (add-assistant-prefix t))
+(llama-defun tokenize-chat (model messages &key template (add-assistant-prefix t))
   "Tokenize a chat conversation safely. Template markers are parsed as special
 tokens; message content is not. This prevents content that resembles special
 tokens (e.g. a model hallucinating <end_of_turn>) from corrupting the prompt

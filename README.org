@@ -32,6 +32,7 @@ installation tip below.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 - [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
+- [[https://codeberg.org/shinmera/form-fiddle][form-fiddle]]
 
 Tested on Linux. macOS should work (=.dylib= is handled). Windows is untested.
 

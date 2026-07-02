@@ -30,6 +30,8 @@
        ,@body)))
 
 (defmacro llama-defun (name lambda-list &body body)
+  "Define a function whose body runs inside WITH-LLAMA-COMPATIBLE-FP-ENVIRONMENT.
+Docstrings and declarations are placed outside the FP wrapper."
   (form-fiddle:with-destructured-lambda-form (:docstring docstring
                                               :declarations declarations
                                               :forms forms)
