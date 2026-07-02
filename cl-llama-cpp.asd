@@ -3,7 +3,7 @@
   :author "Jonathan Hustad"
   :license "MIT"
   :description "CFFI bindings to llama.cpp"
-  :depends-on ("cffi" "cffi-libffi" "trivial-garbage")
+  :depends-on ("cffi" "cffi-libffi" "trivial-garbage" "form-fiddle")
   :serial t
   :components ((:module "src"
                 :serial t

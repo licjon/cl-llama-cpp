@@ -28,3 +28,16 @@
   `(call-with-llama-compatible-fp-environment
      (lambda ()
        ,@body)))
+
+(defmacro llama-defun (name lambda-list &body body)
+  (form-fiddle:with-destructured-lambda-form (:docstring docstring
+                                              :declarations declarations
+                                              :forms forms)
+      `(defun ,name ,lambda-list ,@body)
+    `(defun ,name ,lambda-list
+       ,@(when docstring (list docstring))
+       ,@declarations
+       (with-llama-compatible-fp-environment
+         ,@forms))))
+
+(setf (get 'llama-defun 'lisp-indent-function) 2)
