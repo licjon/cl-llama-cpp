@@ -22,7 +22,8 @@ installation tip below.
 ** Requirements
 
 - *SBCL* (recommended, *required for thread safety*) — llama.cpp triggers floating-point
-  exceptions that SBCL masks automatically via =with-llama-compatible-fp-environment=.
+  exceptions that SBCL masks automatically via =llama-defun= (library code) and
+  =with-llama-compatible-fp-environment= (downstream =%llama= calls).
   Thread-safety guarantees (backend lifecycle mutex, atomic handle deallocation via CAS,
   abort/log callback locking) are implemented with SBCL primitives (=sb-thread:make-mutex=,
   =sb-ext:cas=). On non-SBCL implementations these compile to no-ops: single-threaded
@@ -31,6 +32,7 @@ installation tip below.
 - [[https://github.com/ggml-org/llama.cpp][llama.cpp]] built as a shared library (=libllama.so= / =libllama.dylib=)
 - [[https://cffi.common-lisp.dev/][CFFI]] and [[https://github.com/cffi/cffi][cffi-libffi]]
 - [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
+- [[https://codeberg.org/shinmera/form-fiddle][form-fiddle]]
 
 Tested on Linux. macOS should work (=.dylib= is handled). Windows is untested.
 
@@ -168,7 +170,7 @@ Extract raw pointers from high-level handles with =llama-model-pointer=,
 =llama-context-pointer=, etc.
 
 Direct =%llama= calls must run inside =with-llama-compatible-fp-environment= to mask
-SBCL's FP traps. The high-level API handles this automatically.
+SBCL's FP traps. The high-level API handles this automatically via =llama-defun=.
 
 See [[docs/low-level.org]] for naming conventions, struct and enum usage, and worked
 examples (including model quantization).

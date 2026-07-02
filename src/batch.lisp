@@ -180,27 +180,25 @@ Signals INPUT-VALIDATION-ERROR if TOKENS is empty or START-POS is negative."
                                  ((nil) nil)))))
   nil)
 
-(defun batch-decode (ctx batch)
+(llama-defun batch-decode (ctx batch)
   "Decode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
-  (with-llama-compatible-fp-environment
-    (let ((rc (%llama:decode (llama-context-pointer ctx) (%batch-data batch))))
-      (unless (zerop rc)
-        (error 'decode-error :code rc))
-      (setf (llama-context-compute-pending-p ctx) t)
-      nil)))
+  (let ((rc (%llama:decode (llama-context-pointer ctx) (%batch-data batch))))
+    (unless (zerop rc)
+      (error 'decode-error :code rc))
+    (setf (llama-context-compute-pending-p ctx) t)
+    nil))
 
-(defun batch-encode (ctx batch)
+(llama-defun batch-encode (ctx batch)
   "Encode BATCH using context CTX.
 Signals DECODE-ERROR on failure. Returns NIL on success."
-  (with-llama-compatible-fp-environment
-    (let ((rc (%llama:encode (llama-context-pointer ctx) (%batch-data batch))))
-      (unless (zerop rc)
-        (error 'decode-error :code rc))
-      (setf (llama-context-compute-pending-p ctx) t)
-      nil)))
+  (let ((rc (%llama:encode (llama-context-pointer ctx) (%batch-data batch))))
+    (unless (zerop rc)
+      (error 'decode-error :code rc))
+    (setf (llama-context-compute-pending-p ctx) t)
+    nil))
 
-(defun generate-parallel (ctx prompts &key (max-tokens 256) (temp 0.8)
+(llama-defun generate-parallel (ctx prompts &key (max-tokens 256) (temp 0.8)
                                            top-k top-p min-p (seed 42)
                                            (parse-special t)
                                            typical-p
@@ -231,110 +229,109 @@ SEED may be an integer (each sequence gets SEED+index), :RANDOM or NIL
   (declare (optimize (speed 3)))
   (when (endp prompts)
     (return-from generate-parallel (values nil nil)))
-  (with-llama-compatible-fp-environment
-    (let* ((ctx-ptr (llama-context-pointer ctx))
-           (raw-model (%llama:get-model ctx-ptr))
-           (model (%make-llama-model :pointer raw-model))
-           (vocab (%llama:model-get-vocab raw-model))
-           (n-seq (length prompts))
-           (token-vecs (mapcar (lambda (p)
-                                 (etypecase p
-                                   (string (tokenize model p
-                                                     :parse-special parse-special))
-                                   (vector p)))
-                               prompts))
-           (total-prompt-tokens (reduce #'+ token-vecs :key #'length :initial-value 0))
-           (gen-tokens (loop repeat n-seq
-                             collect (make-array 0 :element-type 'fixnum
-                                                   :adjustable t
-                                                   :fill-pointer 0)))
-           (positions (mapcar #'length token-vecs))
-           (active (make-list n-seq :initial-element t))
-           (samplers '()))
-      (declare (type fixnum n-seq total-prompt-tokens))
-      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
-      (unwind-protect
-           (progn
-             (let ((resolved-seed (resolve-seed seed)))
-               (dotimes (seq n-seq)
-                 (push (build-sampler-chain
-                        :temp temp :top-k top-k :top-p top-p
-                        :min-p min-p
-                        :seed (if (= resolved-seed %llama:+default-seed+)
-                                  resolved-seed
-                                  (+ resolved-seed seq))
-                        :model model
-                      :typical-p typical-p
-                      :xtc-probability xtc-probability
-                      :xtc-threshold xtc-threshold
-                      :top-n-sigma top-n-sigma
-                      :mirostat mirostat :mirostat-v2 mirostat-v2
-                      :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
-                      :repeat-penalty repeat-penalty
-                      :frequency-penalty frequency-penalty
-                      :presence-penalty presence-penalty
-                      :penalty-last-n penalty-last-n
-                      :dry-multiplier dry-multiplier :dry-base dry-base
-                      :dry-allowed-length dry-allowed-length
-                      :dry-penalty-last-n dry-penalty-last-n
-                      :dry-seq-breakers dry-seq-breakers
-                      :logit-bias logit-bias
-                      :dynamic-temp-range dynamic-temp-range
-                      :dynamic-temp-exponent dynamic-temp-exponent
-                      :adaptive-p adaptive-p
-                        :adaptive-p-decay adaptive-p-decay)
-                       samplers)))
-             (setf samplers (nreverse samplers))
-             (with-batch (batch total-prompt-tokens)
-               (loop for tokens in token-vecs
-                     for seq from 0
-                     do (batch-add-sequence batch tokens seq :logits :last))
-               (batch-decode ctx batch)
-               (let ((logit-indices
-                       (let ((acc 0))
-                         (declare (type fixnum acc))
-                         (mapcar (lambda (tv)
-                                   (prog1 (the fixnum (+ acc (1- (length tv))))
-                                     (incf acc (length tv))))
-                                 token-vecs))))
-                 (dotimes (step max-tokens)
-                   (declare (type fixnum step))
-                   (unless (some #'identity active) (return))
-                   (let ((new-tokens
-                           (loop for seq of-type fixnum from 0 below n-seq
-                                 for smpl in samplers
-                                 for idx of-type fixnum in logit-indices
-                                 collect (when (nth seq active)
-                                           (%llama:sampler-sample
-                                            smpl ctx-ptr idx)))))
-                     (loop for tok in new-tokens
-                           for seq of-type fixnum from 0
-                           when (and tok (nth seq active))
-                           do (if (not (zerop (%llama:token-is-eog
-                                              vocab tok)))
-                                  (setf (nth seq active) nil)
-                                  (vector-push-extend
-                                   tok (nth seq gen-tokens))))
-                     (when (some #'identity active)
-                       (batch-clear batch)
-                       (let ((batch-idx 0))
-                         (declare (type fixnum batch-idx))
-                         (loop for tok in new-tokens
-                               for seq of-type fixnum from 0
-                               when (and tok (nth seq active))
-                               do (batch-add-token batch tok
-                                                   (nth seq positions)
-                                                   seq :logits t)
-                                  (setf (nth seq logit-indices) batch-idx)
-                                  (incf (nth seq positions))
-                                  (incf batch-idx)))
-                       (batch-decode ctx batch)))))))
-        (dolist (s samplers)
-          (%llama:sampler-free s)))
-      (values (loop for tokens in gen-tokens
-                    collect (if (zerop (length tokens))
-                                ""
-                                (detokenize model tokens
-                                            :remove-special t)))
-              (loop for is-active in active
-                    collect (if is-active :length :eog))))))
+  (let* ((ctx-ptr (llama-context-pointer ctx))
+         (raw-model (%llama:get-model ctx-ptr))
+         (model (%make-llama-model :pointer raw-model))
+         (vocab (%llama:model-get-vocab raw-model))
+         (n-seq (length prompts))
+         (token-vecs (mapcar (lambda (p)
+                               (etypecase p
+                                 (string (tokenize model p
+                                                   :parse-special parse-special))
+                                 (vector p)))
+                             prompts))
+         (total-prompt-tokens (reduce #'+ token-vecs :key #'length :initial-value 0))
+         (gen-tokens (loop repeat n-seq
+                           collect (make-array 0 :element-type 'fixnum
+                                                 :adjustable t
+                                                 :fill-pointer 0)))
+         (positions (mapcar #'length token-vecs))
+         (active (make-list n-seq :initial-element t))
+         (samplers '()))
+    (declare (type fixnum n-seq total-prompt-tokens))
+    (%llama:memory-clear (%llama:get-memory ctx-ptr) 1)
+    (unwind-protect
+         (progn
+           (let ((resolved-seed (resolve-seed seed)))
+             (dotimes (seq n-seq)
+               (push (build-sampler-chain
+                      :temp temp :top-k top-k :top-p top-p
+                      :min-p min-p
+                      :seed (if (= resolved-seed %llama:+default-seed+)
+                                resolved-seed
+                                (+ resolved-seed seq))
+                      :model model
+                    :typical-p typical-p
+                    :xtc-probability xtc-probability
+                    :xtc-threshold xtc-threshold
+                    :top-n-sigma top-n-sigma
+                    :mirostat mirostat :mirostat-v2 mirostat-v2
+                    :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
+                    :repeat-penalty repeat-penalty
+                    :frequency-penalty frequency-penalty
+                    :presence-penalty presence-penalty
+                    :penalty-last-n penalty-last-n
+                    :dry-multiplier dry-multiplier :dry-base dry-base
+                    :dry-allowed-length dry-allowed-length
+                    :dry-penalty-last-n dry-penalty-last-n
+                    :dry-seq-breakers dry-seq-breakers
+                    :logit-bias logit-bias
+                    :dynamic-temp-range dynamic-temp-range
+                    :dynamic-temp-exponent dynamic-temp-exponent
+                    :adaptive-p adaptive-p
+                      :adaptive-p-decay adaptive-p-decay)
+                     samplers)))
+           (setf samplers (nreverse samplers))
+           (with-batch (batch total-prompt-tokens)
+             (loop for tokens in token-vecs
+                   for seq from 0
+                   do (batch-add-sequence batch tokens seq :logits :last))
+             (batch-decode ctx batch)
+             (let ((logit-indices
+                     (let ((acc 0))
+                       (declare (type fixnum acc))
+                       (mapcar (lambda (tv)
+                                 (prog1 (the fixnum (+ acc (1- (length tv))))
+                                   (incf acc (length tv))))
+                               token-vecs))))
+               (dotimes (step max-tokens)
+                 (declare (type fixnum step))
+                 (unless (some #'identity active) (return))
+                 (let ((new-tokens
+                         (loop for seq of-type fixnum from 0 below n-seq
+                               for smpl in samplers
+                               for idx of-type fixnum in logit-indices
+                               collect (when (nth seq active)
+                                         (%llama:sampler-sample
+                                          smpl ctx-ptr idx)))))
+                   (loop for tok in new-tokens
+                         for seq of-type fixnum from 0
+                         when (and tok (nth seq active))
+                         do (if (not (zerop (%llama:token-is-eog
+                                            vocab tok)))
+                                (setf (nth seq active) nil)
+                                (vector-push-extend
+                                 tok (nth seq gen-tokens))))
+                   (when (some #'identity active)
+                     (batch-clear batch)
+                     (let ((batch-idx 0))
+                       (declare (type fixnum batch-idx))
+                       (loop for tok in new-tokens
+                             for seq of-type fixnum from 0
+                             when (and tok (nth seq active))
+                             do (batch-add-token batch tok
+                                                 (nth seq positions)
+                                                 seq :logits t)
+                                (setf (nth seq logit-indices) batch-idx)
+                                (incf (nth seq positions))
+                                (incf batch-idx)))
+                     (batch-decode ctx batch)))))))
+      (dolist (s samplers)
+        (%llama:sampler-free s)))
+    (values (loop for tokens in gen-tokens
+                  collect (if (zerop (length tokens))
+                              ""
+                              (detokenize model tokens
+                                          :remove-special t)))
+            (loop for is-active in active
+                  collect (if is-active :length :eog)))))

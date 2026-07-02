@@ -25,6 +25,7 @@ New wrappers must follow this convention.")
    ;; Utility
    #:call-with-llama-compatible-fp-environment
    #:with-llama-compatible-fp-environment
+   #:llama-defun
    #:*binding-deps*
    #:check-binding-deps
    ;; Conditions

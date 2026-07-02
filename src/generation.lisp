@@ -308,104 +308,90 @@ BUILD-SAMPLER-CHAIN (same keywords as GENERATE, plus :SAMPLER-CONFIG)."
                     ,@body)
                (%llama:sampler-free ,chain-sym)))))))
 
-(defun sampler-chain-add (chain sampler)
+(llama-defun sampler-chain-add (chain sampler)
   "Add SAMPLER to CHAIN.  Both arguments may be typed LLAMA-SAMPLER handles or
 raw CFFI pointers (e.g. the return value of %LLAMA:SAMPLER-INIT-TEMP).  The
 chain takes ownership of the sampler — freeing the chain frees all added
 samplers."
   (let ((chain-ptr (if (llama-sampler-p chain) (llama-sampler-pointer chain) chain))
         (smpl-ptr  (if (llama-sampler-p sampler) (llama-sampler-pointer sampler) sampler)))
-    (with-llama-compatible-fp-environment
-      (%llama:sampler-chain-add chain-ptr smpl-ptr))))
+    (%llama:sampler-chain-add chain-ptr smpl-ptr)))
 
 ;;; Sampler utilities
 
-(defun sampler-seed (sampler)
+(llama-defun sampler-seed (sampler)
   "Return the current RNG seed from SAMPLER as an integer."
-  (with-llama-compatible-fp-environment
-    (%llama:sampler-get-seed (llama-sampler-pointer sampler))))
+  (%llama:sampler-get-seed (llama-sampler-pointer sampler)))
 
 ;;; Individual sampler constructors
 ;;; Each returns a LLAMA-SAMPLER handle. The caller owns it and must either
 ;;; free it with FREE-SAMPLER or add it to a chain (which then owns it).
 
-(defun make-greedy-sampler ()
+(llama-defun make-greedy-sampler ()
   "Create a greedy sampler that always picks the highest-probability token."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-greedy))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-greedy)))
 
-(defun make-dist-sampler (&optional (seed 42))
+(llama-defun make-dist-sampler (&optional (seed 42))
   "Create a distribution sampler (random sampling weighted by probabilities).
 SEED is a uint32 random seed, :RANDOM, or NIL (nondeterministic)."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-dist (resolve-seed seed)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-dist (resolve-seed seed))))
 
-(defun make-top-k-sampler (k)
+(llama-defun make-top-k-sampler (k)
   "Create a top-k sampler restricting candidates to the K highest-probability tokens."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-top-k k))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-top-k k)))
 
-(defun make-top-p-sampler (p &optional (min-keep 1))
+(llama-defun make-top-p-sampler (p &optional (min-keep 1))
   "Create a top-p (nucleus) sampler keeping tokens until cumulative probability >= P."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-top-p (coerce p 'single-float) min-keep))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-top-p (coerce p 'single-float) min-keep)))
 
-(defun make-min-p-sampler (p &optional (min-keep 1))
+(llama-defun make-min-p-sampler (p &optional (min-keep 1))
   "Create a min-p sampler removing tokens with probability < P * max-prob."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-min-p (coerce p 'single-float) min-keep))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-min-p (coerce p 'single-float) min-keep)))
 
-(defun make-typical-sampler (p &optional (min-keep 1))
+(llama-defun make-typical-sampler (p &optional (min-keep 1))
   "Create a locally typical sampler with probability mass P."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-typical (coerce p 'single-float) min-keep))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-typical (coerce p 'single-float) min-keep)))
 
-(defun make-temp-sampler (temp)
+(llama-defun make-temp-sampler (temp)
   "Create a temperature sampler scaling logits by TEMP before softmax."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-temp (coerce temp 'single-float)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-temp (coerce temp 'single-float))))
 
-(defun make-temp-ext-sampler (temp delta &optional (exponent 1.0))
+(llama-defun make-temp-ext-sampler (temp delta &optional (exponent 1.0))
   "Create an extended temperature sampler with dynamic temperature range.
 TEMP is the base temperature, DELTA the range, EXPONENT the curve shape."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-temp-ext
-                                   (coerce temp 'single-float)
-                                   (coerce delta 'single-float)
-                                   (coerce exponent 'single-float)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-temp-ext
+                                 (coerce temp 'single-float)
+                                 (coerce delta 'single-float)
+                                 (coerce exponent 'single-float))))
 
-(defun make-xtc-sampler (probability threshold &optional (min-keep 1) (seed 42))
+(llama-defun make-xtc-sampler (probability threshold &optional (min-keep 1) (seed 42))
   "Create an XTC sampler that trims high-probability tokens exceeding THRESHOLD.
 PROBABILITY is the chance of applying XTC per sampling step.
 SEED may be an integer, :RANDOM, or NIL (nondeterministic)."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-xtc
-                                   (coerce probability 'single-float)
-                                   (coerce threshold 'single-float)
-                                   min-keep (resolve-seed seed)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-xtc
+                                 (coerce probability 'single-float)
+                                 (coerce threshold 'single-float)
+                                 min-keep (resolve-seed seed))))
 
-(defun make-top-n-sigma-sampler (sigma)
+(llama-defun make-top-n-sigma-sampler (sigma)
   "Create a top-n-sigma sampler keeping tokens within SIGMA standard deviations of the max logit."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-top-n-sigma (coerce sigma 'single-float)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-top-n-sigma (coerce sigma 'single-float))))
 
-(defun make-mirostat-v2-sampler (seed tau eta)
+(llama-defun make-mirostat-v2-sampler (seed tau eta)
   "Create a Mirostat v2 sampler targeting perplexity TAU with learning rate ETA.
 SEED may be an integer, :RANDOM, or NIL (nondeterministic)."
-  (with-llama-compatible-fp-environment
-    (%make-llama-sampler :pointer (%llama:sampler-init-mirostat-v2
-                                   (resolve-seed seed)
-                                   (coerce tau 'single-float)
-                                   (coerce eta 'single-float)))))
+  (%make-llama-sampler :pointer (%llama:sampler-init-mirostat-v2
+                                 (resolve-seed seed)
+                                 (coerce tau 'single-float)
+                                 (coerce eta 'single-float))))
 
-(defun free-sampler (sampler)
+(llama-defun free-sampler (sampler)
   "Free a LLAMA-SAMPLER handle created by any MAKE-*-SAMPLER function.
 Do not call on samplers that have been added to a chain — the chain owns those."
-  (with-llama-compatible-fp-environment
-    (%llama:sampler-free (llama-sampler-pointer sampler)))
+  (%llama:sampler-free (llama-sampler-pointer sampler))
   nil)
 
-(defun prefill (ctx tokens &key (seq-id 0))
+(llama-defun prefill (ctx tokens &key (seq-id 0))
   "Decode TOKENS into sequence SEQ-ID of CTX's KV cache without sampling.
 Returns the number of tokens decoded as a fixnum.
 Does NOT clear the KV cache first — caller controls that (consistent with
@@ -424,30 +410,29 @@ Signals INPUT-VALIDATION-ERROR if TOKENS is not a non-empty vector."
   (let ((n (length tokens))
         (ctx-ptr (llama-context-pointer ctx)))
     (declare (type fixnum n))
-    (with-llama-compatible-fp-environment
-      (if (zerop seq-id)
-          ;; Fast path for seq-id 0: batch-get-one uses null positions (auto-advances
-          ;; from current KV cache end) and null seq_id (defaults to 0).
-          (cffi:with-foreign-object (tok-buf '%llama:token n)
-            (dotimes (i n)
-              (declare (type fixnum i))
-              (setf (cffi:mem-aref tok-buf '%llama:token i)
-                    (aref tokens i)))
-            (let* ((batch (%llama:batch-get-one tok-buf n))
-                   (rc (%llama:decode ctx-ptr batch)))
-              (unless (zerop rc)
-                (error 'decode-error :code rc))))
-          ;; Full batch path for non-zero seq-id: supply explicit start position.
-          (let ((start-pos (multiple-value-bind (mn mx)
-                               (kv-cache-pos ctx seq-id)
-                             (if (>= mn mx) 0 (1+ mx)))))
-            (with-batch (batch n)
-              (batch-add-sequence batch tokens seq-id :start-pos start-pos :logits :last)
-              (batch-decode ctx batch))))
-      (setf (llama-context-compute-pending-p ctx) t))
+    (if (zerop seq-id)
+        ;; Fast path for seq-id 0: batch-get-one uses null positions (auto-advances
+        ;; from current KV cache end) and null seq_id (defaults to 0).
+        (cffi:with-foreign-object (tok-buf '%llama:token n)
+          (dotimes (i n)
+            (declare (type fixnum i))
+            (setf (cffi:mem-aref tok-buf '%llama:token i)
+                  (aref tokens i)))
+          (let* ((batch (%llama:batch-get-one tok-buf n))
+                 (rc (%llama:decode ctx-ptr batch)))
+            (unless (zerop rc)
+              (error 'decode-error :code rc))))
+        ;; Full batch path for non-zero seq-id: supply explicit start position.
+        (let ((start-pos (multiple-value-bind (mn mx)
+                             (kv-cache-pos ctx seq-id)
+                           (if (>= mn mx) 0 (1+ mx)))))
+          (with-batch (batch n)
+            (batch-add-sequence batch tokens seq-id :start-pos start-pos :logits :last)
+            (batch-decode ctx batch))))
+    (setf (llama-context-compute-pending-p ctx) t)
     n))
 
-(defun generate (ctx prompt &rest all-kwargs
+(llama-defun generate (ctx prompt &rest all-kwargs
                              &key sampler-config
                                   (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
@@ -541,251 +526,250 @@ PROMPT is neither a string nor a vector."
   (check-type max-tokens (integer 1 *))
   (unless prompt-tokens
     (check-type prompt (or string vector)))
-  (with-llama-compatible-fp-environment
-    (let* ((ctx-ptr (llama-context-pointer ctx))
-           (raw-model (%llama:get-model ctx-ptr))
-           (model (%make-llama-model :pointer raw-model))
-           (vocab (%llama:model-get-vocab raw-model))
-           (prompt-tokens (or prompt-tokens
-                              (tokenize model prompt :parse-special parse-special)))
-           (n-prompt (length prompt-tokens))
-           (generated (make-array 0 :element-type 'fixnum
-                                    :adjustable t :fill-pointer 0)))
-      (declare (type fixnum n-prompt)
-               (type (vector fixnum) generated))
-      (when reset-context
-        (%llama:memory-clear (%llama:get-memory ctx-ptr) 1))
-      ;; Decode the prompt via prefill (skip if empty — caller already prefilled)
-      (when (plusp n-prompt)
-        (prefill ctx prompt-tokens))
-      ;; Speculative decoding setup
-      (let* ((begin-fn  (getf speculative-fns :begin-fn))
-             (draft-fn  (getf speculative-fns :draft-fn))
-             (accept-fn (getf speculative-fns :accept-fn))
-             (all-tokens (when draft-fn
-                           (let ((v (make-array n-prompt :element-type 'fixnum
-                                                         :adjustable t
-                                                         :fill-pointer n-prompt)))
-                             (dotimes (i n-prompt)
-                               (setf (aref v i) (aref prompt-tokens i)))
-                             v))))
-        (when (and begin-fn (plusp n-prompt))
-          (funcall begin-fn 0 prompt-tokens))
-        ;; Warn if caller supplied a chain but also passed sampler-building kwargs
-      (when (and sampler
-                 (or sampler-config
-                     grammar top-k top-p min-p typical-p xtc-probability
-                     dry-multiplier logit-bias mirostat mirostat-v2
-                     repeat-penalty frequency-penalty presence-penalty
-                     adaptive-p dynamic-temp-range top-n-sigma))
-        (warn "~@<When :SAMPLER is provided, other sampler keywords ~
+  (let* ((ctx-ptr (llama-context-pointer ctx))
+         (raw-model (%llama:get-model ctx-ptr))
+         (model (%make-llama-model :pointer raw-model))
+         (vocab (%llama:model-get-vocab raw-model))
+         (prompt-tokens (or prompt-tokens
+                            (tokenize model prompt :parse-special parse-special)))
+         (n-prompt (length prompt-tokens))
+         (generated (make-array 0 :element-type 'fixnum
+                                  :adjustable t :fill-pointer 0)))
+    (declare (type fixnum n-prompt)
+             (type (vector fixnum) generated))
+    (when reset-context
+      (%llama:memory-clear (%llama:get-memory ctx-ptr) 1))
+    ;; Decode the prompt via prefill (skip if empty — caller already prefilled)
+    (when (plusp n-prompt)
+      (prefill ctx prompt-tokens))
+    ;; Speculative decoding setup
+    (let* ((begin-fn  (getf speculative-fns :begin-fn))
+           (draft-fn  (getf speculative-fns :draft-fn))
+           (accept-fn (getf speculative-fns :accept-fn))
+           (all-tokens (when draft-fn
+                         (let ((v (make-array n-prompt :element-type 'fixnum
+                                                       :adjustable t
+                                                       :fill-pointer n-prompt)))
+                           (dotimes (i n-prompt)
+                             (setf (aref v i) (aref prompt-tokens i)))
+                           v))))
+      (when (and begin-fn (plusp n-prompt))
+        (funcall begin-fn 0 prompt-tokens))
+      ;; Warn if caller supplied a chain but also passed sampler-building kwargs
+    (when (and sampler
+               (or sampler-config
+                   grammar top-k top-p min-p typical-p xtc-probability
+                   dry-multiplier logit-bias mirostat mirostat-v2
+                   repeat-penalty frequency-penalty presence-penalty
+                   adaptive-p dynamic-temp-range top-n-sigma))
+      (warn "~@<When :SAMPLER is provided, other sampler keywords ~
 (:SAMPLER-CONFIG, :GRAMMAR, :TOP-K, :TEMP, etc.) are ignored.~@:>"))
-      ;; Generation loop
-      (let ((chain-ptr (if sampler
-                           (llama-sampler-pointer sampler)
-                           (build-sampler-chain
-                            :temp temp :top-k top-k :top-p top-p
-                            :min-p min-p :seed seed
-                            :model model :grammar grammar
-                            :grammar-root grammar-root
-                            :typical-p typical-p
-                            :xtc-probability xtc-probability
-                            :xtc-threshold xtc-threshold
-                            :top-n-sigma top-n-sigma
-                            :mirostat mirostat :mirostat-v2 mirostat-v2
-                            :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
-                            :repeat-penalty repeat-penalty
-                            :frequency-penalty frequency-penalty
-                            :presence-penalty presence-penalty
-                            :penalty-last-n penalty-last-n
-                            :dry-multiplier dry-multiplier :dry-base dry-base
-                            :dry-allowed-length dry-allowed-length
-                            :dry-penalty-last-n dry-penalty-last-n
-                            :dry-seq-breakers dry-seq-breakers
-                            :logit-bias logit-bias
-                            :dynamic-temp-range dynamic-temp-range
-                            :dynamic-temp-exponent dynamic-temp-exponent
-                            :adaptive-p adaptive-p
-                            :adaptive-p-decay adaptive-p-decay)))
-            (emitted-len 0)
-            (stop-reason nil))
-        (declare (type fixnum emitted-len))
-        (unwind-protect
-            (let ((n-past (the fixnum
-                             (if (plusp n-prompt)
-                                 n-prompt
-                                 (1+ (nth-value 1 (kv-cache-pos ctx 0)))))))
-              (declare (type fixnum n-past))
-              ;; sampler-sample calls sampler-accept internally — do NOT call
-              ;; sampler-accept again or the grammar FSM double-advances.
-              (macrolet ((sample () '(%llama:sampler-sample chain-ptr ctx-ptr -1)))
-                (loop with sampled of-type fixnum = (sample)
-                      while (< (length generated) max-tokens)
-                      do
-                   ;; 1. EOG check
-                   (unless (zerop (%llama:token-is-eog vocab sampled))
-                     (setf stop-reason :eog)
-                     (return))
-                   ;; 2. Record token (all-tokens updated after speculative branch
-                   ;;    so draft-fn sees history WITHOUT the current sampled)
-                   (vector-push-extend sampled generated)
-                   (when token-callback
-                     (let* ((full (detokenize model generated :remove-special t))
-                            (new-text (subseq full emitted-len)))
-                       (when (plusp (length new-text))
-                         (setf emitted-len (length full))
-                         (restart-case
-                             (handler-bind
-                                 ((error (lambda (c)
-                                           (declare (ignore c))
-                                           (invoke-restart 'abort-generation))))
-                               (unless (funcall token-callback new-text)
-                                 (setf stop-reason :callback)
-                                 (return)))
-                           (ignore-callback-error ()
-                             :report "Ignore the callback error and continue generation"
-                             nil)
-                           (abort-generation ()
-                             :report "Abort generation due to token-callback error"
-                             (setf stop-reason :error)
-                             (return))))))
-                   (when (or stop-reason (>= (length generated) max-tokens))
-                     (return))
-                   ;; 3. Speculative branch
-                   (if draft-fn
-                       (let* ((drafts (funcall draft-fn
-                                               :seq-id 0 :n-past n-past
-                                               :id-last sampled
-                                               :prompt-tokens all-tokens))
-                              (k (length drafts)))
-                         (if (plusp k)
-                             ;; Batch decode: sampled + K drafts
-                             (progn
-                               (with-batch (batch (1+ k))
-                                 (batch-add-token batch sampled n-past 0 :logits t)
+    ;; Generation loop
+    (let ((chain-ptr (if sampler
+                         (llama-sampler-pointer sampler)
+                         (build-sampler-chain
+                          :temp temp :top-k top-k :top-p top-p
+                          :min-p min-p :seed seed
+                          :model model :grammar grammar
+                          :grammar-root grammar-root
+                          :typical-p typical-p
+                          :xtc-probability xtc-probability
+                          :xtc-threshold xtc-threshold
+                          :top-n-sigma top-n-sigma
+                          :mirostat mirostat :mirostat-v2 mirostat-v2
+                          :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
+                          :repeat-penalty repeat-penalty
+                          :frequency-penalty frequency-penalty
+                          :presence-penalty presence-penalty
+                          :penalty-last-n penalty-last-n
+                          :dry-multiplier dry-multiplier :dry-base dry-base
+                          :dry-allowed-length dry-allowed-length
+                          :dry-penalty-last-n dry-penalty-last-n
+                          :dry-seq-breakers dry-seq-breakers
+                          :logit-bias logit-bias
+                          :dynamic-temp-range dynamic-temp-range
+                          :dynamic-temp-exponent dynamic-temp-exponent
+                          :adaptive-p adaptive-p
+                          :adaptive-p-decay adaptive-p-decay)))
+          (emitted-len 0)
+          (stop-reason nil))
+      (declare (type fixnum emitted-len))
+      (unwind-protect
+          (let ((n-past (the fixnum
+                           (if (plusp n-prompt)
+                               n-prompt
+                               (1+ (nth-value 1 (kv-cache-pos ctx 0)))))))
+            (declare (type fixnum n-past))
+            ;; sampler-sample calls sampler-accept internally — do NOT call
+            ;; sampler-accept again or the grammar FSM double-advances.
+            (macrolet ((sample () '(%llama:sampler-sample chain-ptr ctx-ptr -1)))
+              (loop with sampled of-type fixnum = (sample)
+                    while (< (length generated) max-tokens)
+                    do
+                 ;; 1. EOG check
+                 (unless (zerop (%llama:token-is-eog vocab sampled))
+                   (setf stop-reason :eog)
+                   (return))
+                 ;; 2. Record token (all-tokens updated after speculative branch
+                 ;;    so draft-fn sees history WITHOUT the current sampled)
+                 (vector-push-extend sampled generated)
+                 (when token-callback
+                   (let* ((full (detokenize model generated :remove-special t))
+                          (new-text (subseq full emitted-len)))
+                     (when (plusp (length new-text))
+                       (setf emitted-len (length full))
+                       (restart-case
+                           (handler-bind
+                               ((error (lambda (c)
+                                         (declare (ignore c))
+                                         (invoke-restart 'abort-generation))))
+                             (unless (funcall token-callback new-text)
+                               (setf stop-reason :callback)
+                               (return)))
+                         (ignore-callback-error ()
+                           :report "Ignore the callback error and continue generation"
+                           nil)
+                         (abort-generation ()
+                           :report "Abort generation due to token-callback error"
+                           (setf stop-reason :error)
+                           (return))))))
+                 (when (or stop-reason (>= (length generated) max-tokens))
+                   (return))
+                 ;; 3. Speculative branch
+                 (if draft-fn
+                     (let* ((drafts (funcall draft-fn
+                                             :seq-id 0 :n-past n-past
+                                             :id-last sampled
+                                             :prompt-tokens all-tokens))
+                            (k (length drafts)))
+                       (if (plusp k)
+                           ;; Batch decode: sampled + K drafts
+                           (progn
+                             (with-batch (batch (1+ k))
+                               (batch-add-token batch sampled n-past 0 :logits t)
+                               (dotimes (i k)
+                                 (batch-add-token batch (aref drafts i)
+                                                  (+ n-past 1 i) 0 :logits t))
+                               (batch-decode ctx batch))
+                             (let ((n-accepted 0)
+                                   (mismatch-token nil))
+                               (declare (type fixnum n-accepted))
+                               ;; Verify each draft
+                               (block verify
                                  (dotimes (i k)
-                                   (batch-add-token batch (aref drafts i)
-                                                    (+ n-past 1 i) 0 :logits t))
-                                 (batch-decode ctx batch))
-                               (let ((n-accepted 0)
-                                     (mismatch-token nil))
-                                 (declare (type fixnum n-accepted))
-                                 ;; Verify each draft
-                                 (block verify
-                                   (dotimes (i k)
-                                     (let ((target (%llama:sampler-sample
-                                                    chain-ptr ctx-ptr i)))
-                                       (if (= target (aref drafts i))
-                                           (progn
-                                             (incf n-accepted)
-                                             ;; Check EOG on accepted draft
-                                             (unless (zerop (%llama:token-is-eog
-                                                             vocab (aref drafts i)))
-                                               (setf stop-reason :eog)
-                                               (return-from verify))
-                                             ;; Record accepted draft
+                                   (let ((target (%llama:sampler-sample
+                                                  chain-ptr ctx-ptr i)))
+                                     (if (= target (aref drafts i))
+                                         (progn
+                                           (incf n-accepted)
+                                           ;; Check EOG on accepted draft
+                                           (unless (zerop (%llama:token-is-eog
+                                                           vocab (aref drafts i)))
+                                             (setf stop-reason :eog)
+                                             (return-from verify))
+                                           ;; Record accepted draft
+                                           (vector-push-extend (aref drafts i)
+                                                               generated)
+                                           (when all-tokens
                                              (vector-push-extend (aref drafts i)
-                                                                 generated)
-                                             (when all-tokens
-                                               (vector-push-extend (aref drafts i)
-                                                                   all-tokens))
-                                             (when token-callback
-                                               (let* ((full (detokenize model generated
-                                                                        :remove-special t))
-                                                      (new-text (subseq full emitted-len)))
-                                                 (when (plusp (length new-text))
-                                                   (setf emitted-len (length full))
-                                                   (restart-case
-                                                       (handler-bind
-                                                           ((error (lambda (c)
-                                                                     (declare (ignore c))
-                                                                     (invoke-restart
-                                                                      'abort-generation))))
-                                                         (unless (funcall token-callback
-                                                                          new-text)
-                                                           (setf stop-reason :callback)
-                                                           (return-from verify)))
-                                                     (ignore-callback-error ()
-                                                       :report "Ignore callback error"
-                                                       nil)
-                                                     (abort-generation ()
-                                                       :report "Abort generation"
-                                                       (setf stop-reason :error)
-                                                       (return-from verify))))))
-                                             (when (or stop-reason
-                                                       (>= (length generated)
-                                                           max-tokens))
-                                               (return-from verify)))
-                                           ;; Mismatch — save target's token, stop verification
-                                           (progn
-                                             (setf mismatch-token target)
-                                             (return-from verify))))))
-                                 ;; Record sampled in all-tokens now that drafting is done
-                                 (when all-tokens
-                                   (vector-push-extend sampled all-tokens))
-                                 ;; Accept/evict
-                                 (when accept-fn
-                                   (funcall accept-fn 0 n-accepted))
-                                 (incf n-past (1+ n-accepted))
-                                 (when (< n-accepted k)
-                                   (kv-cache-seq-rm ctx 0 n-past -1))
-                                 ;; Next sample
-                                 (unless (or stop-reason
-                                             (>= (length generated) max-tokens))
-                                   (setf sampled
-                                         (if mismatch-token
-                                             mismatch-token
-                                             ;; All accepted: sample from position after last
-                                             (%llama:sampler-sample chain-ptr ctx-ptr k))))))
-                             ;; No drafts available — single token decode
-                             (progn
+                                                                 all-tokens))
+                                           (when token-callback
+                                             (let* ((full (detokenize model generated
+                                                                      :remove-special t))
+                                                    (new-text (subseq full emitted-len)))
+                                               (when (plusp (length new-text))
+                                                 (setf emitted-len (length full))
+                                                 (restart-case
+                                                     (handler-bind
+                                                         ((error (lambda (c)
+                                                                   (declare (ignore c))
+                                                                   (invoke-restart
+                                                                    'abort-generation))))
+                                                       (unless (funcall token-callback
+                                                                        new-text)
+                                                         (setf stop-reason :callback)
+                                                         (return-from verify)))
+                                                   (ignore-callback-error ()
+                                                     :report "Ignore callback error"
+                                                     nil)
+                                                   (abort-generation ()
+                                                     :report "Abort generation"
+                                                     (setf stop-reason :error)
+                                                     (return-from verify))))))
+                                           (when (or stop-reason
+                                                     (>= (length generated)
+                                                         max-tokens))
+                                             (return-from verify)))
+                                         ;; Mismatch — save target's token, stop verification
+                                         (progn
+                                           (setf mismatch-token target)
+                                           (return-from verify))))))
+                               ;; Record sampled in all-tokens now that drafting is done
                                (when all-tokens
                                  (vector-push-extend sampled all-tokens))
-                               (cffi:with-foreign-object (tok-buf '%llama:token 1)
-                                 (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
-                                 (let* ((batch (%llama:batch-get-one tok-buf 1))
-                                        (rc (%llama:decode ctx-ptr batch)))
-                                   (declare (type fixnum rc))
-                                   (unless (zerop rc)
-                                     (error 'decode-error :code rc)))
-                                 (setf (llama-context-compute-pending-p ctx) t))
-                               (incf n-past)
-                               (setf sampled (sample)))))
-                       ;; No speculative fns — original single-token path
-                       (progn
-                         (cffi:with-foreign-object (tok-buf '%llama:token 1)
-                           (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
-                           (let* ((batch (%llama:batch-get-one tok-buf 1))
-                                  (rc (%llama:decode ctx-ptr batch)))
-                             (declare (type fixnum rc))
-                             (unless (zerop rc)
-                               (error 'decode-error :code rc)))
-                           (setf (llama-context-compute-pending-p ctx) t))
-                         (incf n-past)
-                         (setf sampled (sample))))
-                   (when stop-reason (return)))))
-          (unless sampler
-            (%llama:sampler-free chain-ptr)))
-      ;; Convert generated tokens to string.  Always materialise result-tokens so
-      ;; it can be returned as the third value for callers that need exact cache
-      ;; contents (e.g. CHAT-SESSION-SEND) without a lossy re-tokenise.
-      (let* ((n-gen (length generated))
-             (result-tokens (make-array n-gen :element-type 'fixnum))
-             (text (if (zerop n-gen)
-                       ""
-                       (progn
-                         (dotimes (i n-gen)
-                           (declare (type fixnum i))
-                           (setf (aref result-tokens i) (aref generated i)))
-                         (detokenize model result-tokens :remove-special t)))))
-        (declare (type fixnum n-gen)
-                 (type (simple-array fixnum (*)) result-tokens))
-        (values text
-                (or stop-reason
-                    (if (= n-gen max-tokens) :length :eog))
-                result-tokens)))))))
+                               ;; Accept/evict
+                               (when accept-fn
+                                 (funcall accept-fn 0 n-accepted))
+                               (incf n-past (1+ n-accepted))
+                               (when (< n-accepted k)
+                                 (kv-cache-seq-rm ctx 0 n-past -1))
+                               ;; Next sample
+                               (unless (or stop-reason
+                                           (>= (length generated) max-tokens))
+                                 (setf sampled
+                                       (if mismatch-token
+                                           mismatch-token
+                                           ;; All accepted: sample from position after last
+                                           (%llama:sampler-sample chain-ptr ctx-ptr k))))))
+                           ;; No drafts available — single token decode
+                           (progn
+                             (when all-tokens
+                               (vector-push-extend sampled all-tokens))
+                             (cffi:with-foreign-object (tok-buf '%llama:token 1)
+                               (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
+                               (let* ((batch (%llama:batch-get-one tok-buf 1))
+                                      (rc (%llama:decode ctx-ptr batch)))
+                                 (declare (type fixnum rc))
+                                 (unless (zerop rc)
+                                   (error 'decode-error :code rc)))
+                               (setf (llama-context-compute-pending-p ctx) t))
+                             (incf n-past)
+                             (setf sampled (sample)))))
+                     ;; No speculative fns — original single-token path
+                     (progn
+                       (cffi:with-foreign-object (tok-buf '%llama:token 1)
+                         (setf (cffi:mem-aref tok-buf '%llama:token 0) sampled)
+                         (let* ((batch (%llama:batch-get-one tok-buf 1))
+                                (rc (%llama:decode ctx-ptr batch)))
+                           (declare (type fixnum rc))
+                           (unless (zerop rc)
+                             (error 'decode-error :code rc)))
+                         (setf (llama-context-compute-pending-p ctx) t))
+                       (incf n-past)
+                       (setf sampled (sample))))
+                 (when stop-reason (return)))))
+        (unless sampler
+          (%llama:sampler-free chain-ptr)))
+    ;; Convert generated tokens to string.  Always materialise result-tokens so
+    ;; it can be returned as the third value for callers that need exact cache
+    ;; contents (e.g. CHAT-SESSION-SEND) without a lossy re-tokenise.
+    (let* ((n-gen (length generated))
+           (result-tokens (make-array n-gen :element-type 'fixnum))
+           (text (if (zerop n-gen)
+                     ""
+                     (progn
+                       (dotimes (i n-gen)
+                         (declare (type fixnum i))
+                         (setf (aref result-tokens i) (aref generated i)))
+                       (detokenize model result-tokens :remove-special t)))))
+      (declare (type fixnum n-gen)
+               (type (simple-array fixnum (*)) result-tokens))
+      (values text
+              (or stop-reason
+                  (if (= n-gen max-tokens) :length :eog))
+              result-tokens))))))
 
-(defun embed (ctx text &key (normalize t))
+(llama-defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.
 The context must have been created with :embeddings 1.
 When NORMALIZE is true (default), L2-normalizes the result.
@@ -796,47 +780,46 @@ Signals INPUT-VALIDATION-ERROR if TEXT is not a non-empty string."
     (error 'input-validation-error
            :function-name 'embed :argument :text :value text
            :reason "text must be non-empty"))
-  (with-llama-compatible-fp-environment
-    (let* ((ctx-ptr (llama-context-pointer ctx))
-           (raw-model (%llama:get-model ctx-ptr))
-           (model (%make-llama-model :pointer raw-model))
-           (tokens (tokenize model text))
-           (n-tokens (length tokens))
-           (n-embd (%llama:model-n-embd raw-model)))
-      (declare (type fixnum n-tokens n-embd))
-      ;; Check embeddings configured before calling C encode (would crash if not)
-      (when (eq (%llama:pooling-type ctx-ptr) :none)
+  (let* ((ctx-ptr (llama-context-pointer ctx))
+         (raw-model (%llama:get-model ctx-ptr))
+         (model (%make-llama-model :pointer raw-model))
+         (tokens (tokenize model text))
+         (n-tokens (length tokens))
+         (n-embd (%llama:model-n-embd raw-model)))
+    (declare (type fixnum n-tokens n-embd))
+    ;; Check embeddings configured before calling C encode (would crash if not)
+    (when (eq (%llama:pooling-type ctx-ptr) :none)
+      (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
+    ;; Build batch and encode
+    (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
+      (dotimes (i n-tokens)
+        (declare (type fixnum i))
+        (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
+      (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
+             (rc (%llama:encode ctx-ptr batch)))
+        (unless (zerop rc)
+          (error 'decode-error :code rc)))
+      (setf (llama-context-compute-pending-p ctx) t))
+    ;; Sync before reading — encode may run asynchronously on GPU
+    (when (llama-context-compute-pending-p ctx)
+      (%llama:synchronize ctx-ptr)
+      (setf (llama-context-compute-pending-p ctx) nil))
+    ;; Read embeddings (null-pointer → error per NIL↔null convention)
+    (let* ((embd-ptr (%llama:get-embeddings-ith ctx-ptr 0)))
+      (when (cffi:null-pointer-p embd-ptr)
         (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
-      ;; Build batch and encode
-      (cffi:with-foreign-object (tok-buf '%llama:token n-tokens)
-        (dotimes (i n-tokens)
+      (let ((result (make-array n-embd :element-type 'single-float)))
+        (declare (type (simple-array single-float (*)) result))
+        (dotimes (i n-embd)
           (declare (type fixnum i))
-          (setf (cffi:mem-aref tok-buf '%llama:token i) (aref tokens i)))
-        (let* ((batch (%llama:batch-get-one tok-buf n-tokens))
-               (rc (%llama:encode ctx-ptr batch)))
-          (unless (zerop rc)
-            (error 'decode-error :code rc)))
-        (setf (llama-context-compute-pending-p ctx) t))
-      ;; Sync before reading — encode may run asynchronously on GPU
-      (when (llama-context-compute-pending-p ctx)
-        (%llama:synchronize ctx-ptr)
-        (setf (llama-context-compute-pending-p ctx) nil))
-      ;; Read embeddings (null-pointer → error per NIL↔null convention)
-      (let* ((embd-ptr (%llama:get-embeddings-ith ctx-ptr 0)))
-        (when (cffi:null-pointer-p embd-ptr)
-          (error "Embeddings not available — was the context created with :EMBEDDINGS enabled?"))
-        (let ((result (make-array n-embd :element-type 'single-float)))
-          (declare (type (simple-array single-float (*)) result))
-          (dotimes (i n-embd)
-            (declare (type fixnum i))
-            (setf (aref result i) (cffi:mem-aref embd-ptr :float i)))
-          (when normalize
-            (let ((norm (sqrt (loop for x of-type single-float across result
-                                    sum (the single-float (* x x))
-                                    of-type single-float))))
-              (declare (type single-float norm))
-              (when (> norm 0.0)
-                (dotimes (i n-embd)
-                  (declare (type fixnum i))
-                  (setf (aref result i) (/ (aref result i) norm))))))
-          result)))))
+          (setf (aref result i) (cffi:mem-aref embd-ptr :float i)))
+        (when normalize
+          (let ((norm (sqrt (loop for x of-type single-float across result
+                                  sum (the single-float (* x x))
+                                  of-type single-float))))
+            (declare (type single-float norm))
+            (when (> norm 0.0)
+              (dotimes (i n-embd)
+                (declare (type fixnum i))
+                (setf (aref result i) (/ (aref result i) norm))))))
+        result))))

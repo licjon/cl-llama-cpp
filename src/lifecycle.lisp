@@ -55,34 +55,34 @@ zero, unless *BACKEND-PERMANENT* is T.")
 
 ;;; --- Internal scope helpers --------------------------------------------------
 
-(defun %backend-scope-enter ()
+(llama-defun %backend-scope-enter ()
   "Thread-safe entry into a WITH-BACKEND scope. Initializes the backend if not
 already running, then increments the active scope count."
   (%with-backend-lock
     (unless *backend-initialized*
-      (with-llama-compatible-fp-environment (%llama:backend-init))
+      (%llama:backend-init)
       (setf *backend-initialized* t))
     (incf *backend-refcount*)))
 
-(defun %backend-scope-exit ()
+(llama-defun %backend-scope-exit ()
   "Thread-safe exit from a WITH-BACKEND scope. Frees the backend when the scope
 count reaches zero and ENSURE-BACKEND has not established a permanent hold."
   (%with-backend-lock
     (when (zerop (decf *backend-refcount*))
       (unless *backend-permanent*
-        (with-llama-compatible-fp-environment (%llama:backend-free))
+        (%llama:backend-free)
         (setf *backend-initialized* nil)))))
 
 ;;; --- Public lifecycle API ---------------------------------------------------
 
-(defun ensure-backend ()
+(llama-defun ensure-backend ()
   "Ensure the llama backend is initialized. Thread-safe; safe to call from any
 thread. Establishes a permanent hold so the backend is not freed when an
 enclosing WITH-BACKEND scope exits. Prefer calling this once from the main
 thread before spawning worker threads."
   (%with-backend-lock
     (unless *backend-initialized*
-      (with-llama-compatible-fp-environment (%llama:backend-init))
+      (%llama:backend-init)
       (setf *backend-initialized* t))
     (setf *backend-permanent* t)))
 
@@ -182,47 +182,45 @@ to 0/1."
 
 ;;; --- Standalone model/context constructors & destructors --------------------
 
-(defun make-model (path &rest params)
+(llama-defun make-model (path &rest params)
   "Load a model from PATH, return a LLAMA-MODEL handle with a GC finalizer.
 PARAMS are keyword overrides for llama_model_default_params (e.g. :n-gpu-layers 99).
 The caller owns the handle and must eventually call FREE-MODEL, or let the GC
 collect it (the finalizer frees the foreign memory as a safety net)."
   (ensure-backend)
-  (with-llama-compatible-fp-environment
-    (let* ((defaults (%llama:model-default-params))
-           (model-params (override-params defaults params))
-           (ptr (%llama:model-load-from-file path model-params)))
-      (if (cffi:null-pointer-p ptr)
-          (restart-case (error 'model-load-error :path path)
-            (retry-with-layers (n)
-              :report "Retry loading with a different :n-gpu-layers value"
-              :interactive (lambda ()
-                             (format *query-io* "n-gpu-layers: ")
-                             (list (read *query-io*)))
-              (apply #'make-model path (append params (list :n-gpu-layers n))))
-            (use-cpu-only ()
-              :report "Retry loading with :n-gpu-layers 0 (CPU only)"
-              (apply #'make-model path (append params (list :n-gpu-layers 0))))
-            (use-different-path (new-path)
-              :report "Retry loading from a different path"
-              :interactive (lambda ()
-                             (format *query-io* "Model path: ")
-                             (list (read-line *query-io*)))
-              (apply #'make-model new-path params)))
-          (let ((handle (%make-llama-model :pointer ptr)))
-            (%register-model-finalizer handle)
-            handle)))))
+  (let* ((defaults (%llama:model-default-params))
+         (model-params (override-params defaults params))
+         (ptr (%llama:model-load-from-file path model-params)))
+    (if (cffi:null-pointer-p ptr)
+        (restart-case (error 'model-load-error :path path)
+          (retry-with-layers (n)
+            :report "Retry loading with a different :n-gpu-layers value"
+            :interactive (lambda ()
+                           (format *query-io* "n-gpu-layers: ")
+                           (list (read *query-io*)))
+            (apply #'make-model path (append params (list :n-gpu-layers n))))
+          (use-cpu-only ()
+            :report "Retry loading with :n-gpu-layers 0 (CPU only)"
+            (apply #'make-model path (append params (list :n-gpu-layers 0))))
+          (use-different-path (new-path)
+            :report "Retry loading from a different path"
+            :interactive (lambda ()
+                           (format *query-io* "Model path: ")
+                           (list (read-line *query-io*)))
+            (apply #'make-model new-path params)))
+        (let ((handle (%make-llama-model :pointer ptr)))
+          (%register-model-finalizer handle)
+          handle))))
 
-(defun free-model (model)
+(llama-defun free-model (model)
   "Free the foreign memory held by MODEL and cancel its GC finalizer.
 Idempotent — calling on an already-freed model is a no-op. Returns NIL."
   (when (%try-claim-for-free (llama-model-freed-cell model))
     (tg:cancel-finalization model)
-    (with-llama-compatible-fp-environment
-      (%llama:model-free (llama-model-pointer model))))
+    (%llama:model-free (llama-model-pointer model)))
   nil)
 
-(defun make-context (model &rest params)
+(llama-defun make-context (model &rest params)
   "Create an inference context from MODEL, return a LLAMA-CONTEXT handle with
 a GC finalizer. PARAMS are keyword overrides for llama_context_default_params
 \(e.g. :n-ctx 2048). Additional keywords :VALIDATION (:off :warn :error) and
@@ -234,39 +232,37 @@ GC collect it."
          (clean-params (loop for (k v) on params by #'cddr
                              unless (member k '(:validation :vram-budget))
                              collect k collect v)))
-    (with-llama-compatible-fp-environment
-      (let* ((defaults (%llama:context-default-params))
-             (ctx-params (override-params defaults clean-params)))
-        (when validation
-          (%validate-context-params model ctx-params validation vram-budget))
-        (let ((ptr (%llama:new-context-with-model
-                    (llama-model-pointer model) ctx-params)))
-          (if (cffi:null-pointer-p ptr)
-              (restart-case (error 'context-creation-error)
-                (retry-with-smaller-ctx (n)
-                  :report "Retry with a smaller :n-ctx value"
-                  :interactive (lambda ()
-                                 (format *query-io* "n-ctx: ")
-                                 (list (read *query-io*)))
-                  (apply #'make-context model (append clean-params (list :n-ctx n))))
-                (retry-with-params (plist)
-                  :report "Retry with new params (plist)"
-                  :interactive (lambda ()
-                                 (format *query-io* "Params plist: ")
-                                 (list (read *query-io*)))
-                  (apply #'make-context model plist)))
-              (let ((handle (%make-llama-context :pointer ptr)))
-                (%register-context-finalizer handle)
-                handle)))))))
+    (let* ((defaults (%llama:context-default-params))
+           (ctx-params (override-params defaults clean-params)))
+      (when validation
+        (%validate-context-params model ctx-params validation vram-budget))
+      (let ((ptr (%llama:new-context-with-model
+                  (llama-model-pointer model) ctx-params)))
+        (if (cffi:null-pointer-p ptr)
+            (restart-case (error 'context-creation-error)
+              (retry-with-smaller-ctx (n)
+                :report "Retry with a smaller :n-ctx value"
+                :interactive (lambda ()
+                               (format *query-io* "n-ctx: ")
+                               (list (read *query-io*)))
+                (apply #'make-context model (append clean-params (list :n-ctx n))))
+              (retry-with-params (plist)
+                :report "Retry with new params (plist)"
+                :interactive (lambda ()
+                               (format *query-io* "Params plist: ")
+                               (list (read *query-io*)))
+                (apply #'make-context model plist)))
+            (let ((handle (%make-llama-context :pointer ptr)))
+              (%register-context-finalizer handle)
+              handle))))))
 
-(defun free-context (ctx)
+(llama-defun free-context (ctx)
   "Free the foreign memory held by CTX and cancel its GC finalizer.
 Cleans up any registered abort callback. Idempotent. Returns NIL."
   (when (%try-claim-for-free (llama-context-freed-cell ctx))
     (tg:cancel-finalization ctx)
     (let ((ptr (llama-context-pointer ctx)))
-      (with-llama-compatible-fp-environment
-        (%llama:free ptr))
+      (%llama:free ptr)
       (%with-abort-lock
         (remhash (cffi:pointer-address ptr) *abort-callbacks*))))
   nil)
@@ -293,40 +289,35 @@ control pre-creation resource validation."
 
 ;;; Context runtime configuration
 
-(defun set-n-threads (ctx n-threads n-threads-batch)
+(llama-defun set-n-threads (ctx n-threads n-threads-batch)
   "Set the number of threads on CTX for single-token decoding (N-THREADS)
 and batch decoding (N-THREADS-BATCH). Both values are required together."
   (check-type n-threads (integer 0 *))
   (check-type n-threads-batch (integer 0 *))
-  (with-llama-compatible-fp-environment
-    (%llama:set-n-threads (llama-context-pointer ctx) n-threads n-threads-batch))
+  (%llama:set-n-threads (llama-context-pointer ctx) n-threads n-threads-batch)
   nil)
 
-(defun set-warmup (ctx warmup-p)
+(llama-defun set-warmup (ctx warmup-p)
   "Enable or disable the warmup pass on CTX."
-  (with-llama-compatible-fp-environment
-    (%llama:set-warmup (llama-context-pointer ctx) (%bool->c warmup-p)))
+  (%llama:set-warmup (llama-context-pointer ctx) (%bool->c warmup-p))
   nil)
 
-(defun set-causal-attn (ctx causal-attn-p)
+(llama-defun set-causal-attn (ctx causal-attn-p)
   "Enable or disable causal attention on CTX."
-  (with-llama-compatible-fp-environment
-    (%llama:set-causal-attn (llama-context-pointer ctx) (%bool->c causal-attn-p)))
+  (%llama:set-causal-attn (llama-context-pointer ctx) (%bool->c causal-attn-p))
   nil)
 
-(defun set-embeddings (ctx embeddings-p)
+(llama-defun set-embeddings (ctx embeddings-p)
   "Set the embedding-output flag on CTX to EMBEDDINGS-P. Must match the mode
 the context was created with: enable only on contexts created with :embeddings
 non-nil, disable only on contexts created without it. Toggling on a mismatched
 context leaves internal C state inconsistent."
-  (with-llama-compatible-fp-environment
-    (%llama:set-embeddings (llama-context-pointer ctx) (%bool->c embeddings-p)))
+  (%llama:set-embeddings (llama-context-pointer ctx) (%bool->c embeddings-p))
   nil)
 
-(defun synchronize (ctx)
+(llama-defun synchronize (ctx)
   "Block until all pending async operations on CTX have completed."
-  (with-llama-compatible-fp-environment
-    (%llama:synchronize (llama-context-pointer ctx)))
+  (%llama:synchronize (llama-context-pointer ctx))
   (setf (llama-context-compute-pending-p ctx) nil)
   nil)
 
@@ -353,7 +344,7 @@ context leaves internal C state inconsistent."
                               (return-from %abort-dispatcher nil))))
         (not (null (funcall fn)))))))
 
-(defun set-abort-callback (ctx fn)
+(llama-defun set-abort-callback (ctx fn)
   "Register FN as the abort callback on CTX. FN is a Lisp function of no
 arguments that returns T to abort generation or NIL to continue.
 Pass NIL to clear a previously registered callback.
@@ -374,11 +365,10 @@ boundary."
       (if fn
           (setf (gethash key *abort-callbacks*) fn)
           (remhash key *abort-callbacks*)))
-    (with-llama-compatible-fp-environment
-      (%llama:set-abort-callback
-       ptr
-       (if fn (cffi:callback %abort-dispatcher) (cffi:null-pointer))
-       (if fn ptr (cffi:null-pointer)))))
+    (%llama:set-abort-callback
+     ptr
+     (if fn (cffi:callback %abort-dispatcher) (cffi:null-pointer))
+     (if fn ptr (cffi:null-pointer))))
   nil)
 
 (defun get-abort-callback (ctx)
@@ -389,20 +379,18 @@ Thread-safe."
 
 ;;; Threadpool management
 
-(defun attach-threadpool (ctx threadpool &optional threadpool-batch)
+(llama-defun attach-threadpool (ctx threadpool &optional threadpool-batch)
   "Attach THREADPOOL to CTX. THREADPOOL-BATCH is an optional separate
 threadpool for batch operations; when omitted, THREADPOOL is used for both.
 The caller retains ownership of the threadpool — detach-threadpool does
 not free it."
-  (with-llama-compatible-fp-environment
-    (%llama:attach-threadpool
-     (llama-context-pointer ctx)
-     threadpool
-     (or threadpool-batch (cffi:null-pointer))))
+  (%llama:attach-threadpool
+   (llama-context-pointer ctx)
+   threadpool
+   (or threadpool-batch (cffi:null-pointer)))
   nil)
 
-(defun detach-threadpool (ctx)
+(llama-defun detach-threadpool (ctx)
   "Detach the threadpool from CTX. Does not free the threadpool."
-  (with-llama-compatible-fp-environment
-    (%llama:detach-threadpool (llama-context-pointer ctx)))
+  (%llama:detach-threadpool (llama-context-pointer ctx))
   nil)

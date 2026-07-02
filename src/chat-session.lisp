@@ -30,7 +30,7 @@ Editing earlier turns invalidates the cache from the first changed token onward
   (decoded  (make-array 0 :element-type 'fixnum :adjustable t :fill-pointer 0)
             :type (array fixnum (*))))
 
-(defun make-chat-session (ctx &key template system-prompt)
+(llama-defun make-chat-session (ctx &key template system-prompt)
   "Create a stateful chat session that incrementally reuses the KV cache.
 CTX must be a LLAMA-CONTEXT created with sufficient :N-CTX for the expected
 conversation length.

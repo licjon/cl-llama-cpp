@@ -1,17 +1,16 @@
 (in-package #:cl-llama-cpp)
 
-(defun model-chat-template (model &optional name)
+(llama-defun model-chat-template (model &optional name)
   "Return the chat template string embedded in MODEL.
 If NAME is given, look up a specific named template."
-  (with-llama-compatible-fp-environment
-    (let ((res-ptr (if name
-                       (cffi:with-foreign-string (name-ptr name)
-                         (%llama:model-chat-template (llama-model-pointer model) name-ptr))
-                       (%llama:model-chat-template (llama-model-pointer model) (cffi:null-pointer)))))
-      (unless (cffi:null-pointer-p res-ptr)
-        (cffi:foreign-string-to-lisp res-ptr)))))
+  (let ((res-ptr (if name
+                     (cffi:with-foreign-string (name-ptr name)
+                       (%llama:model-chat-template (llama-model-pointer model) name-ptr))
+                     (%llama:model-chat-template (llama-model-pointer model) (cffi:null-pointer)))))
+    (unless (cffi:null-pointer-p res-ptr)
+      (cffi:foreign-string-to-lisp res-ptr))))
 
-(defun list-chat-templates ()
+(llama-defun list-chat-templates ()
   "Return a list of built-in chat template name strings."
   (let ((n (%llama:chat-builtin-templates (cffi:null-pointer) 0)))
     (when (> n 0)
@@ -21,7 +20,7 @@ If NAME is given, look up a specific named template."
               collect (cffi:foreign-string-to-lisp
                        (cffi:mem-aref output :pointer i)))))))
 
-(defun format-chat (model messages &key template (add-assistant-prefix t))
+(llama-defun format-chat (model messages &key template (add-assistant-prefix t))
   "Format MESSAGES as a chat prompt string using a Jinja-style chat template.
 MESSAGES is a list of plists with :role and :content keys.
 Uses MODEL's embedded chat template unless TEMPLATE is provided.
@@ -39,47 +38,46 @@ Signals INPUT-VALIDATION-ERROR if MESSAGES is empty or malformed."
       (error 'input-validation-error
              :function-name 'format-chat :argument :messages :value msg
              :reason "each message must have a :CONTENT string")))
-  (with-llama-compatible-fp-environment
-    (let* ((tmpl (or template (model-chat-template model)))
-           (tmpl-arg (or tmpl (cffi:null-pointer)))
-           ;; Gemma templates use "model" instead of "assistant"
-           (model-role (and (stringp tmpl) (search "'model'" tmpl)))
-           (n-msg (length messages))
-           (add-ass (if add-assistant-prefix 1 0))
-           (msg-size (cffi:foreign-type-size '(:struct %llama:chat-message)))
-           (foreign-strings nil))
-      (cffi:with-foreign-object (chat '(:struct %llama:chat-message) n-msg)
-        (unwind-protect
-            (progn
-              (loop for msg in messages
-                    for i from 0
-                    for msg-ptr = (cffi:inc-pointer chat (* i msg-size))
-                    for role = (let ((r (getf msg :role)))
-                                 (if (and model-role (string= r "assistant"))
-                                     "model" r))
-                    for role-ptr = (cffi:foreign-string-alloc role)
-                    for content-ptr = (cffi:foreign-string-alloc (getf msg :content))
-                    do (push role-ptr foreign-strings)
-                       (push content-ptr foreign-strings)
-                       (setf (cffi:mem-ref msg-ptr :pointer 0) role-ptr
-                             (cffi:mem-ref msg-ptr :pointer 8) content-ptr))
-              (let ((n-needed (%llama:chat-apply-template
-                               tmpl-arg chat n-msg add-ass
-                               (cffi:null-pointer) 0)))
-                (if (< n-needed 0)
-                    (restart-case (error 'chat-template-error)
-                      (use-default-template ()
-                        :report "Retry format-chat with the model's default template"
-                        (format-chat model messages
-                                     :add-assistant-prefix add-assistant-prefix)))
-                    (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
-                      (%llama:chat-apply-template
-                       tmpl-arg chat n-msg add-ass
-                       buf (1+ n-needed))))))
-          (dolist (ptr foreign-strings)
-            (cffi:foreign-string-free ptr)))))))
+  (let* ((tmpl (or template (model-chat-template model)))
+         (tmpl-arg (or tmpl (cffi:null-pointer)))
+         ;; Gemma templates use "model" instead of "assistant"
+         (model-role (and (stringp tmpl) (search "'model'" tmpl)))
+         (n-msg (length messages))
+         (add-ass (if add-assistant-prefix 1 0))
+         (msg-size (cffi:foreign-type-size '(:struct %llama:chat-message)))
+         (foreign-strings nil))
+    (cffi:with-foreign-object (chat '(:struct %llama:chat-message) n-msg)
+      (unwind-protect
+          (progn
+            (loop for msg in messages
+                  for i from 0
+                  for msg-ptr = (cffi:inc-pointer chat (* i msg-size))
+                  for role = (let ((r (getf msg :role)))
+                               (if (and model-role (string= r "assistant"))
+                                   "model" r))
+                  for role-ptr = (cffi:foreign-string-alloc role)
+                  for content-ptr = (cffi:foreign-string-alloc (getf msg :content))
+                  do (push role-ptr foreign-strings)
+                     (push content-ptr foreign-strings)
+                     (setf (cffi:mem-ref msg-ptr :pointer 0) role-ptr
+                           (cffi:mem-ref msg-ptr :pointer 8) content-ptr))
+            (let ((n-needed (%llama:chat-apply-template
+                             tmpl-arg chat n-msg add-ass
+                             (cffi:null-pointer) 0)))
+              (if (< n-needed 0)
+                  (restart-case (error 'chat-template-error)
+                    (use-default-template ()
+                      :report "Retry format-chat with the model's default template"
+                      (format-chat model messages
+                                   :add-assistant-prefix add-assistant-prefix)))
+                  (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
+                    (%llama:chat-apply-template
+                     tmpl-arg chat n-msg add-ass
+                     buf (1+ n-needed))))))
+        (dolist (ptr foreign-strings)
+          (cffi:foreign-string-free ptr))))))
 
-(defun tokenize-chat (model messages &key template (add-assistant-prefix t))
+(llama-defun tokenize-chat (model messages &key template (add-assistant-prefix t))
   "Tokenize a chat conversation safely. Template markers are parsed as special
 tokens; message content is not. This prevents content that resembles special
 tokens (e.g. a model hallucinating <end_of_turn>) from corrupting the prompt
