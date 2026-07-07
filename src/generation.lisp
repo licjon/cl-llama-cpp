@@ -432,12 +432,47 @@ Signals INPUT-VALIDATION-ERROR if TOKENS is not a non-empty vector."
     (setf (llama-context-compute-pending-p ctx) t)
     n))
 
+(defun %copy-logits (ctx-ptr n-vocab)
+  "Copy the N-VOCAB raw logits at CTX-PTR's last position (index -1) into
+a fresh (simple-array single-float (*)). The FFI buffer backing these
+logits is only valid until the next decode call, so the copy is what
+callers (e.g. :LOGIT-CALLBACK) must hold onto."
+  (declare (type fixnum n-vocab))
+  (let ((ptr (%llama:get-logits-ith ctx-ptr -1))
+        (copy (make-array n-vocab :element-type 'single-float)))
+    (declare (type (simple-array single-float (*)) copy))
+    (dotimes (i n-vocab)
+      (declare (type fixnum i))
+      (setf (aref copy i) (cffi:mem-aref ptr :float i)))
+    copy))
+
+(defun %invoke-logit-callback (logit-callback ctx-ptr n-vocab)
+  "Copy the current logits and invoke LOGIT-CALLBACK with (logits n-vocab).
+Returns :ABORT if the callback signaled an error that was not resolved by
+the IGNORE-LOGIT-CALLBACK-ERROR restart; returns NIL otherwise."
+  (let ((logits (%copy-logits ctx-ptr n-vocab)))
+    (restart-case
+        (progn
+          (handler-bind
+              ((error (lambda (c)
+                        (declare (ignore c))
+                        (invoke-restart 'abort-logit-callback))))
+            (funcall logit-callback logits n-vocab))
+          nil)
+      (ignore-logit-callback-error ()
+        :report "Ignore the logit-callback error and continue generation"
+        nil)
+      (abort-logit-callback ()
+        :report "Abort generation due to logit-callback error"
+        :abort))))
+
 (llama-defun generate (ctx prompt &rest all-kwargs
                              &key sampler-config
                                   (max-tokens 256) (temp 0.8)
                                   top-k top-p min-p (seed 42)
                                   (parse-special t) prompt-tokens
                                   token-callback
+                                  logit-callback
                                   grammar (grammar-root "root")
                                   ;; Extended sampler keywords
                                   typical-p
@@ -480,6 +515,15 @@ consistent state (e.g. the current cache is a prefix of the new prompt).  The
 default (T) preserves the original behaviour: clear the cache and re-prefill
 the full prompt each call.
 
+:LOGIT-CALLBACK, when supplied, is called once per token sampled via this
+function's own single-token-decode path (the initial token and every
+subsequent ordinary token) with (LOGITS N-VOCAB) — LOGITS a fresh
+(simple-array single-float (*)) of the raw pre-sampler-chain logits for
+the token about to be sampled. Tokens accepted inside a :SPECULATIVE-FNS
+draft-verification pass do not trigger it. An error signaled by the
+callback aborts generation with STOP-REASON :ERROR unless the
+IGNORE-LOGIT-CALLBACK-ERROR restart is invoked.
+
 Signals INPUT-VALIDATION-ERROR if MAX-TOKENS is not a positive integer or
 PROMPT is neither a string nor a vector."
   (declare (optimize (speed 3)))
@@ -488,8 +532,8 @@ PROMPT is neither a string nor a vector."
   ;; appear first in the appended plist so they win over the config.
   (when (and sampler-config (not sampler))
     (let* ((skip '(:sampler-config :max-tokens :parse-special
-                   :prompt-tokens :token-callback :sampler :reset-context
-                   :speculative-fns))
+                   :prompt-tokens :token-callback :logit-callback
+                   :sampler :reset-context :speculative-fns))
            (caller-sampler (loop for (k v) on all-kwargs by #'cddr
                                  unless (member k skip)
                                  nconc (list k v)))
@@ -530,12 +574,13 @@ PROMPT is neither a string nor a vector."
          (raw-model (%llama:get-model ctx-ptr))
          (model (%make-llama-model :pointer raw-model))
          (vocab (%llama:model-get-vocab raw-model))
+         (n-vocab (%llama:vocab-n-tokens vocab))
          (prompt-tokens (or prompt-tokens
                             (tokenize model prompt :parse-special parse-special)))
          (n-prompt (length prompt-tokens))
          (generated (make-array 0 :element-type 'fixnum
                                   :adjustable t :fill-pointer 0)))
-    (declare (type fixnum n-prompt)
+    (declare (type fixnum n-prompt n-vocab)
              (type (vector fixnum) generated))
     (when reset-context
       (%llama:memory-clear (%llama:get-memory ctx-ptr) 1))
@@ -602,7 +647,14 @@ PROMPT is neither a string nor a vector."
             (declare (type fixnum n-past))
             ;; sampler-sample calls sampler-accept internally — do NOT call
             ;; sampler-accept again or the grammar FSM double-advances.
-            (macrolet ((sample () '(%llama:sampler-sample chain-ptr ctx-ptr -1)))
+            (macrolet ((sample ()
+                         '(progn
+                            (when (and logit-callback
+                                       (eq :abort (%invoke-logit-callback
+                                                   logit-callback ctx-ptr n-vocab)))
+                              (setf stop-reason :error)
+                              (return))
+                            (%llama:sampler-sample chain-ptr ctx-ptr -1))))
               (loop with sampled of-type fixnum = (sample)
                     while (< (length generated) max-tokens)
                     do

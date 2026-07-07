@@ -3153,3 +3153,113 @@ ws     ::= [ \\t\\n]*")
                                               :max-tokens 16 :temp 0.8)))
             (ok (string= text1 text2)
                 "default seed produces identical output")))))))
+
+(deftest generate-logit-callback-fires-per-token
+  (when-model-available
+    (testing "logit-callback fires once per generated token with n-vocab-length logits"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((calls '()))
+            (multiple-value-bind (text stop-reason)
+                (cl-llama-cpp:generate ctx "The capital of France is"
+                                       :max-tokens 8
+                                       :temp 0.1
+                                       :logit-callback
+                                       (lambda (logits n)
+                                         (push (list logits n) calls)))
+              (declare (ignore stop-reason))
+              (setf calls (nreverse calls))
+              (ok (stringp text) "generate returned a string")
+              (ok (= (length calls) 8)
+                  (format nil "logit-callback fired once per token: ~D calls"
+                          (length calls)))
+              (ok (every (lambda (c) (= (second c) (length (first c)))) calls)
+                  "every call's reported n-vocab matches its logits array length")
+              (ok (apply #'= (mapcar #'second calls))
+                  "n-vocab is consistent across every call")
+              (ok (every (lambda (c)
+                           (typep (first c) '(simple-array single-float (*))))
+                         calls)
+                  "every call's logits is a simple-array single-float")
+              (ok (every (lambda (c)
+                           (every (lambda (x) (and (typep x 'single-float)
+                                                    (not (sb-ext:float-nan-p x))))
+                                  (first c)))
+                         calls)
+                  "no NaN logits leaked through"))))))))
+
+(deftest generate-logit-callback-independent-of-token-callback
+  (when-model-available
+    (testing ":logit-callback and :token-callback can both be supplied and both fire"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((logit-calls 0) (token-calls 0))
+            (cl-llama-cpp:generate ctx "The capital of France is"
+                                   :max-tokens 8
+                                   :temp 0.1
+                                   :logit-callback (lambda (l n)
+                                                      (declare (ignore l n))
+                                                      (incf logit-calls))
+                                   :token-callback (lambda (chunk)
+                                                      (declare (ignore chunk))
+                                                      (incf token-calls)
+                                                      t))
+            (ok (= logit-calls 8) (format nil "logit-callback fired 8 times: ~D" logit-calls))
+            (ok (plusp token-calls) (format nil "token-callback also fired: ~D" token-calls))))))))
+
+(deftest generate-logit-callback-error-returns-error-stop
+  (when-model-available
+    (testing "logit-callback that signals an error produces :error stop reason"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "The capital of France is"
+                                     :max-tokens 64
+                                     :temp 0.1
+                                     :logit-callback (lambda (l n)
+                                                       (declare (ignore l n))
+                                                       (error "deliberate logit-callback error")))
+            (ok (stringp text) "generate returned a string despite callback error")
+            (ok (eq :error stop-reason)
+                (format nil "stop-reason is :error: ~A" stop-reason))))))))
+
+(deftest generate-logit-callback-ignore-restart-continues
+  (when-model-available
+    (testing "invoking ignore-logit-callback-error restart allows generation to continue"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (let ((call-count 0))
+            (multiple-value-bind (text stop-reason)
+                (cl-llama-cpp:generate
+                 ctx "The capital of France is"
+                 :max-tokens 16
+                 :temp 0.1
+                 :logit-callback
+                 (lambda (l n)
+                   (declare (ignore l n))
+                   (incf call-count)
+                   (when (= call-count 1)
+                     (handler-bind
+                         ((error (lambda (c)
+                                   (declare (ignore c))
+                                   (when (find-restart 'cl-llama-cpp::ignore-logit-callback-error)
+                                     (invoke-restart 'cl-llama-cpp::ignore-logit-callback-error)))))
+                       (error "first call errors")))))
+              (ok (stringp text) "generate returned text after error recovery")
+              (ok (member stop-reason '(:eog :length))
+                  (format nil "stop-reason is not :error after recovery: ~A" stop-reason))
+              (ok (> call-count 1)
+                  (format nil "callback was invoked ~D times (continued after error)"
+                          call-count)))))))))
+
+(deftest generate-without-logit-callback-unaffected
+  (when-model-available
+    (testing "generate without :logit-callback still returns :eog or :length"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "The capital of France is"
+                                     :max-tokens 16 :temp 0.8)
+            (ok (stringp text) "generate returned text")
+            (ok (member stop-reason '(:eog :length))
+                (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))
