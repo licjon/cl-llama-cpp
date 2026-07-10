@@ -82,6 +82,8 @@ New wrappers must follow this convention.")
    #:embed
    ;; Chat templates
    #:chat-template-error
+   #:use-default-template
+   #:use-template
    #:format-chat
    #:tokenize-chat
    #:model-chat-template

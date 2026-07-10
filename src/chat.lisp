@@ -67,8 +67,15 @@ Signals INPUT-VALIDATION-ERROR if MESSAGES is empty or malformed."
               (if (< n-needed 0)
                   (restart-case (error 'chat-template-error)
                     (use-default-template ()
-                      :report "Retry format-chat with the model's default template"
-                      (format-chat model messages
+                      :report "Retry format-chat with llama.cpp's default (chatml) template"
+                      (format-chat model messages :template "chatml"
+                                   :add-assistant-prefix add-assistant-prefix))
+                    (use-template (new-template)
+                      :report "Retry format-chat with a given template (llama.cpp name or template string)"
+                      :interactive (lambda ()
+                                     (format *query-io* "Template: ")
+                                     (list (read-line *query-io*)))
+                      (format-chat model messages :template new-template
                                    :add-assistant-prefix add-assistant-prefix)))
                   (cffi:with-foreign-pointer-as-string (buf (1+ n-needed))
                     (%llama:chat-apply-template
