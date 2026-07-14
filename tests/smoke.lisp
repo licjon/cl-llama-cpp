@@ -1679,3 +1679,9 @@
     (ok (> (cl-llama-cpp::%utf-8-byte-length "こんにちは世界")
            (length "こんにちは世界"))
         "byte length > char length for CJK")))
+
+(deftest test-model-freed-p
+  (let ((m (cl-llama-cpp::%make-llama-model)))
+    (ok (not (cl-llama-cpp:model-freed-p m)))
+    (setf (car (cl-llama-cpp::llama-model-freed-cell m)) t)
+    (ok (cl-llama-cpp:model-freed-p m))))

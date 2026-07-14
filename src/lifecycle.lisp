@@ -155,6 +155,12 @@ to 0/1."
   #-sbcl (prog1 (null (car cell))
            (setf (car cell) t)))
 
+(defun model-freed-p (model)
+  "True when MODEL's underlying llama.cpp model has been freed, whether
+explicitly or by its GC finalizer. A freed model must not reach any FFI
+call."
+  (and (car (llama-model-freed-cell model)) t))
+
 (defun %register-model-finalizer (model)
   (let ((ptr (llama-model-pointer model))
         (cell (llama-model-freed-cell model)))
