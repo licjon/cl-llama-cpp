@@ -132,6 +132,7 @@ New wrappers must follow this convention.")
    #:model-metadata
    #:model-info
    #:model-cls-label
+   #:model-freed-p
    #:context-info
    #:system-info
    ;; Grammar / constrained generation
