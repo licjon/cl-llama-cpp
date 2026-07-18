@@ -160,6 +160,37 @@ Not yet wrapped at the high level (use =%llama= directly):
 
 - Model quantization
 
+*** Chat template compatibility
+
+=format-chat= renders messages through llama.cpp's C-level template engine
+(=llama_chat_apply_template=). That engine recognises a fixed set of known
+template patterns — it does not interpret arbitrary Jinja.
+
+Some newer models embed templates that go beyond what it understands, with
+tool-calling markup or custom control tokens. For those models,
+=format-chat= signals =chat-template-error= even though the model itself is
+fine.
+
+When that happens, you have three ways to recover:
+
+- *Pass a template up front.* Give =:template= to =format-chat= or
+  =tokenize-chat=, using either a built-in name from =list-chat-templates=
+  (e.g. ="gemma"=, ="llama3"=) or a complete template string.
+
+- *Use a restart.* At the debugger, =use-default-template= retries with
+  llama.cpp's generic chatml template, and =use-template= retries with a
+  template you name.
+
+- *Set it downstream.* Libraries built on cl-llama-cpp expose the same
+  knob — e.g. =cl-llm-backend/llama='s =make-llama-backend= accepts
+  =:chat-template=.
+
+Picking the built-in template that matches the model's family usually
+restores correct formatting. One caveat: a model trained on markedly
+different turn markers can format without error yet generate poorly. After
+switching templates, check a sample generation — =model-chat-template=
+shows the embedded template the model actually wanted.
+
 ** Low-Level =%llama= Access
 
 =%llama= is a supported, first-class layer — not an implementation detail. All 881
