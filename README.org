@@ -182,7 +182,7 @@ When that happens, you have three ways to recover:
   template you name.
 
 - *Set it downstream.* Libraries built on cl-llama-cpp expose the same
-  knob — e.g. =cl-llm-backend/llama='s =make-llama-backend= accepts
+  knob — e.g. [[https://github.com/licjon/cl-llm-backend][cl-llm-backend/llama]]'s =make-llama-backend= accepts
   =:chat-template=.
 
 Picking the built-in template that matches the model's family usually
@@ -239,6 +239,8 @@ examples (including model quantization).
 
 ** Built with cl-llama-cpp
 
+- [[https://github.com/licjon/cl-llm-backend][cl-llm-backend]] — provider-agnostic LLM backend protocol; the =llama= backend
+  wraps cl-llama-cpp with configuration, chat-template handling, and streaming.
 - [[https://github.com/licjon/cl-llama-chat][cl-llama-chat]] — terminal interface for cl-llama-cpp providing automatic model
   configuration and dual-branch response selection across sampling configurations.
 
