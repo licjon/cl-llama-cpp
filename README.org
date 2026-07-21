@@ -243,6 +243,8 @@ examples (including model quantization).
   wraps cl-llama-cpp with configuration, chat-template handling, and streaming.
 - [[https://github.com/licjon/cl-llama-chat][cl-llama-chat]] — terminal interface for cl-llama-cpp providing automatic model
   configuration and dual-branch response selection across sampling configurations.
+- [[https://github.com/licjon/clos-alchemy][clos-alchemy]] — structured data extraction from unstructured text using
+  CLOS classes as schemas with grammar-constrained LLM generation.
 
 ** Running Tests
 
