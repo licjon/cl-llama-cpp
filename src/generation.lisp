@@ -1,5 +1,80 @@
 (in-package #:cl-llama-cpp)
 
+;;; Token history ring buffer
+
+(defstruct (token-history (:constructor %make-token-history))
+  (buffer (make-array 0 :element-type 'fixnum) :type (simple-array fixnum (*)))
+  (capacity 0 :type fixnum)
+  (head 0 :type fixnum)
+  (count 0 :type fixnum))
+
+(defun make-token-history (capacity)
+  "Create a token history ring buffer with the given CAPACITY."
+  (declare (optimize (speed 3)))
+  (check-type capacity (integer 1 *))
+  (%make-token-history
+   :buffer (make-array capacity :element-type 'fixnum :initial-element 0)
+   :capacity capacity))
+
+(defun token-history-push (history token)
+  "Push TOKEN into HISTORY, overwriting the oldest entry if full."
+  (declare (optimize (speed 3))
+           (type fixnum token))
+  (let ((cap (token-history-capacity history))
+        (head (token-history-head history)))
+    (declare (type fixnum cap head))
+    (setf (aref (token-history-buffer history) head) token)
+    (setf (token-history-head history) (mod (1+ head) cap))
+    (when (< (token-history-count history) cap)
+      (incf (token-history-count history)))
+    token))
+
+(defun token-history-last (history)
+  "Return the most recently pushed token, or NIL if history is empty."
+  (declare (optimize (speed 3)))
+  (let ((count (token-history-count history)))
+    (declare (type fixnum count))
+    (when (plusp count)
+      (let ((idx (mod (1- (token-history-head history))
+                      (token-history-capacity history))))
+        (declare (type fixnum idx))
+        (aref (token-history-buffer history) idx)))))
+
+(defun token-history-tokens (history n)
+  "Return the last min(N, available) tokens as a (simple-array fixnum (*)),
+oldest first."
+  (declare (optimize (speed 3))
+           (type fixnum n))
+  (let* ((count (token-history-count history))
+         (actual (min n count))
+         (cap (token-history-capacity history))
+         (buf (token-history-buffer history))
+         (head (token-history-head history))
+         (result (make-array actual :element-type 'fixnum)))
+    (declare (type fixnum count actual cap head)
+             (type (simple-array fixnum (*)) buf result))
+    (let ((start (mod (- head actual) cap)))
+      (declare (type fixnum start))
+      (dotimes (i actual)
+        (declare (type fixnum i))
+        (setf (aref result i) (aref buf (mod (+ start i) cap)))))
+    result))
+
+(defun token-history-clear (history)
+  "Clear all tokens from HISTORY."
+  (setf (token-history-head history) 0
+        (token-history-count history) 0)
+  nil)
+
+(defun token-history-prev-str (history model n)
+  "Return the detokenized string of the last N tokens in HISTORY."
+  (let ((tokens (token-history-tokens history n)))
+    (if (zerop (length tokens))
+        ""
+        (detokenize model tokens :remove-special t))))
+
+;;; Seed resolution
+
 (defun resolve-seed (seed)
   "Resolve a seed argument to a uint32 integer for the C sampler layer.
 INTEGER → passed through unchanged.
@@ -19,6 +94,7 @@ Any other type signals INPUT-VALIDATION-ERROR."
                                  grammar grammar-root grammar-lazy
                                  grammar-trigger-words grammar-trigger-patterns
                                  grammar-trigger-tokens infill
+                                 grammar-first
                                  typical-p xtc-probability xtc-threshold
                                  top-n-sigma mirostat mirostat-v2
                                  mirostat-tau mirostat-eta
@@ -43,6 +119,7 @@ resolution to a concrete seed happens when the config is consumed."
                    grammar grammar-root grammar-lazy
                    grammar-trigger-words grammar-trigger-patterns
                    grammar-trigger-tokens infill
+                   grammar-first
                    typical-p xtc-probability xtc-threshold
                    top-n-sigma mirostat mirostat-v2
                    mirostat-tau mirostat-eta
@@ -60,6 +137,7 @@ resolution to a concrete seed happens when the config is consumed."
                                 model grammar (grammar-root "root") grammar-lazy
                                 grammar-trigger-words grammar-trigger-patterns
                                 grammar-trigger-tokens infill
+                                grammar-first
                                 ;; Extended sampler keywords
                                 typical-p
                                 xtc-probability xtc-threshold
@@ -76,6 +154,10 @@ resolution to a concrete seed happens when the config is consumed."
                                 adaptive-p (adaptive-p-decay 0.0))
   "Build and return a sampler chain pointer. Caller must free with %llama:sampler-free.
 When GRAMMAR is provided, a grammar sampler is added (requires MODEL).
+When GRAMMAR-FIRST is true and GRAMMAR is provided, the grammar sampler is
+NOT added to the chain — instead it is returned as a second value so the caller
+can apply it as a logit filter before or after the chain (matching the
+grammar-first resampling pattern from common_sampler).
 When INFILL is true, an infill sampler is added (requires MODEL).
 When MIROSTAT or MIROSTAT-V2 is true, the normal top-k/top-p/min-p/temp/dist
 chain is replaced with the mirostat sampler.
@@ -105,6 +187,7 @@ draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42."
             grammar-trigger-patterns (getf effective :grammar-trigger-patterns nil)
             grammar-trigger-tokens   (getf effective :grammar-trigger-tokens nil)
             infill            (getf effective :infill nil)
+            grammar-first     (getf effective :grammar-first nil)
             typical-p         (getf effective :typical-p nil)
             xtc-probability   (getf effective :xtc-probability nil)
             xtc-threshold     (getf effective :xtc-threshold nil)
@@ -186,20 +269,23 @@ draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42."
           (dolist (ptr foreign-strings)
             (cffi:foreign-string-free ptr)))))
     ;; 4. Grammar / infill
-    (when grammar
-      (unless model (error ":GRAMMAR requires :MODEL"))
-      (%llama:sampler-chain-add
-       chain (llama-sampler-pointer
-              (if grammar-lazy
-                  (make-grammar-sampler-lazy model grammar
-                    :root grammar-root
-                    :trigger-words grammar-trigger-words
-                    :trigger-patterns grammar-trigger-patterns
-                    :trigger-tokens grammar-trigger-tokens)
-                  (make-grammar-sampler model grammar :root grammar-root)))))
-    (when infill
-      (unless model (error ":INFILL requires :MODEL"))
-      (%llama:sampler-chain-add chain (llama-sampler-pointer (make-infill-sampler model))))
+    (let ((grammar-smpl-ptr nil))
+      (when grammar
+        (unless model (error ":GRAMMAR requires :MODEL"))
+        (let ((gptr (llama-sampler-pointer
+                     (if grammar-lazy
+                         (make-grammar-sampler-lazy model grammar
+                           :root grammar-root
+                           :trigger-words grammar-trigger-words
+                           :trigger-patterns grammar-trigger-patterns
+                           :trigger-tokens grammar-trigger-tokens)
+                         (make-grammar-sampler model grammar :root grammar-root)))))
+          (if grammar-first
+              (setf grammar-smpl-ptr gptr)
+              (%llama:sampler-chain-add chain gptr))))
+      (when infill
+        (unless model (error ":INFILL requires :MODEL"))
+        (%llama:sampler-chain-add chain (llama-sampler-pointer (make-infill-sampler model))))
     ;; 5. Sampling strategy
     (cond
       (greedy
@@ -253,7 +339,7 @@ draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42."
            (%llama:sampler-chain-add
             chain (%llama:sampler-init-temp (coerce temp 'single-float))))
        (%llama:sampler-chain-add chain (%llama:sampler-init-dist seed))))
-    chain))
+    (values chain grammar-smpl-ptr))))
 
 (defmacro with-sampler-chain ((var &rest args
                                 &key sampler-config
@@ -262,7 +348,7 @@ draws a fresh seed internally), or NIL (same as :RANDOM).  Default is 42."
                                      model grammar (grammar-root "root")
                                      grammar-lazy grammar-trigger-words
                                      grammar-trigger-patterns grammar-trigger-tokens
-                                     infill
+                                     infill grammar-first
                                      typical-p xtc-probability xtc-threshold
                                      top-n-sigma mirostat mirostat-v2
                                      (mirostat-tau 5.0) (mirostat-eta 0.1)
@@ -282,7 +368,7 @@ BUILD-SAMPLER-CHAIN (same keywords as GENERATE, plus :SAMPLER-CONFIG)."
   (declare (ignore sampler-config temp top-k top-p min-p seed greedy
                    model grammar grammar-root grammar-lazy
                    grammar-trigger-words grammar-trigger-patterns
-                   grammar-trigger-tokens infill
+                   grammar-trigger-tokens infill grammar-first
                    typical-p xtc-probability xtc-threshold
                    top-n-sigma mirostat mirostat-v2
                    mirostat-tau mirostat-eta
@@ -292,13 +378,16 @@ BUILD-SAMPLER-CHAIN (same keywords as GENERATE, plus :SAMPLER-CONFIG)."
                    dry-penalty-last-n dry-seq-breakers logit-bias
                    dynamic-temp-range dynamic-temp-exponent
                    adaptive-p adaptive-p-decay))
-  (let ((chain-sym (gensym "CHAIN")))
+  (let ((chain-sym (gensym "CHAIN"))
+        (grmr-sym (gensym "GRMR")))
     (if args
         `(with-llama-compatible-fp-environment
-           (let ((,chain-sym (build-sampler-chain ,@args)))
+           (multiple-value-bind (,chain-sym ,grmr-sym)
+               (build-sampler-chain ,@args)
              (unwind-protect
                   (let ((,var (%make-llama-sampler :pointer ,chain-sym)))
                     ,@body)
+               (when ,grmr-sym (%llama:sampler-free ,grmr-sym))
                (%llama:sampler-free ,chain-sym))))
         `(with-llama-compatible-fp-environment
            (let ((,chain-sym (%llama:sampler-chain-init
@@ -466,6 +555,64 @@ the IGNORE-LOGIT-CALLBACK-ERROR restart; returns NIL otherwise."
         :report "Abort generation due to logit-callback error"
         :abort))))
 
+(defun %grammar-first-sample (chain-ptr grmr-ptr ctx-ptr n-vocab idx)
+  "Sample with grammar-first resampling: apply grammar to logits, then chain.
+If grammar rejects all candidates, fall back to unconstrained chain sampling.
+Returns the selected token ID. Advances the grammar FSM via sampler-accept."
+  (declare (optimize (speed 3))
+           (type fixnum n-vocab idx))
+  (let ((token-size (cffi:foreign-type-size '(:struct %llama:token-data))))
+    (declare (type fixnum token-size))
+    (cffi:with-foreign-objects ((data-buf '(:struct %llama:token-data) n-vocab)
+                                (arr-buf '(:struct %llama:token-data-array)))
+      (let ((logits-ptr (%llama:get-logits-ith ctx-ptr idx)))
+        (dotimes (i n-vocab)
+          (declare (type fixnum i))
+          (let ((ptr (cffi:inc-pointer data-buf (* i token-size))))
+            (setf (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:id) i
+                  (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:logit)
+                  (cffi:mem-aref logits-ptr :float i)
+                  (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:p) 0.0)))
+      (setf (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:data)
+            data-buf
+            (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:size)
+            n-vocab
+            (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:selected)
+            -1
+            (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:sorted)
+            0)
+      (%llama:sampler-apply grmr-ptr arr-buf)
+      (%llama:sampler-apply chain-ptr arr-buf)
+      (let* ((selected (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array)
+                                                '%llama:selected))
+             (id (if (>= selected 0)
+                     (let ((ptr (cffi:inc-pointer data-buf (* selected token-size))))
+                       (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:id))
+                     ;; Grammar rejected everything — resample without grammar
+                     (progn
+                       (dotimes (i n-vocab)
+                         (declare (type fixnum i))
+                         (let ((ptr (cffi:inc-pointer data-buf (* i token-size))))
+                           (setf (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:id) i
+                                 (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:logit)
+                                 (cffi:mem-aref logits-ptr :float i)
+                                 (cffi:foreign-slot-value ptr '(:struct %llama:token-data) '%llama:p) 0.0)))
+                       (setf (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:size)
+                             n-vocab
+                             (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:selected)
+                             -1
+                             (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array) '%llama:sorted)
+                             0)
+                       (%llama:sampler-apply chain-ptr arr-buf)
+                       (let* ((sel2 (cffi:foreign-slot-value arr-buf '(:struct %llama:token-data-array)
+                                                             '%llama:selected))
+                              (ptr2 (cffi:inc-pointer data-buf (* sel2 token-size))))
+                         (cffi:foreign-slot-value ptr2 '(:struct %llama:token-data) '%llama:id))))))
+        (declare (type fixnum id))
+        (%llama:sampler-accept grmr-ptr id)
+        (%llama:sampler-accept chain-ptr id)
+        id)))))
+
 (llama-defun generate (ctx prompt &rest all-kwargs
                              &key sampler-config
                                   (max-tokens 256) (temp 0.8)
@@ -474,6 +621,7 @@ the IGNORE-LOGIT-CALLBACK-ERROR restart; returns NIL otherwise."
                                   token-callback
                                   logit-callback
                                   grammar (grammar-root "root")
+                                  grammar-first
                                   ;; Extended sampler keywords
                                   typical-p
                                   xtc-probability xtc-threshold
@@ -545,6 +693,7 @@ PROMPT is neither a string nor a vector."
             seed              (getf effective :seed 42)
             grammar           (getf effective :grammar nil)
             grammar-root      (getf effective :grammar-root "root")
+            grammar-first     (getf effective :grammar-first nil)
             typical-p         (getf effective :typical-p nil)
             xtc-probability   (getf effective :xtc-probability nil)
             xtc-threshold     (getf effective :xtc-threshold nil)
@@ -610,32 +759,36 @@ PROMPT is neither a string nor a vector."
       (warn "~@<When :SAMPLER is provided, other sampler keywords ~
 (:SAMPLER-CONFIG, :GRAMMAR, :TOP-K, :TEMP, etc.) are ignored.~@:>"))
     ;; Generation loop
-    (let ((chain-ptr (if sampler
-                         (llama-sampler-pointer sampler)
-                         (build-sampler-chain
-                          :temp temp :top-k top-k :top-p top-p
-                          :min-p min-p :seed seed
-                          :model model :grammar grammar
-                          :grammar-root grammar-root
-                          :typical-p typical-p
-                          :xtc-probability xtc-probability
-                          :xtc-threshold xtc-threshold
-                          :top-n-sigma top-n-sigma
-                          :mirostat mirostat :mirostat-v2 mirostat-v2
-                          :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
-                          :repeat-penalty repeat-penalty
-                          :frequency-penalty frequency-penalty
-                          :presence-penalty presence-penalty
-                          :penalty-last-n penalty-last-n
-                          :dry-multiplier dry-multiplier :dry-base dry-base
-                          :dry-allowed-length dry-allowed-length
-                          :dry-penalty-last-n dry-penalty-last-n
-                          :dry-seq-breakers dry-seq-breakers
-                          :logit-bias logit-bias
-                          :dynamic-temp-range dynamic-temp-range
-                          :dynamic-temp-exponent dynamic-temp-exponent
-                          :adaptive-p adaptive-p
-                          :adaptive-p-decay adaptive-p-decay)))
+    (multiple-value-bind (built-chain-ptr built-grmr-ptr)
+        (if sampler
+            (values (llama-sampler-pointer sampler) nil)
+            (build-sampler-chain
+             :temp temp :top-k top-k :top-p top-p
+             :min-p min-p :seed seed
+             :model model :grammar grammar
+             :grammar-root grammar-root
+             :grammar-first grammar-first
+             :typical-p typical-p
+             :xtc-probability xtc-probability
+             :xtc-threshold xtc-threshold
+             :top-n-sigma top-n-sigma
+             :mirostat mirostat :mirostat-v2 mirostat-v2
+             :mirostat-tau mirostat-tau :mirostat-eta mirostat-eta
+             :repeat-penalty repeat-penalty
+             :frequency-penalty frequency-penalty
+             :presence-penalty presence-penalty
+             :penalty-last-n penalty-last-n
+             :dry-multiplier dry-multiplier :dry-base dry-base
+             :dry-allowed-length dry-allowed-length
+             :dry-penalty-last-n dry-penalty-last-n
+             :dry-seq-breakers dry-seq-breakers
+             :logit-bias logit-bias
+             :dynamic-temp-range dynamic-temp-range
+             :dynamic-temp-exponent dynamic-temp-exponent
+             :adaptive-p adaptive-p
+             :adaptive-p-decay adaptive-p-decay))
+    (let ((chain-ptr built-chain-ptr)
+          (grmr-ptr built-grmr-ptr)
           (emitted-len 0)
           (stop-reason nil))
       (declare (type fixnum emitted-len))
@@ -645,8 +798,10 @@ PROMPT is neither a string nor a vector."
                                n-prompt
                                (1+ (nth-value 1 (kv-cache-pos ctx 0)))))))
             (declare (type fixnum n-past))
-            ;; sampler-sample calls sampler-accept internally — do NOT call
-            ;; sampler-accept again or the grammar FSM double-advances.
+            ;; When grmr-ptr is nil, sampler-sample calls sampler-accept
+            ;; internally — do NOT call sampler-accept again.
+            ;; When grmr-ptr is non-nil, %grammar-first-sample handles
+            ;; both grammar application and accept.
             (macrolet ((sample ()
                          '(progn
                             (when (and logit-callback
@@ -654,7 +809,10 @@ PROMPT is neither a string nor a vector."
                                                    logit-callback ctx-ptr n-vocab)))
                               (setf stop-reason :error)
                               (return))
-                            (%llama:sampler-sample chain-ptr ctx-ptr -1))))
+                            (if grmr-ptr
+                                (%grammar-first-sample
+                                 chain-ptr grmr-ptr ctx-ptr n-vocab -1)
+                                (%llama:sampler-sample chain-ptr ctx-ptr -1)))))
               (loop with sampled of-type fixnum = (sample)
                     while (< (length generated) max-tokens)
                     do
@@ -801,6 +959,7 @@ PROMPT is neither a string nor a vector."
                        (setf sampled (sample))))
                  (when stop-reason (return)))))
         (unless sampler
+          (when grmr-ptr (%llama:sampler-free grmr-ptr))
           (%llama:sampler-free chain-ptr)))
     ;; Convert generated tokens to string.  Always materialise result-tokens so
     ;; it can be returned as the third value for callers that need exact cache
@@ -819,7 +978,7 @@ PROMPT is neither a string nor a vector."
       (values text
               (or stop-reason
                   (if (= n-gen max-tokens) :length :eog))
-              result-tokens))))))
+              result-tokens)))))))
 
 (llama-defun embed (ctx text &key (normalize t))
   "Compute embeddings for TEXT. Returns a vector of single-floats.

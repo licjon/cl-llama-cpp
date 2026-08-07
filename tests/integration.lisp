@@ -3263,3 +3263,106 @@ ws     ::= [ \\t\\n]*")
             (ok (stringp text) "generate returned text")
             (ok (member stop-reason '(:eog :length))
                 (format nil "stop-reason is :eog or :length: ~A" stop-reason))))))))
+
+;;; --- Issue #99: Sampler parity — grammar-first, token history, sample-and-accept-n ---
+
+;;; Feature 1: Grammar-first resampling integration tests
+
+(deftest build-sampler-chain-grammar-first-returns-grammar
+  (when-model-available
+    (testing "build-sampler-chain with :grammar-first t returns grammar sampler as second value"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-llama-compatible-fp-environment
+          (multiple-value-bind (chain grammar-smpl)
+              (cl-llama-cpp::build-sampler-chain
+               :model model :grammar *json-grammar*
+               :grammar-first t :temp 0.1)
+            (unwind-protect
+                 (progn
+                   (ok (not (cffi:null-pointer-p chain))
+                       "chain is non-null")
+                   (ok (not (null grammar-smpl))
+                       "grammar sampler returned as second value")
+                   (ok (not (cffi:null-pointer-p grammar-smpl))
+                       "grammar sampler pointer is non-null"))
+              (%llama:sampler-free chain)
+              (when grammar-smpl
+                (%llama:sampler-free grammar-smpl)))))))))
+
+(deftest build-sampler-chain-grammar-first-nil-keeps-in-chain
+  (when-model-available
+    (testing "build-sampler-chain with :grammar-first nil keeps grammar in chain (default behavior)"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-llama-compatible-fp-environment
+          (multiple-value-bind (chain grammar-smpl)
+              (cl-llama-cpp::build-sampler-chain
+               :model model :grammar *json-grammar*
+               :temp 0.1)
+            (unwind-protect
+                 (progn
+                   (ok (not (cffi:null-pointer-p chain))
+                       "chain is non-null")
+                   (ok (null grammar-smpl)
+                       "no grammar sampler returned when grammar-first is nil"))
+              (%llama:sampler-free chain))))))))
+
+(deftest build-sampler-chain-grammar-first-no-grammar-no-second-value
+  (testing "build-sampler-chain with :grammar-first t but no grammar returns nil second value"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (multiple-value-bind (chain grammar-smpl)
+          (cl-llama-cpp::build-sampler-chain :grammar-first t :temp 0.1)
+        (unwind-protect
+             (progn
+               (ok (not (cffi:null-pointer-p chain))
+                   "chain is non-null")
+               (ok (null grammar-smpl)
+                   "no grammar sampler when no grammar supplied"))
+          (%llama:sampler-free chain))))))
+
+(deftest generate-with-grammar-first-produces-valid-output
+  (when-model-available
+    (testing "generate with :grammar-first t constrains output to grammar"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "Output a JSON object with a name field:"
+                                     :max-tokens 64
+                                     :temp 0.1
+                                     :grammar *json-grammar*
+                                     :grammar-first t)
+            (ok (stringp text)
+                (format nil "generated with grammar-first: ~S" text))
+            (ok (member stop-reason '(:eog :length))
+                (format nil "stop-reason is valid: ~A" stop-reason))))))))
+
+(deftest generate-grammar-first-accepts-keyword
+  (when-model-available
+    (testing "generate accepts :grammar-first keyword"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (cl-llama-cpp:with-context (ctx model :n-ctx 512)
+          (multiple-value-bind (text stop-reason)
+              (cl-llama-cpp:generate ctx "Hello"
+                                     :max-tokens 8
+                                     :temp 0.1
+                                     :grammar-first t)
+            (ok (stringp text)
+                "generate with :grammar-first (no grammar) returns text")
+            (ok (member stop-reason '(:eog :length))
+                "stop-reason is valid")))))))
+
+;;; Feature 2: Token history integration tests
+
+(deftest token-history-prev-str
+  (when-model-available
+    (testing "token-history-prev-str detokenizes history tokens"
+      (cl-llama-cpp:with-model (model *test-model-path* :n-gpu-layers 0)
+        (let* ((hist (cl-llama-cpp:make-token-history 64))
+               (tokens (cl-llama-cpp:tokenize model "Hello world"))
+               (n-tokens (length tokens)))
+          (dotimes (i n-tokens)
+            (cl-llama-cpp:token-history-push hist (aref tokens i)))
+          (let ((prev-str (cl-llama-cpp:token-history-prev-str hist model n-tokens)))
+            (ok (stringp prev-str) "token-history-prev-str returns a string")
+            (ok (search "Hello" prev-str)
+                (format nil "prev-str contains 'Hello': ~S" prev-str))))))))

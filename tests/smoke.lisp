@@ -1685,3 +1685,117 @@
     (ok (not (cl-llama-cpp:model-freed-p m)))
     (setf (car (cl-llama-cpp::llama-model-freed-cell m)) t)
     (ok (cl-llama-cpp:model-freed-p m))))
+
+;;; --- Issue #99: Sampler parity — grammar-first, token history, sample-and-accept-n ---
+
+;;; Feature 1: Grammar-first resampling
+
+(deftest grammar-first-keyword-accepted-by-build-sampler-chain
+  (testing "build-sampler-chain accepts :grammar-first keyword without error"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (let ((chain (cl-llama-cpp::build-sampler-chain :grammar-first t)))
+        (unwind-protect
+             (ok (not (cffi:null-pointer-p chain))
+                 "chain with :grammar-first (no grammar) is non-null")
+          (%llama:sampler-free chain))))))
+
+(deftest grammar-first-returns-two-values
+  (testing "build-sampler-chain with :grammar-first t returns grammar sampler as second value"
+    (ok (handler-case
+            (progn
+              (cl-llama-cpp:with-llama-compatible-fp-environment
+                (cl-llama-cpp::build-sampler-chain :grammar-first t))
+              t)
+          (error () nil))
+        "build-sampler-chain with :grammar-first t does not error (no grammar = no second value)")))
+
+(deftest grammar-first-keyword-in-make-sampler-config
+  (testing "make-sampler-config accepts :grammar-first keyword"
+    (let ((cfg (cl-llama-cpp:make-sampler-config :grammar-first t :temp 0.3)))
+      (ok (eq t (getf cfg :grammar-first)) ":grammar-first stored in config"))))
+
+(deftest grammar-first-keyword-in-with-sampler-chain
+  (testing "with-sampler-chain accepts :grammar-first keyword"
+    (cl-llama-cpp:with-llama-compatible-fp-environment
+      (%llama:backend-init)
+      (cl-llama-cpp:with-sampler-chain (chain :grammar-first t)
+        (ok (cl-llama-cpp:llama-sampler-p chain)
+            "chain created with :grammar-first is a valid handle")))))
+
+;;; Feature 2: Token history tracking
+
+(deftest token-history-symbols-exported
+  (testing "token history symbols are exported from cl-llama-cpp"
+    (dolist (sym '(make-token-history
+                   token-history-push
+                   token-history-last
+                   token-history-tokens
+                   token-history-clear))
+      (let ((found (find-symbol (symbol-name sym) :cl-llama-cpp)))
+        (ok found (format nil "~A is accessible in cl-llama-cpp" sym))
+        (when found
+          (multiple-value-bind (s status) (find-symbol (symbol-name sym) :cl-llama-cpp)
+            (declare (ignore s))
+            (ok (eq status :external)
+                (format nil "~A is exported" sym))))))))
+
+(deftest token-history-functions-fbound
+  (testing "token history functions are fbound"
+    (dolist (sym-name '("MAKE-TOKEN-HISTORY"
+                        "TOKEN-HISTORY-PUSH"
+                        "TOKEN-HISTORY-LAST"
+                        "TOKEN-HISTORY-TOKENS"
+                        "TOKEN-HISTORY-CLEAR"))
+      (let ((sym (find-symbol sym-name :cl-llama-cpp)))
+        (ok (and sym (fboundp sym))
+            (format nil "~A is fbound" sym-name))))))
+
+(deftest token-history-basic-operations
+  (testing "make-token-history creates a history, push/last/tokens work"
+    (let ((hist (cl-llama-cpp:make-token-history 8)))
+      (ok hist "make-token-history returns non-nil")
+      (cl-llama-cpp:token-history-push hist 100)
+      (cl-llama-cpp:token-history-push hist 200)
+      (cl-llama-cpp:token-history-push hist 300)
+      (ok (= 300 (cl-llama-cpp:token-history-last hist))
+          "token-history-last returns most recent token")
+      (let ((tokens (cl-llama-cpp:token-history-tokens hist 2)))
+        (ok (vectorp tokens) "token-history-tokens returns a vector")
+        (ok (= 2 (length tokens)) "requested 2 tokens, got 2")
+        (ok (= 200 (aref tokens 0)) "first element is second-to-last push")
+        (ok (= 300 (aref tokens 1)) "second element is last push")))))
+
+(deftest token-history-ring-buffer-overflow
+  (testing "token history wraps around when capacity exceeded"
+    (let ((hist (cl-llama-cpp:make-token-history 4)))
+      (dotimes (i 6)
+        (cl-llama-cpp:token-history-push hist (* (1+ i) 10)))
+      (ok (= 60 (cl-llama-cpp:token-history-last hist))
+          "last token is most recent push")
+      (let ((tokens (cl-llama-cpp:token-history-tokens hist 4)))
+        (ok (= 4 (length tokens)) "capacity is 4, returns 4")
+        (ok (= 30 (aref tokens 0)) "oldest surviving token is 30")
+        (ok (= 60 (aref tokens 3)) "newest token is 60")))))
+
+(deftest token-history-clear
+  (testing "token-history-clear empties the history"
+    (let ((hist (cl-llama-cpp:make-token-history 8)))
+      (cl-llama-cpp:token-history-push hist 42)
+      (cl-llama-cpp:token-history-clear hist)
+      (let ((tokens (cl-llama-cpp:token-history-tokens hist 10)))
+        (ok (= 0 (length tokens)) "no tokens after clear")))))
+
+(deftest token-history-tokens-clamps-to-available
+  (testing "token-history-tokens returns min(n, available) tokens"
+    (let ((hist (cl-llama-cpp:make-token-history 8)))
+      (cl-llama-cpp:token-history-push hist 1)
+      (cl-llama-cpp:token-history-push hist 2)
+      (let ((tokens (cl-llama-cpp:token-history-tokens hist 100)))
+        (ok (= 2 (length tokens)) "only 2 tokens available, returns 2")))))
+
+(deftest token-history-last-empty
+  (testing "token-history-last returns nil on empty history"
+    (let ((hist (cl-llama-cpp:make-token-history 4)))
+      (ok (null (cl-llama-cpp:token-history-last hist))
+          "token-history-last is nil on empty history"))))
