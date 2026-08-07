@@ -122,13 +122,18 @@ Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
   via caller-supplied draft/verify/accept closures (=:speculative-fns=; see
   [[https://github.com/licjon/cl-llama-cpp-extras][cl-llama-cpp-extras]] for ready-made primitives). Reusable sampler config
   objects (=make-sampler-config=) and explicit sampler chains (=with-sampler-chain=,
-  individual =make-*-sampler= constructors).
+  individual =make-*-sampler= constructors). Token history ring buffer
+  (=make-token-history=) for tracking accepted tokens with =token-history-prev-str=
+  for debugging.
 - *Chat* — Simple sessions (full-history prefill) and incremental sessions
   (=make-chat-session= / =chat-session-send=: KV-cache reuse keeps per-turn prefill
   cost proportional to new tokens only; supports =:speculative-fns= for speculative
   decoding). Chat template formatting and safe multi-turn tokenization (=format-chat=,
   =tokenize-chat=).
 - *Constrained generation* — GBNF grammars, lazy grammars with trigger words, infill.
+  Grammar-first resampling (=:grammar-first t=) applies grammar constraints first and
+  falls back to unconstrained sampling when the grammar rejects all candidates — matching
+  upstream =common_sampler='s resampling pattern.
 - *Parallel decoding* — =generate-parallel= runs multiple prompts simultaneously in
   shared forward passes. Independent contexts can run concurrently on separate threads
   (SBCL only for thread-safety guarantees; see Requirements).

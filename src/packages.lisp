@@ -142,6 +142,13 @@ New wrappers must follow this convention.")
    #:make-grammar-sampler-lazy
    #:make-infill-sampler
    #:with-grammar-sampler
+   ;; Token history ring buffer
+   #:make-token-history
+   #:token-history-push
+   #:token-history-last
+   #:token-history-tokens
+   #:token-history-clear
+   #:token-history-prev-str
    ;; Sampler utilities
    #:sampler-chain-add
    #:sampler-seed
