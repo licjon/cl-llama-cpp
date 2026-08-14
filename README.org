@@ -239,6 +239,8 @@ was merged in from the formerly separate =cl-llama-cpp-extras= repo.
 Each system has a matching =/tests= system (e.g.
 =cl-llama-cpp/common/chat/tests=), runnable the same way as [[*Running Tests][the core tests]].
 
+See [[file:common/README.org][common/README.org]] for per-extension usage, signals, and restarts.
+
 Examples live under =examples/common/= rather than alongside the core
 library's examples:
 
