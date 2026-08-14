@@ -342,9 +342,9 @@ Load individual extensions:
 (asdf:load-system "cl-llama-cpp/examples")
 #+end_src
 
-| File                                | Demonstrates                                                      |
-|---------------------------------------+---------------------------------------------------------------------|
-| =examples/common/json-schema.lisp=    | Schema → GBNF conversion, constrained generation, error handling |
+| File                             | Demonstrates                                                      |
+|----------------------------------+-------------------------------------------------------------------|
+| =examples/common/json-schema.lisp= | Schema → GBNF conversion, constrained generation, error handling |
 
 Run without a model (demos 1 and 3 only need the shim):
 
