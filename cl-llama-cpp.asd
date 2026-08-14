@@ -48,7 +48,9 @@
                  (:file "sampler-comparison")
                  (:file "sampler-showcase")
                  (:file "tool-calling")
-                 (:file "json-schema")))))
+                 (:module "common"
+                  :components
+                  ((:file "json-schema")))))))
 
 (defsystem "cl-llama-cpp/generate"
   :description "Binding generator for cl-llama-cpp (developers only)"

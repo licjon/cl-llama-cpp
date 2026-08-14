@@ -239,6 +239,13 @@ was merged in from the formerly separate =cl-llama-cpp-extras= repo.
 Each system has a matching =/tests= system (e.g.
 =cl-llama-cpp/common/chat/tests=), runnable the same way as [[*Running Tests][the core tests]].
 
+Examples live under =examples/common/= rather than alongside the core
+library's examples:
+
+| File                                       | Demonstrates                              |
+|---------------------------------------------+---------------------------------------------|
+| =examples/common/json-schema.lisp=           | JSON Schema-constrained generation          |
+
 ** Examples
 
 #+begin_src lisp
