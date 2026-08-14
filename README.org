@@ -120,7 +120,8 @@ Multi-turn chat with KV-cache reuse — each turn decodes only the new tokens:
   min-p, mirostat v1/v2, XTC, DRY, typical-p, top-n-sigma, dynamic temperature,
   repetition/frequency/presence penalties, logit bias, greedy). Speculative decoding
   via caller-supplied draft/verify/accept closures (=:speculative-fns=; see
-  [[https://github.com/licjon/cl-llama-cpp-extras][cl-llama-cpp-extras]] for ready-made primitives). Reusable sampler config
+  [[*Common Module][the common module]]'s =speculative= and =ngram-map= systems for
+  ready-made primitives). Reusable sampler config
   objects (=make-sampler-config=) and explicit sampler chains (=with-sampler-chain=,
   individual =make-*-sampler= constructors). Token history ring buffer
   (=make-token-history=) for tracking accepted tokens with =token-history-prev-str=
@@ -210,6 +211,42 @@ SBCL's FP traps. The high-level API handles this automatically via =llama-defun=
 
 See [[docs/low-level.org]] for naming conventions, struct and enum usage, and worked
 examples (including model quantization).
+
+** Common Module
+
+=cl-llama-cpp/common= mirrors llama.cpp's own =common/= layer: optional
+extensions that depend on C++ internals not covered by the public C API.
+Each extension is its own ASDF system under the =cl-llama-cpp/common/=
+prefix, and they share a single unified C++ shim library
+(=libllama-common-shim.so=, built automatically on first load). This module
+was merged in from the formerly separate =cl-llama-cpp-extras= repo.
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/common/chat")
+#+end_src
+
+| System                                 | Provides                                                          |
+|-----------------------------------------+--------------------------------------------------------------------|
+| =cl-llama-cpp/common/json-schema=       | JSON Schema → GBNF grammar conversion for constrained generation   |
+| =cl-llama-cpp/common/json-partial=      | Streaming JSON healer — parse incomplete JSON mid-generation       |
+| =cl-llama-cpp/common/chat=              | Chat template rendering (Jinja) and tool-call parsing              |
+| =cl-llama-cpp/common/speculative=       | Self-speculative decoding via n-gram prediction                    |
+| =cl-llama-cpp/common/ngram-map=         | N-gram speculative token drafting via hash-map lookup              |
+| =cl-llama-cpp/common/reasoning-budget=  | Token budget limiter for =<think>...</think>= reasoning blocks       |
+| =cl-llama-cpp/common/imatrix-loader=    | Importance matrix loading for quantization workflows               |
+| =cl-llama-cpp/common/fit=               | Automatic GPU memory fitting (=n-gpu-layers=, context, tensor split) |
+
+Each system has a matching =/tests= system (e.g.
+=cl-llama-cpp/common/chat/tests=), runnable the same way as [[*Running Tests][the core tests]].
+
+See [[file:common/README.org][common/README.org]] for per-extension usage, signals, and restarts.
+
+Examples live under =examples/common/= rather than alongside the core
+library's examples:
+
+| File                                       | Demonstrates                              |
+|---------------------------------------------+---------------------------------------------|
+| =examples/common/json-schema.lisp=           | JSON Schema-constrained generation          |
 
 ** Examples
 

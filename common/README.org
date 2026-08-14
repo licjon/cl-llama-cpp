@@ -1,0 +1,403 @@
+* cl-llama-cpp/common
+
+Optional extensions for [[file:../README.org][cl-llama-cpp]] that depend on C++ internals not
+covered by the public C API. Mirrors llama.cpp's own =src/= + =common/= split
+— see the main README's [[file:../README.org::*Common Module][Common Module section]] for the short version. Each
+extension lives in its own ASDF system under the =cl-llama-cpp/common/=
+prefix. All extensions share a single unified C++ shim library
+(=libllama-common-shim.so=), built automatically on first load.
+
+Formerly the separate =cl-llama-cpp-extras= repo, merged in as this module.
+
+** Extensions
+
+*** =cl-llama-cpp/common/json-schema=
+
+Convert JSON Schema strings to GBNF grammars for constrained generation. Wraps
+llama.cpp's =json_schema_to_grammar()= (a C++ function in =libllama-common=) via
+a thin C shim with =extern "C"= linkage.
+
+#+begin_src lisp
+;; Convert a JSON Schema to a GBNF grammar string
+(cl-llama-cpp/common/json-schema:json-schema-to-grammar
+  "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}")
+
+;; Use the grammar for constrained generation
+(let ((gbnf (cl-llama-cpp/common/json-schema:json-schema-to-grammar schema)))
+  (cl-llama-cpp:generate ctx prompt :grammar gbnf))
+
+;; Or create a sampler directly (for manual chain building)
+(let ((gs (cl-llama-cpp/common/json-schema:make-json-schema-sampler model schema)))
+  (cl-llama-cpp:with-sampler-chain (chain)
+    (cl-llama-cpp:sampler-chain-add chain gs)
+    (cl-llama-cpp:sampler-chain-add chain (cl-llama-cpp:make-dist-sampler 42))
+    (cl-llama-cpp:generate ctx prompt :sampler chain)))
+#+end_src
+
+Signals =json-schema-parse-error= (malformed JSON) and =json-schema-conversion-error=
+(invalid schema), both subtypes of =cl-llama-cpp:llama-error=. A =use-different-schema=
+restart is established for interactive recovery.
+
+*** =cl-llama-cpp/common/json-partial=
+
+Parse incomplete JSON mid-generation by adding missing closers. Wraps
+llama.cpp's =common_json_parse()= from =json-partial.h=. Useful for streaming
+tool-call extraction — lets you parse partial JSON output before the model
+finishes generating.
+
+#+begin_src lisp
+;; Parse complete JSON (no healing)
+(cl-llama-cpp/common/json-partial:json-partial-parse "{\"name\":\"Alice\"}")
+;; => "{\"name\":\"Alice\"}", NIL, ""
+
+;; Heal partial JSON with a healing marker
+(cl-llama-cpp/common/json-partial:json-partial-parse
+  "{\"name\":\"Ali"
+  :healing-marker "$HEAL$")
+;; => "{\"name\":\"Ali$HEAL$\"}", T, "$HEAL$"
+;; The json-dump-marker (third value) locates where healing begins in the output
+#+end_src
+
+Returns three values: the parsed JSON string, whether healing was applied (=T= or
+=NIL=), and the json-dump-marker (a string that locates the healing boundary in
+the output). Signals =json-partial-parse-error= when the input cannot be parsed
+or healed, a subtype of =json-partial-error= (itself a subtype of
+=cl-llama-cpp:llama-error=).
+
+*** =cl-llama-cpp/common/speculative=
+
+Self-speculative decoding via n-gram prediction (=NGRAM_SIMPLE=). The model
+drafts candidate tokens based on n-gram patterns in the prompt, then verifies
+them in a single batch — no separate draft model required.
+
+#+begin_src lisp
+;; Create params and configure n-gram speculative decoding
+(cl-llama-cpp/common/speculative:with-speculative-params (params)
+  (cl-llama-cpp/common/speculative:speculative-params-add-type
+    params cl-llama-cpp/common/speculative:+speculative-type-ngram-simple+)
+  (cl-llama-cpp/common/speculative:speculative-params-set-ngram-n params 4)
+
+  ;; Initialize the speculative context
+  (cl-llama-cpp/common/speculative:with-speculative-context (ctx params)
+    ;; Begin with prompt tokens
+    (cl-llama-cpp/common/speculative:speculative-begin ctx 0 prompt-tokens)
+
+    ;; Draft/verify loop
+    (let ((drafted (cl-llama-cpp/common/speculative:speculative-draft ctx
+                     :seq-id 0
+                     :n-past n-past
+                     :id-last last-token
+                     :prompt-tokens prompt-tokens)))
+      ;; ... verify drafted tokens with target model ...
+      (cl-llama-cpp/common/speculative:speculative-accept ctx 0 n-accepted))))
+#+end_src
+
+Signals =speculative-init-error= (a subtype of =cl-llama-cpp:llama-error=) on
+initialization failure.
+
+Currently supported types: =+speculative-type-ngram-simple+= (self-speculative,
+no draft model). Draft-model types (=DRAFT_SIMPLE=, =EAGLE3=, =MTP=) are defined
+as constants but require cross-package batch access and are deferred.
+
+*** =cl-llama-cpp/common/reasoning-budget=
+
+Limit how many tokens a reasoning model (DeepSeek-R1, QwQ, etc.) can spend
+inside a =<think>...</think>= block. Wraps =common/reasoning-budget.h= — a
+=llama_sampler= with a state machine
+(=IDLE → COUNTING → WAITING_UTF8 → FORCING → DONE=) that counts tokens after a
+start sequence and forces an end sequence once the budget runs out.
+
+The sampler is created via a shim because the upstream C++ API takes
+=std::vector<llama_token>&= parameters.
+
+#+begin_src lisp
+;; Load the extension
+(asdf:load-system "cl-llama-cpp/common/reasoning-budget")
+
+;; Tokenize the start/end/forced sequences for your model.
+;; For DeepSeek-R1 style models, these are typically:
+;;   start  = "<think>"
+;;   end    = "</think>"
+;;   forced = "</think>"  (what gets injected when budget expires)
+(let* ((start-tokens  (cl-llama-cpp:tokenize model "<think>"
+                        :add-special nil :parse-special t))
+       (end-tokens    (cl-llama-cpp:tokenize model "</think>"
+                        :add-special nil :parse-special t))
+       (forced-tokens (cl-llama-cpp:tokenize model "</think>"
+                        :add-special nil :parse-special t))
+
+       ;; Create the sampler — allow up to 1024 thinking tokens
+       (rb (cl-llama-cpp/common/reasoning-budget:make-reasoning-budget-sampler
+             model start-tokens end-tokens forced-tokens 1024)))
+
+  ;; Add it to your sampler chain (before the sampling strategy).
+  ;; The chain takes ownership — freeing the chain frees this sampler too.
+  (cl-llama-cpp:with-sampler-chain (chain :model model :temp 0.6 :min-p 0.1)
+    (cl-llama-cpp:sampler-chain-add chain rb)
+    (cl-llama-cpp:generate ctx prompt :sampler chain)))
+#+end_src
+
+The sampler works as a logit filter: in =FORCING= state it sets all logits to
+=-inf= except the next forced token, guaranteeing the end sequence is emitted.
+In all other states it's a passthrough.
+
+#+begin_src lisp
+;; Query the state machine at any point
+(cl-llama-cpp/common/reasoning-budget:reasoning-budget-state rb)
+;; => :IDLE, :COUNTING, :WAITING-UTF8, :FORCING, or :DONE
+
+;; Manually force an early end to thinking (only works from :COUNTING)
+(cl-llama-cpp/common/reasoning-budget:reasoning-budget-force rb)
+;; => T if transition occurred, NIL otherwise
+#+end_src
+
+The sampler re-arms on a new =<think>= tag after reaching =DONE=, so models
+that emit multiple thinking blocks each get a fresh budget window.
+
+Signals =reasoning-budget-init-error= (a subtype of =cl-llama-cpp:llama-error=)
+if sampler creation fails.
+
+*** =cl-llama-cpp/common/chat=
+
+Structured chat template rendering and tool-call parsing via llama.cpp's
+=common/chat.h=. Provides Jinja-based template rendering, GBNF grammar
+generation for constrained tool calling, and output parsing into structured
+messages. This is the higher-level layer above =cl-llama-cpp='s =chat.lisp=
+(which wraps the simpler C function =llama_chat_apply_template=).
+
+#+begin_src lisp
+;; Create a templates handle from a loaded model
+(cl-llama-cpp/common/chat:with-chat-templates (tmpls model)
+
+  ;; Render messages to a prompt + grammar for constrained generation
+  (let* ((messages (list (list :role "system" :content "You are helpful.")
+                         (list :role "user" :content "What's the weather?")))
+         (tools (list (list :name "get_weather"
+                            :description "Get current weather"
+                            :parameters "{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}")))
+         (result (cl-llama-cpp/common/chat:chat-templates-apply
+                   tmpls messages :tools tools)))
+    ;; result is a plist: :PROMPT, :GRAMMAR, :FORMAT, :GRAMMAR-LAZY, ...
+    (let ((prompt (getf result :prompt))
+          (grammar (getf result :grammar)))
+      ;; Use prompt + grammar for constrained generation
+      (cl-llama-cpp:generate ctx prompt :grammar grammar))))
+#+end_src
+
+Parse model output back into structured messages:
+
+#+begin_src lisp
+;; Parse content-only output (no tool calls)
+(cl-llama-cpp/common/chat:chat-parse "Hello!")
+;; => (:ROLE "assistant" :CONTENT "Hello!")
+
+;; Validate a chat template string
+(cl-llama-cpp/common/chat:chat-verify-template
+  "{% for message in messages %}...{% endfor %}" :use-jinja t)
+;; => T or NIL
+#+end_src
+
+The templates handle needs a GC finalizer or =with-chat-templates= for cleanup.
+It must not outlive the model it was created from.
+
+Signals =chat-init-error= (template/apply failures) and =chat-parse-error=
+(parse failures), both subtypes of =cl-llama-cpp:llama-error=.
+
+*** =cl-llama-cpp/common/ngram-map=
+
+N-gram speculative token drafting via hash-map lookup. Wraps
+=common/ngram-map.h= — a stateful map that records n-gram patterns in the
+generation history and drafts candidate continuations from them. Includes a
+simpler stateless =ngram-simple-draft= function for one-shot pattern matching.
+
+#+begin_src lisp
+;; Stateless: draft from token history directly
+(cl-llama-cpp/common/ngram-map:ngram-simple-draft
+  2 3                            ; n-gram size, m-gram draft size
+  #(10 20 30 40 50 10 20 30)    ; token history
+  40)                            ; last sampled token
+;; => #(50 10 20)  — drafted tokens from matched pattern
+
+;; Stateful: create a map, train on history, draft
+(cl-llama-cpp/common/ngram-map:with-ngram-map (m 2 3 :key-only-p t :min-hits 1)
+  (let ((tokens #(10 20 30 40 50 10 20 30)))
+    (cl-llama-cpp/common/ngram-map:ngram-map-begin m tokens)
+    (let ((drafted (cl-llama-cpp/common/ngram-map:ngram-map-draft m tokens 40)))
+      ;; ... verify drafted tokens with target model ...
+      (cl-llama-cpp/common/ngram-map:ngram-map-accept m (length drafted)))))
+#+end_src
+
+The map handle is freed automatically by =with-ngram-map= or GC finalization;
+=free-ngram-map= is available for explicit cleanup (idempotent).
+
+Signals =ngram-map-init-error= (a subtype of =cl-llama-cpp:llama-error=) on
+allocation failure.
+
+*** =cl-llama-cpp/common/fit=
+
+Automatic GPU memory fitting — compute optimal =n-gpu-layers=, context size,
+and tensor split to fit available device memory. Wraps =common/fit.h=, which
+probes actual device memory rather than relying on metadata estimates.
+Eliminates the "how many layers can I offload?" guesswork.
+
+#+begin_src lisp
+;; Compute fitting parameters for a model
+(let ((result (cl-llama-cpp/common/fit:fit-params
+                "/path/to/model.gguf"
+                :margin (* 256 1024 1024)   ; leave 256 MiB free per device
+                :n-ctx-min 512              ; minimum context size
+                :log-level :warn)))         ; :none :debug :info :warn :error
+  (format t "Status: ~A~%" (cl-llama-cpp/common/fit:fit-result-status result))
+  (format t "GPU layers: ~A~%" (cl-llama-cpp/common/fit:fit-result-n-gpu-layers result))
+  (format t "Context: ~A~%" (cl-llama-cpp/common/fit:fit-result-n-ctx result))
+  (format t "Tensor split: ~A~%" (cl-llama-cpp/common/fit:fit-result-tensor-split result))
+
+  ;; Use the computed parameters to load the model
+  (when (eq :success (cl-llama-cpp/common/fit:fit-result-status result))
+    (cl-llama-cpp:with-model (model "/path/to/model.gguf"
+                               :n-gpu-layers (cl-llama-cpp/common/fit:fit-result-n-gpu-layers result))
+      ;; ...
+      )))
+
+;; Print estimated per-device memory breakdown
+(cl-llama-cpp/common/fit:fit-print "/path/to/model.gguf")
+
+;; Print memory breakdown for an already-loaded context
+(cl-llama-cpp/common/fit:memory-breakdown-print ctx)
+#+end_src
+
+Returns a =fit-result= struct with =status= (=:success=, =:failure=, or
+=:error=), =n-gpu-layers=, =n-ctx=, and =tensor-split=. Signals =fit-error=
+(a subtype of =cl-llama-cpp:llama-error=) on hard errors (e.g. model not found).
+
+*Thread safety caveat:* =fit-params= is NOT thread safe — it modifies the
+global llama logger state internally.
+
+*** =cl-llama-cpp/common/imatrix-loader=
+
+Load importance matrices from =.dat= (legacy) or =.gguf= files for use in
+quantization workflows. Wraps =common/imatrix-loader.h= — a single
+=load-imatrix= function that reads the file and returns all data as CL structs.
+
+#+begin_src lisp
+;; Load an importance matrix
+(let ((imat (cl-llama-cpp/common/imatrix-loader:load-imatrix
+              "/path/to/imatrix.dat")))
+
+  ;; Inspect metadata
+  (cl-llama-cpp/common/imatrix-loader:imatrix-chunk-count imat)   ; => 100
+  (cl-llama-cpp/common/imatrix-loader:imatrix-chunk-size imat)    ; => 512
+  (cl-llama-cpp/common/imatrix-loader:imatrix-legacy-p imat)      ; => T or NIL
+  (cl-llama-cpp/common/imatrix-loader:imatrix-has-metadata-p imat) ; => T or NIL
+  (cl-llama-cpp/common/imatrix-loader:imatrix-datasets imat)      ; => ("wiki" ...)
+
+  ;; Access entries — hash table mapping tensor name to imatrix-entry
+  (let ((entries (cl-llama-cpp/common/imatrix-loader:imatrix-entries imat)))
+    (maphash (lambda (name entry)
+               (format t "~A: ~D sums, ~D counts~%"
+                       name
+                       (length (cl-llama-cpp/common/imatrix-loader:imatrix-entry-sums entry))
+                       (length (cl-llama-cpp/common/imatrix-loader:imatrix-entry-counts entry))))
+             entries)))
+#+end_src
+
+Returns pure CL data — no opaque pointers or cleanup needed. The C-side handle
+is created, read, and freed within the single =load-imatrix= call.
+
+Signals =imatrix-load-error= (a subtype of =cl-llama-cpp:llama-error=) when the
+file cannot be loaded or parsed.
+
+** Requirements
+
+- llama.cpp built (=libllama-common.so= must exist) — see the main
+  [[file:../README.org::*Installation][Installation]] section
+- A C++17 compiler (for building the shim)
+
+** Installation
+
+This module ships as part of =cl-llama-cpp= — no separate clone needed once
+=cl-llama-cpp= itself is installed and =llama.cpp= is built.
+
+The unified C++ shim (=libllama-common-shim.so=) is built automatically on first
+load of any extension. It rebuilds whenever =libllama-common.so= or any shim
+source file is updated, so upgrading the =llama.cpp= submodule is handled
+transparently.
+
+Load individual extensions:
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/common/json-schema")
+(asdf:load-system "cl-llama-cpp/common/json-partial")
+(asdf:load-system "cl-llama-cpp/common/speculative")
+(asdf:load-system "cl-llama-cpp/common/reasoning-budget")
+(asdf:load-system "cl-llama-cpp/common/chat")
+(asdf:load-system "cl-llama-cpp/common/ngram-map")
+(asdf:load-system "cl-llama-cpp/common/imatrix-loader")
+(asdf:load-system "cl-llama-cpp/common/fit")
+#+end_src
+
+** Examples
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/examples")
+#+end_src
+
+| File                             | Demonstrates                                                      |
+|----------------------------------+-------------------------------------------------------------------|
+| =examples/common/json-schema.lisp= | Schema → GBNF conversion, constrained generation, error handling |
+
+Run without a model (demos 1 and 3 only need the shim):
+
+#+begin_src lisp
+(cl-llama-cpp/common/examples/json-schema:run)
+#+end_src
+
+Run with a model (all demos):
+
+#+begin_src lisp
+(setf cl-llama-cpp/common/examples/json-schema::*model-path*
+      "/path/to/model.gguf")
+(cl-llama-cpp/common/examples/json-schema:run)
+#+end_src
+
+** Running Tests
+
+#+begin_src bash
+# JSON Schema tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/json-schema/tests")' \
+        --eval '(sb-ext:quit)'
+
+# JSON partial healing tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/json-partial/tests")' \
+        --eval '(sb-ext:quit)'
+
+# Speculative decoding tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/speculative/tests")' \
+        --eval '(sb-ext:quit)'
+
+# Reasoning budget tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/reasoning-budget/tests")' \
+        --eval '(sb-ext:quit)'
+
+# Chat tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/chat/tests")' \
+        --eval '(sb-ext:quit)'
+
+# N-gram map tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/ngram-map/tests")' \
+        --eval '(sb-ext:quit)'
+
+# Importance matrix loader tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/imatrix-loader/tests")' \
+        --eval '(sb-ext:quit)'
+
+# Fit (GPU memory fitting) tests
+ros run --eval '(asdf:test-system "cl-llama-cpp/common/fit/tests")' \
+        --eval '(sb-ext:quit)'
+#+end_src
+
+No model is required — tests exercise the shim API, conditions, and lifecycle.
+
+** License
+
+MIT
