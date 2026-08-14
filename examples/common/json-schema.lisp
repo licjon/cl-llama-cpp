@@ -11,7 +11,7 @@
 ;;;;   3. Error handling — conditions, restarts, and recovery
 ;;;;
 ;;;; Setup:
-;;;;   (ql:quickload :cl-llama-cpp/common/examples)
+;;;;   (ql:quickload :cl-llama-cpp/examples)
 ;;;;   (setf cl-llama-cpp/common/examples/json-schema::*model-path*
 ;;;;         "/path/to/model.gguf")
 ;;;;   (cl-llama-cpp/common/examples/json-schema:run)
