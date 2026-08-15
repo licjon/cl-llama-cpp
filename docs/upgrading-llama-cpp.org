@@ -1,0 +1,320 @@
+* Upgrading llama.cpp
+
+Step-by-step procedure for bumping the llama.cpp submodule to a new release.
+
+** Overview
+
+The pipeline is: *submodule update -> rebuild shared library -> c2ffi spec -> CLAW -> fixups -> bindings.lisp*. After the bindings regenerate, verify that the high-level API and tests still work. Breakage almost always comes from renamed/removed C functions or changed struct layouts.
+
+** When to update
+
+llama.cpp cuts build tags (=b9631=, =b9632=, ...) multiple times per /day/. These are CI artifacts, not meaningful releases. *Do not chase them.*
+
+What matters is changes to =llama.h= --- the C API surface. In practice:
+
+- *~5--14 commits touch =llama.h= per month* (116 in the 18 months to June 2026)
+- *~21 of those were breaking* (deprecations, removals, refactors, renames)
+- The pattern is: *deprecate -> keep for 1--3 months -> remove*
+
+*** Recommended cadence: quarterly
+
+Update roughly every 3 months, timed to /after/ a removal wave rather than during a deprecation window. Concretely:
+
+1. *Don't chase build tags.* Updating weekly would be pure churn with near-zero benefit for a binding library.
+2. *Update when you need something.* If a new feature you want to wrap (grammar, LoRA, multimodal) lands in =llama.h=, that's the natural time to bump.
+3. *Avoid the deprecation window.* If you see a function you use just got deprecated, wait until the /next/ quarter --- by then the replacement API will be stable and you only adapt once instead of twice.
+4. *Check the changelog quarterly* even if you don't need anything, to stay aware of what's moving.
+
+*** Quarterly changelog check
+
+Every ~3 months, review what changed in =llama.h= since the pinned submodule version. Run this from the project root:
+
+#+begin_src bash
+cd llama.cpp
+git fetch origin
+
+# What changed in the C API since our pinned version?
+git log --oneline HEAD..origin/master -- include/llama.h
+
+# Filter for breaking changes specifically
+git log --oneline HEAD..origin/master -- include/llama.h \
+  | grep -iE 'deprecat|refactor|rename|remov|break|api'
+#+end_src
+
+If the first command shows nothing, skip the update. If the second command shows hits, read those commits before deciding whether to update now or wait.
+
+To set a recurring reminder, add a cron job or calendar event. For example, with =cron=:
+
+#+begin_src bash
+# Edit your crontab
+crontab -e
+
+# Add this line (runs at 9am on the 1st of Jan, Apr, Jul, Oct):
+0 9 1 1,4,7,10 * cd /home/jh/.roswell/local-projects/cl-llama-cpp/llama.cpp && git fetch origin -q && echo "=== llama.h changes since pinned version ===" && git log --oneline HEAD..origin/master -- include/llama.h | head -30 >> /home/jh/llama-cpp-changelog.txt 2>&1
+#+end_src
+
+Or if you prefer a systemd timer:
+
+#+begin_src bash
+# Create ~/.config/systemd/user/llama-check.service
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/llama-check.service << 'EOF'
+[Unit]
+Description=Check llama.cpp API changes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'cd /home/jh/.roswell/local-projects/cl-llama-cpp/llama.cpp && git fetch origin -q && changes=$(git log --oneline HEAD..origin/master -- include/llama.h) && if [ -n "$changes" ]; then echo "$(date): llama.h has upstream changes:" >> /home/jh/llama-cpp-changelog.txt; echo "$changes" >> /home/jh/llama-cpp-changelog.txt; echo "---" >> /home/jh/llama-cpp-changelog.txt; fi'
+EOF
+
+# Create ~/.config/systemd/user/llama-check.timer
+cat > ~/.config/systemd/user/llama-check.timer << 'EOF'
+[Unit]
+Description=Quarterly llama.cpp API check
+
+[Timer]
+OnCalendar=*-01,04,07,10-01 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Enable it
+systemctl --user daemon-reload
+systemctl --user enable --now llama-check.timer
+
+# Verify
+systemctl --user list-timers
+#+end_src
+
+Either way, the output goes to =~/llama-cpp-changelog.txt=. If the file is empty or unchanged, there's nothing to do. If it has entries, read them and decide whether to proceed with the upgrade steps below.
+
+You can also run the check manually at any time:
+
+#+begin_src bash
+cd /home/jh/.roswell/local-projects/cl-llama-cpp/llama.cpp
+git fetch origin
+git log --oneline HEAD..origin/master -- include/llama.h
+#+end_src
+
+** Prerequisites
+
+- =c2ffi= (v17) built and on PATH (yours is at =~/tools/c2ffi=)
+- =cmake= and a C/C++ toolchain
+- SBCL with CLAW, CFFI, and cffi-libffi loaded
+
+** Checking for drift without regenerating
+
+Before committing to a full update, or periodically alongside the [[Quarterly changelog check]]
+above, run a non-destructive check: it extracts the current
+upstream API and diffs it against the committed =src/bindings.lisp= --- both
+added/removed symbols and, unlike the raw =git log= check, *changed
+signatures* on symbols that kept their name --- without writing anything.
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/generate")
+(cl-llama-cpp/generate:check-bindings)
+#+end_src
+
+Pass =:rebuild-spec t= after bumping the submodule (Step 1 below) so c2ffi
+re-parses the new headers instead of reusing the cached spec files in
+=spec/=:
+
+#+begin_src lisp
+(cl-llama-cpp/generate:check-bindings :rebuild-spec t)
+#+end_src
+
+Returns =T= if any drift was found (and prints what changed), =NIL= if
+=src/bindings.lisp= still matches what today's generator would produce.
+This can catch drift with *no* pin movement at all --- e.g. a binding that
+was hand-tuned after a past =generate= run (to fix a CFFI type CLAW infers
+incorrectly, for instance) silently falling out of sync the next time
+=generate= is actually run. Since this never touches =src/bindings.lisp=,
+running it costs nothing and there's no need to guard against a dirty
+working tree.
+
+** Step 1: Update the submodule
+
+#+begin_src bash
+cd /path/to/cl-llama-cpp
+git submodule update --remote llama.cpp
+cd llama.cpp
+git log --oneline -5   # note the new version tag
+#+end_src
+
+Check the [[https://github.com/ggml-org/llama.cpp/releases][llama.cpp release notes]] for breaking changes to the C API. Pay attention to:
+- Renamed or removed functions in =llama.h=
+- Changed struct fields (especially =llama_model_params=, =llama_context_params=, =llama_chat_message=)
+- New required initialization steps
+
+** Step 2: Rebuild the shared library
+
+#+begin_src bash
+cd llama.cpp
+rm -rf build
+cmake -B build -DBUILD_SHARED_LIBS=ON
+cmake --build build -j$(nproc)
+#+end_src
+
+Verify the library exists:
+
+#+begin_src bash
+ls build/bin/libllama.so*
+#+end_src
+
+** Step 3: Regenerate the c2ffi spec
+
+Delete the old spec so CLAW re-parses the new headers:
+
+#+begin_src bash
+rm -f spec/*.spec
+#+end_src
+
+** Step 4: Regenerate bindings
+
+In SBCL (restart fresh --- stale bindings in a running image cause confusing errors):
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/generate")
+(cl-llama-cpp/generate:generate :rebuild-spec t)
+#+end_src
+
+This writes =src/bindings.lisp=. The generator:
+- Strips CLAW anonymous symbols and numeric IDs
+- Renames anonymous union/struct types to =<PARENT>-VALUE=
+- Removes SRET fabricated =result= parameters
+- Prefixes all symbols into the =%llama= package with =llama_= / =LLAMA_= stripped
+- *Diffs old vs new exports* and prints a summary of added/removed symbols
+- *Flags removals that affect the high-level API* by checking against =*binding-deps*= in =high-level.lisp=
+
+Example output after a regen where the KV cache API was removed:
+
+#+begin_example
+Bindings written to src/bindings.lisp
+Symbol diff:
+  + 3 symbols added
+  - 5 symbols removed:
+      KV-CACHE-CLEAR
+      KV-CACHE-SEQ-CP
+      KV-CACHE-SEQ-KEEP
+      KV-CACHE-SEQ-RM
+      KV-CACHE-VIEW-INIT
+  *** 1 removal affects the high-level API:
+      KV-CACHE-CLEAR  <-- used by high-level.lisp
+#+end_example
+
+** Step 5: Compile and check for breakage
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp" :force t)
+(cl-llama-cpp:check-binding-deps)
+#+end_src
+
+=check-binding-deps= verifies every =%llama= symbol in =*binding-deps*= is still fbound or a known CFFI type. If anything is missing, it prints the names so you know exactly what to fix in =high-level.lisp=.
+
+Common failures at this stage:
+
+| Symptom                        | Cause                       | Fix                                  |
+|--------------------------------+-----------------------------+--------------------------------------|
+| =undefined foreign function=     | Function renamed in llama.h | Update the call in =high-level.lisp=   |
+| =unknown foreign type=           | Struct removed or renamed   | Check bindings.lisp for the new name |
+| Wrong number of args from CFFI | Function signature changed  | Update callers in =high-level.lisp=    |
+| Crash / SIGFPE on param calls  | Struct layout changed       | Rebuild with =:force t= and fresh SBCL |
+
+** Step 6: Fix the high-level API
+
+The high-level wrappers in =src/high-level.lisp= call =%llama= bindings directly. After regeneration, grep for any broken references:
+
+#+begin_src lisp
+;; In the REPL, try each high-level function:
+(%llama:backend-init)
+(%llama:model-default-params)
+(%llama:context-default-params)
+(%llama:sampler-chain-default-params)
+#+end_src
+
+Functions most likely to break on an upgrade:
+
+| High-level function | Underlying C calls                                                                                       |
+|---------------------+----------------------------------------------------------------------------------------------------------|
+| =tokenize=            | =model-get-vocab=, =tokenize=                                                                                |
+| =detokenize=          | =model-get-vocab=, =detokenize=                                                                              |
+| =generate=            | =get-model=, =get-memory=, =memory-clear=, =batch-get-one=, =decode=, =sampler-sample=, =sampler-accept=, =token-is-eog= |
+| =embed=               | =encode=, =get-embeddings-ith=, =model-n-embd=                                                                 |
+| =format-chat=         | =chat-apply-template=, =model-chat-template=                                                                 |
+| =tokenize-chat=       | =token-bos=, =model-get-vocab= (+ =format-chat= and =tokenize=)                                                  |
+
+When fixing a renamed function:
+1. Find the new name in =src/bindings.lisp=
+2. Update the call in =src/high-level.lisp=
+3. Update =*binding-deps*= at the top of =high-level.lisp= to reflect the new name
+
+** Step 7: Run tests
+
+#+begin_src bash
+# Smoke tests (no model needed)
+sbcl --eval '(asdf:load-system "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+
+# Integration tests
+LLAMA_TEST_MODEL=/path/to/model.gguf \
+LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+sbcl --eval '(asdf:load-system "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+** Step 8: Manual smoke test
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp" :force t)
+
+;; Quick generation test
+(cl-llama-cpp:with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (cl-llama-cpp:with-context (ctx model :n-ctx 2048)
+    (princ (cl-llama-cpp:generate ctx "Hello" :max-tokens 32))))
+
+;; Multi-turn chat test (load the example)
+(load "examples/my-chat.lisp")
+(cl-llama-cpp/examples/chat:start-chat)
+(cl-llama-cpp/examples/chat:say "Say hello.")
+(cl-llama-cpp/examples/chat:say "What did I just ask you?")
+(cl-llama-cpp/examples/chat:end-chat)
+#+end_src
+
+The second =say= is the critical test --- it exercises =tokenize-chat=, multi-turn formatting, role normalization, and BOS handling.
+
+** Step 9: Commit
+
+#+begin_src bash
+git add llama.cpp src/bindings.lisp spec/
+# Also add any files changed in high-level.lisp, conditions.lisp, packages.lisp
+git commit -m "bump llama.cpp to <version tag>"
+#+end_src
+
+** Troubleshooting
+
+*** c2ffi fails to parse headers
+
+llama.cpp occasionally uses C++ features in =llama.h= that c2ffi (a C parser) cannot handle. Check whether the header needs =-xc= vs =-xc++=. If a single declaration is unparsable, you may need to patch the header locally or add it to CLAW's exclude list in =generate.lisp=.
+
+*** CFFI type mismatch at runtime
+
+If a function loads but crashes or returns garbage, the most likely cause is a struct whose layout changed. Delete the FASL cache and rebuild:
+
+#+begin_src bash
+find . -name '*.fasl' -delete
+#+end_src
+
+Then reload from a fresh SBCL.
+
+*** New function you want to wrap
+
+1. Find it in =src/bindings.lisp= (search for the C name minus the =llama_= prefix)
+2. Add the high-level wrapper in =src/high-level.lisp=
+3. Add the =%llama= symbol to =*binding-deps*= at the top of =high-level.lisp=
+4. Export from =src/packages.lisp=
+5. Add a test
