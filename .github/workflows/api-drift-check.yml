@@ -42,11 +42,19 @@ jobs:
           mkdir -p ~/.local/bin "$RUNNER_TEMP/llvm"
           curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-linux-gnu-ubuntu-22.04.tar.xz" \
             | tar -xJ -C "$RUNNER_TEMP/llvm" --strip-components=1
+          # The official release tarball ships LLVM/Clang as static libs only
+          # (correct CMake config layout, but no combined libLLVM.so). c2ffi's
+          # link step needs -lLLVM, so pull just that shared library from
+          # Ubuntu's llvm-17-dev package (same 17.0.6 build) and point the
+          # linker at it.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends llvm-17-dev
           git clone --depth 1 --branch "$C2FFI_TAG" https://github.com/rpav/c2ffi.git "$RUNNER_TEMP/c2ffi"
           cmake -B "$RUNNER_TEMP/c2ffi/build" -S "$RUNNER_TEMP/c2ffi" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_DIR="$RUNNER_TEMP/llvm/lib/cmake/llvm" \
-            -DClang_DIR="$RUNNER_TEMP/llvm/lib/cmake/clang"
+            -DClang_DIR="$RUNNER_TEMP/llvm/lib/cmake/clang" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/lib/llvm-17/lib"
           cmake --build "$RUNNER_TEMP/c2ffi/build" -j"$(nproc)"
           cp "$RUNNER_TEMP/c2ffi/build/bin/c2ffi" ~/.local/bin/c2ffi
 
