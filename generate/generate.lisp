@@ -1,6 +1,6 @@
 (defpackage #:cl-llama-cpp/generate
   (:use #:cl)
-  (:export #:generate))
+  (:export #:generate #:check-bindings))
 
 (in-package #:cl-llama-cpp/generate)
 
@@ -284,6 +284,62 @@ references and numeric-ID union/struct names."
             (error ()))))
       (nreverse names))))
 
+(defun form-definition-name (form)
+  "Return the %LLAMA symbol FORM defines (a defcfun/defcstruct/defcunion/
+defcenum), or NIL if FORM does not define one."
+  (when (and (listp form)
+             (member (car form)
+                     '(cffi:defcfun cffi:defcstruct cffi:defcunion cffi:defcenum)))
+    (let ((spec (cadr form)))
+      (cond
+        ;; defcfun: (("c_name" lisp-symbol) ...) or (lisp-symbol ...)
+        ((and (eq (car form) 'cffi:defcfun) (listp spec)) (cadr spec))
+        ((eq (car form) 'cffi:defcfun) spec)
+        ;; defcstruct/defcunion/defcenum: (name ...) or (name :size N)
+        ((listp spec) (car spec))
+        (t spec)))))
+
+(defun extract-definition-forms (file)
+  "Read FILE and return a hash-table mapping each defined %LLAMA symbol to
+its full top-level definition form."
+  (let ((table (make-hash-table :test 'eq)))
+    (when (probe-file file)
+      (with-open-file (in file :external-format :utf-8)
+        (let ((*package* (or (find-package :%llama) *package*))
+              (*read-eval* nil))
+          (handler-case
+              (loop for form = (read in nil :eof)
+                    until (eq form :eof)
+                    for name = (form-definition-name form)
+                    when name
+                    do (setf (gethash name table) form))
+            (error () nil)))))
+    table))
+
+(defun report-signature-diff (old-file new-file)
+  "Compare definition forms between OLD-FILE and NEW-FILE for symbols
+present in both. Prints and returns the sorted list of symbol names whose
+form changed (e.g. a parameter added/removed/retyped) even though the
+symbol's name did not change. Symbols only present in one file are NOT
+reported here -- those are covered by REPORT-BINDING-DIFF."
+  (let* ((old-forms (extract-definition-forms old-file))
+         (new-forms (extract-definition-forms new-file))
+         (changed nil))
+    (maphash
+     (lambda (name new-form)
+       (multiple-value-bind (old-form present-p) (gethash name old-forms)
+         (when (and present-p (not (equal old-form new-form)))
+           (push name changed))))
+     new-forms)
+    (setf changed (sort changed #'string< :key #'symbol-name))
+    (if changed
+        (progn
+          (format t "~&  ~D signature~:P changed:~%" (length changed))
+          (dolist (name changed)
+            (format t "      ~A~%" name)))
+        (format t "~&  No signature changes.~%"))
+    changed))
+
 (defun report-binding-diff (old-file new-file)
   "Compare exports between OLD-FILE's symbols and NEW-FILE, print a summary.
 Flags removals that affect high-level API dependencies."
@@ -319,7 +375,8 @@ Flags removals that affect high-level API dependencies."
         (dolist (name (sort broken #'string<))
           (format t "      ~A  <-- used by high-level.lisp~%" name))))
     (unless (or added removed)
-      (format t "~&  No symbol changes.~%"))))
+      (format t "~&  No symbol changes.~%"))
+    (and (or added removed) t)))
 
 (defun generate (&key (output (project-path "src/bindings.lisp"))
                       rebuild-spec)
@@ -345,5 +402,35 @@ removals that affect the high-level API dependency manifest."
       (when old-exports-file
         (format t "~&Symbol diff:~%")
         (report-binding-diff old-exports-file output)
+        (format t "~&Signature diff:~%")
+        (report-signature-diff old-exports-file output)
         (delete-file old-exports-file))
       output)))
+
+(defun check-bindings-against (new-file &key (output (project-path "src/bindings.lisp")))
+  "Pure diff logic: compare the committed OUTPUT against NEW-FILE (a
+freshly extracted, not-yet-committed bindings file). Returns a
+generalized boolean: non-nil if any symbol was added, removed, or had
+its definition form change. Never writes to OUTPUT."
+  (let ((added-removed (report-binding-diff output new-file))
+        (changed (report-signature-diff output new-file)))
+    (and (or added-removed changed) t)))
+
+(defun check-bindings (&key (output (project-path "src/bindings.lisp")) rebuild-spec)
+  "Non-destructive drift check: extracts the current upstream API (via the
+same CLAW pipeline GENERATE uses) into a temp file, diffs it against the
+committed OUTPUT via CHECK-BINDINGS-AGAINST, then deletes the temp file.
+Never writes to OUTPUT. Pass REBUILD-SPEC T after bumping the llama.cpp
+submodule so c2ffi re-parses the new headers instead of reusing cached
+spec files. Returns a generalized boolean: non-nil if drift was found."
+  (when rebuild-spec
+    (pushnew :claw-rebuild-spec *features*))
+  (pushnew :claw-local-only *features*)
+  (let* ((form (build-wrapper-form))
+         (expansion (macroexpand-1 form))
+         (tmp (merge-pathnames "bindings-check.lisp" (uiop:temporary-directory))))
+    (write-bindings expansion tmp)
+    (format t "~&Checked against ~a (not written)~%" output)
+    (unwind-protect
+         (check-bindings-against tmp :output output)
+      (when (probe-file tmp) (delete-file tmp)))))
