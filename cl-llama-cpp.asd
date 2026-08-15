@@ -59,6 +59,14 @@
                 :components
                 ((:file "generate")))))
 
+(defsystem "cl-llama-cpp/generate/tests"
+  :description "Tests for the binding generator (developers only)"
+  :depends-on ("cl-llama-cpp/generate" "rove")
+  :components ((:module "tests"
+                :components
+                ((:file "generate"))))
+  :perform (test-op (op c) (symbol-call :rove :run c)))
+
 (defsystem "cl-llama-cpp/tests"
   :description "Tests for cl-llama-cpp"
   :depends-on ("cl-llama-cpp" "rove")
