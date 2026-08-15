@@ -73,3 +73,27 @@ as the reader package, and return its pathname."
           "reports nil when nothing changed")
       (delete-file empty-path)
       (delete-file added-path))))
+
+(deftest check-bindings-against-detects-drift-without-writing
+  (testing "returns non-nil on drift and never modifies the output file"
+    (let* ((sym (intern "TEST-QUUX" :%llama))
+           (output-path (write-test-file nil))
+           (output-before (uiop:read-file-string output-path))
+           (new-path (write-test-file
+                      (list `(common-lisp:export ',sym "%LLAMA")))))
+      (ok (cl-llama-cpp/generate::check-bindings-against new-path :output output-path)
+          "drift is detected")
+      (ok (string= output-before (uiop:read-file-string output-path))
+          "the committed output file was not modified")
+      (delete-file output-path)
+      (delete-file new-path))))
+
+(deftest check-bindings-against-no-drift
+  (testing "returns nil when the new extraction matches the committed output"
+    (let* ((form `(common-lisp:export ',(intern "TEST-CORGE" :%llama) "%LLAMA"))
+           (output-path (write-test-file (list form)))
+           (new-path (write-test-file (list form))))
+      (ok (not (cl-llama-cpp/generate::check-bindings-against new-path :output output-path))
+          "no drift is reported")
+      (delete-file output-path)
+      (delete-file new-path))))

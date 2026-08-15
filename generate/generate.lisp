@@ -1,6 +1,6 @@
 (defpackage #:cl-llama-cpp/generate
   (:use #:cl)
-  (:export #:generate))
+  (:export #:generate #:check-bindings))
 
 (in-package #:cl-llama-cpp/generate)
 
@@ -406,3 +406,31 @@ removals that affect the high-level API dependency manifest."
         (report-signature-diff old-exports-file output)
         (delete-file old-exports-file))
       output)))
+
+(defun check-bindings-against (new-file &key (output (project-path "src/bindings.lisp")))
+  "Pure diff logic: compare the committed OUTPUT against NEW-FILE (a
+freshly extracted, not-yet-committed bindings file). Returns a
+generalized boolean: non-nil if any symbol was added, removed, or had
+its definition form change. Never writes to OUTPUT."
+  (let ((added-removed (report-binding-diff output new-file))
+        (changed (report-signature-diff output new-file)))
+    (and (or added-removed changed) t)))
+
+(defun check-bindings (&key (output (project-path "src/bindings.lisp")) rebuild-spec)
+  "Non-destructive drift check: extracts the current upstream API (via the
+same CLAW pipeline GENERATE uses) into a temp file, diffs it against the
+committed OUTPUT via CHECK-BINDINGS-AGAINST, then deletes the temp file.
+Never writes to OUTPUT. Pass REBUILD-SPEC T after bumping the llama.cpp
+submodule so c2ffi re-parses the new headers instead of reusing cached
+spec files. Returns a generalized boolean: non-nil if drift was found."
+  (when rebuild-spec
+    (pushnew :claw-rebuild-spec *features*))
+  (pushnew :claw-local-only *features*)
+  (let* ((form (build-wrapper-form))
+         (expansion (macroexpand-1 form))
+         (tmp (merge-pathnames "bindings-check.lisp" (uiop:temporary-directory))))
+    (write-bindings expansion tmp)
+    (format t "~&Checked against ~a (not written)~%" output)
+    (unwind-protect
+         (check-bindings-against tmp :output output)
+      (when (probe-file tmp) (delete-file tmp)))))
