@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 9d57ce456c94d241dde672b2db9cf18879766568
+Last covered upstream commit: 3af988fabcf79fd81f8720505e684d2aa5bfc786
 
 ---
 
@@ -95,3 +95,78 @@ These upstream changes touch the llama.cpp public API but are **not present** in
 - **Converters**: Many converter fixes for new models; split MTP export; endianness conversion for Q1/TQ2; per_layer_config handling.
 - **Docs**: AI-generated code policy updated; conda-forge instructions; maintainer PR link.
 - **Refactoring**: Fused ops refactor (#24646); model loading refactor (#24980); prompt cache state ownership (#25649); batch construction refactor (#24843).
+
+---
+
+## 2026-08-21 — 134 commits since last digest
+
+### New Features
+
+- **Kimi-K3 text model** (#26185): Moonshot's Kimi K3 — a hybrid architecture combining KDA (linear/recurrent) attention with MLA (full) attention. Introduces five new mechanisms over Kimi-Linear: cross-layer residual attention, latent MoE (1024 experts, up from the previous max of 512), "situ" activation (replaces SwiGLU), MLA output gating, and a full-rank KDA gate. Includes full chat template with reasoning and tool-call support.
+- **BailingMoE3** (#26608): ByteDance's Bailing MoE v3 architecture with speculative decoding support, Q-LoRA (Ling-3.0-tiny), and SwiGLU activation clamping. Includes both flash and tiny model variants.
+- **GraniteSWA / GraniteMoeSWA** (#25505): IBM Granite models with sliding window attention and per-layer rope pattern control. Adds a new `has_rope` hparam and `rope_pattern` array for models that mix RoPE and NoPE layers.
+- **dots3-note** (#27060): New model architecture with DSA-iSWA (dynamic sparse attention with interleaved sliding window attention) KV cache.
+- **DSpark speculators-format support** (#26275): The DSpark speculative decoder now accepts SpecForge-exported drafts with reduced vocabulary, bonus-anchor block layout, and d2t remapping tables.
+- **`--mmproj-device` argument** (#23255): Lets you place the vision projector (multimodal) on a specific GPU device instead of the default.
+- **`--models-dir` MTP loading** (#24431): The models directory auto-discovery now finds MTP (multi-token prediction) assistant models for speculative decoding.
+- **`ggml_rope_set_offset()`** (#27120): New ggml operation that applies RoPE with an explicit position offset, supported on CPU, Metal, CUDA, Vulkan, OpenCL, SYCL, WebGPU, and Hexagon backends.
+- **llama.cpp version 0.2.0** (#27498): Major version bump with semantic versioning now enforced via CMake. Includes a `release.sh` script for release preparation.
+- **Server: model endpoint auth** (#26347): The `/models` endpoints are now private (require API key) when authentication is enabled.
+- **Server: sleep refactor** (#27376): The `/metrics` endpoint remains accessible while the server is sleeping. Sleep state handling cleaned up with cached responses.
+- **Server: dedup-cache-models preset** (#27346): New preset option for deduplicating cached models in multi-model setups.
+- **LLAMA_MAX_EXPERTS raised to 1024**: Up from 512, needed for Kimi K3's latent MoE.
+
+### Bug Fixes
+
+- **Unicode '~' missing from symbol class** (#26972): The tilde character was not included in the collapsed `\p{S}` (Symbol) Unicode class, so input like `" ~"` was split into separate pre-tokens. This broke the `Ġ~` BPE merge used by DeepSeek V4, causing re-tokenized prompts to diverge from sampled tokens and preventing KV cache reuse.
+- **Metal mat-mul OOB read for K not a multiple of 32** (#27450): The Tensor API mat-mat kernel used a static K=32 tile width on every iteration, reading past the K extent on the last partial tile. Could corrupt results or produce NaN.
+- **Backend split scheduler race condition** (#26040): Graph splits without inputs were running concurrently with other splits that reused the same memory, causing data corruption.
+- **LoRA tensor bounds check** (#27056): LoRA adapter loading now validates that tensor data regions fall within file bounds, preventing OOB reads on malformed adapter files.
+- **GGUF array type validation** (#27075): Array element types are now checked before reading, preventing type-confusion bugs on malformed GGUF files.
+- **gguf-py size guards** (#27188): The Python GGUF reader now validates kv_count, tensor_count, string length, and array length against crafted values that could cause unbounded allocation or hangs (security fix).
+- **Nemotron 3 Ultra block count** (#27101): The converter was miscounting blocks for the Nemotron 3 Ultra architecture.
+- **LFM2 image tiling threshold** (#27057): The multimodal preprocessor was using an incorrect threshold for deciding when to tile LFM2 images.
+- **SYCL mlock loading** (#27250): Loading models with mlock was broken on SYCL backends.
+- **SYCL zero device crash** (#27291): llama-quantize (and other non-compute tools) crashed on hosts with no SYCL devices instead of gracefully falling back.
+- **Vulkan null queue cleanup** (#27353): Missing null checks in queue cleanup caused crashes on some Vulkan drivers.
+- **Vulkan FA precision for Q types** (#27413): The flash attention MMQ path could overflow when computing `1/qd` for denormalized Q scale values; now uses fp32.
+- **OpenCL q6_K on Adreno A6x/A7x** (#26476): Four compiler codegen defects in the q6_K flat mul_mat kernel on older Adreno E031 compilers, worked around with version-gated code paths.
+- **OpenCL norm local size** (#27339): Incorrect workgroup size for normalization kernels.
+- **OpenCL FA tile kernel race** (#26434): Write-after-read race condition in the generic flash attention tile kernels when the workgroup spans multiple subgroups.
+- **Hexagon FA queue ordering** (#27042): Incorrect HMX queue ordering in the pipelined flash attention path, plus D matrix packing fix.
+- **Server `--docker-repo` mode detection** (#27416): The `--docker-repo` flag was incorrectly triggering router mode.
+- **JSON schema regex fallback** (#26939): Unsupported regex patterns in JSON schema now gracefully degrade instead of failing.
+- **Thread pool sharing reverted** (#27337): The "share thread pools when `n_threads` differ" change (#27138) caused issues and was reverted.
+- **HIP UMA memory reporting** (#27083): AMD APUs report accurate memory via `hipMemGetInfo`; the UMA override was over-promising available VRAM on small-carveout systems.
+- **SYCL quantized copy kernel dimensions** (#27160): Thread/block counts were not proportional to quant size; q4_0→f32 throughput improved from 20 to 158 GB/s on Arc 70.
+- **Integer tokenizer scores** (#27260): Tokenizer scores stored as integers in GGUF are now handled correctly.
+- **Speculative decoding null reference** (#27404): Binding a reference to a null pointer in the speculative decoding path.
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15 digest) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum and added `load_mtp`).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode` enum** and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+
+No new llama C API surface changes were introduced in this batch of commits. The migration of `--mmap`/`--no-mmap` CLI flags to `--load-mode` (#26934) is a CLI-level change that reinforces the already-noted struct-level break.
+
+### Other / Internal
+
+- **Build**: llama.cpp version bumped 0.1.1 → 0.1.2 → 0.2.0; ggml bumped 0.20.1 → 0.20.2 → 0.21.0; release workflow overhauled with deploy keys, attestation, configurable commit targeting, and pre-release changelog generation; `release.sh` script added; xcframework builds parallelized and made configurable; BoringSSL updated to 0.20260813.0; cpp-httplib updated to 0.53.1; hash library moved to vendor directory with CMake alias targets.
+- **CI**: Windows ARM64 CUDA 13.4 added; OpenVINO updated to 2026.3; release attestation; ccache-clear as last release step; cmake pkg check via shell script; duplicate flags removed; SYCL release dependency re-enabled.
+- **CUDA**: Per-hardware MMVQ→MMQ crossover switch points for Blackwell, Ada (RTX 4090), and DGX Spark (#26079); MMVQ nwarps=8 for bs=1 on DGX Spark (#26843); static cuBLAS workspace (#26574).
+- **Metal**: Dequantize quantized KV cache (q8_0, q4_0, q4_1, q5_0, q5_1) to F16 before flash attention (#27390) — improves FA on quantized KV by running the proven F16 kernels on a dequantized scratch buffer; dequantize q8_0 with packed types (#27370); dequant only for large batches (#27438).
+- **Vulkan**: Tiled transpose for 0↔2 permuted CONT (#26585) — 84% faster DeepSeek V4 prefill on RDNA; dequant q8_0 KV once in coopmat1 (#25494); shader source groups (#26666); Intel Xe SLM padding/reshape for coopmat mul_mm (#25380).
+- **SYCL**: FWHT (Fast Walsh-Hadamard Transform) kernel (#27298) — 3.3–6x speedup; OPT_STEP_ADAMW/SGD ops (#25268); Q2_K MMVQ+ESIMD kernels (added then reverted); Q5_K ESIMD kernel (#26376); Alchemist GPU oneDNN gate logic (#26635); warning fixes (#26713).
+- **OpenCL (Adreno)**: MoE per-expert bias fusion (#26431); SSM_SCAN kernel for Mamba-2 (#26439); deterministic MoE expert scatter (#26464); Adreno A7X compiler SIGSEGV workaround for mixed-type FA programs; vocab-scale K-quant lm_head kept on CPU for A7X (#26440).
+- **Hexagon**: FA HMX queue fix and D matrix packing (#27042).
+- **WebGPU**: MulMat with overlapping src0/src1 for MiniMax-01 (#27321).
+- **Server UI**: Major multi-PR refactoring — stores split into domain namespaces (#27240), services consolidated (#27239), stores consolidated (#27238); settings navigation cleanup (#27241); built-in tools renamed to server/browser tools (#27271); `get_datetime` tool moved to frontend (#27255); browser `get_info` tool added (#27251); MCP tool result `structuredContent` support (#26691); API key field masking (#26562); settings persistence ordering fix (#27365); alphabetical enum ordering enforced (#27272).
+- **Converters**: `@ModelBase.example` decorator for model registration (#27208); speculators-format DSpark (#26275); Kimi K3 MXFP4 repack (#26185); BailingMoE3 Q-LoRA (#26608); Nemotron 3 Ultra fix (#27101).
+- **Quantization**: Memory usage optimization — weights are evicted from memory after processing each layer (#22877), reducing peak RSS during quantization.
+- **Other**: ggml `__fp16` gated on `__ARM_FP16_FORMAT_IEEE` for 32-bit ARM (#26860); RPC use_count populated for fusion (#27142); multimodal SHA-256 hashing (#27274); LFM2 non-tiled thumbnail skip (#27246); Granite preprocessor hardened (#27235); chat format refactoring for string/typed content (#27130); `ggml_concat` usage reduced (#27176); duplicate metadata load removed (#27378).
