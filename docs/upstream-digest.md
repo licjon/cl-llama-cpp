@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 3af988fabcf79fd81f8720505e684d2aa5bfc786
+Last covered upstream commit: d7bd3bfcad3e29c7e49fd26f38c79ee3e9a3fd6b
 
 ---
 
@@ -170,3 +170,83 @@ No new llama C API surface changes were introduced in this batch of commits. The
 - **Converters**: `@ModelBase.example` decorator for model registration (#27208); speculators-format DSpark (#26275); Kimi K3 MXFP4 repack (#26185); BailingMoE3 Q-LoRA (#26608); Nemotron 3 Ultra fix (#27101).
 - **Quantization**: Memory usage optimization — weights are evicted from memory after processing each layer (#22877), reducing peak RSS during quantization.
 - **Other**: ggml `__fp16` gated on `__ARM_FP16_FORMAT_IEEE` for 32-bit ARM (#26860); RPC use_count populated for fusion (#27142); multimodal SHA-256 hashing (#27274); LFM2 non-tiled thumbnail skip (#27246); Granite preprocessor hardened (#27235); chat format refactoring for string/typed content (#27130); `ggml_concat` usage reduced (#27176); duplicate metadata load removed (#27378).
+
+---
+
+## 2026-08-28 — 108 commits since last digest
+
+### New Features
+
+- **Qwen3.8-Flash-Next (qwen4exp) architecture** (#27742): A large new hybrid model from Alibaba combining gated delta net (recurrent) layers with full attention layers, hyper-connections (wide residual stream), MoE with gated shared experts, QSA sparse attention with block-level top-k indexing, and a PLE (per-layer embedding) n-gram hash table. Includes quantized KV cache support, tensor parallelism, multi-slot server support, and multimodal image handling. This is a substantial architecture addition (~1200 lines of model code).
+- **DFlash2 speculative decoding** (#27816): A new speculative decoding method that uses local convolution for candidate selection instead of a separate draft model, offering a different speed/quality tradeoff from DFlash1 and DSpark.
+- **DSpark support for Nemotron3.5** (#27804) and **BailingMoE3** (#27508): Extends the DSpark speculative decoding method to two more model families.
+- **dots3-note vision+audio** (#27524): Multimodal support (both image and audio input) for the dots3-note model.
+- **nanbeige4.2-3B** (#27730): New model support for the Nanbeige 4.2 3B architecture.
+- **MTP for GLM-4.5-Air** (#26534): Multi-token prediction speculative decoding added to the GLM-4.5-Air model.
+- **Lazy tensor reading** (#27794): New `LLAMA_LAZY_MODE` option that reads large tensor rows on demand via mmap instead of loading them upfront, reducing memory usage for models with very large gather tables (e.g. qwen4exp's 26 GiB PLE table).
+- **`--video-*` CLI arguments** (#24318): New CLI flags for video input in multimodal models, plus a `mtmd_helper_init_opt` API function.
+- **`--n-cpu-ffn` option** (#26622): CPU-offload dense FFN weights for the first N layers, complementing the existing `--n-cpu-moe`.
+- **`--kv-unified-per-slot`** (#24124): Server option controlling how many KV cache slots each client connection gets in unified cache mode.
+- **Token ID tracking in KV cells** (#27762): KV cache cells now record which token ID produced them, enabling `get_prev_tokens()` for n-gram history lookups without separate bookkeeping.
+- **Synthetic speculative acceptance** (#27711): Benchmark-only option to simulate speculative decoding acceptance rates without an actual draft model, useful for measuring overhead.
+- **RPC async backend APIs** (#18626): The RPC (remote procedure call) backend now supports event-driven and asynchronous tensor operations, reducing latency for distributed inference.
+- **Apple RDMA as RPC transport** (#26421): On Apple Silicon Macs, the RPC backend can now use RDMA for low-latency inter-node communication instead of TCP sockets.
+- **`LLAMA_SERVER_SLOTS_N_DIFF` env var** (#27600): Controls the number of slot differences the server tracks.
+- **llama.cpp version 0.3.0** (#27696): Version bump with semantic versioning enforced. ggml bumped to 0.22.0.
+- **Metal per-op source split + parallel compile** (#26561): Metal shader sources are split per-operation and compiled in parallel, significantly reducing Metal backend initialization time.
+- **Metal per-device flash-attention tuning** (#26570): Flash-attention vector kernels are now tuned per Apple GPU model (M1 Pro through M5 Max) for optimal (Q, NE) tile dispatch, with an offline tuning tool.
+
+### Bug Fixes
+
+- **Vulkan view-alias dependency ordering** (#27812): The Vulkan graph optimizer failed to treat two views of the same tensor as dependent, silently reordering reads and writes across aliased state. This produced wrong tokens under greedy decoding with no error logged, hitting recurrent-state models (like Qwen3.8) on AMD and NVIDIA Vulkan.
+- **conv_transpose_2d multi-batch** (#26132): Only the first batch was computed in transposed 2D convolution; all subsequent batches were left as zeros. Fixed on both CPU and Metal.
+- **DeepSeekV4 rollback with multi-sequence** (#26756): Cache rollback in multi-sequence mode was incorrect, causing state corruption.
+- **ggml_clamp** (#27644): The clamp operation produced incorrect results in certain cases.
+- **Metal OOM crash** (#25371): A null Metal buffer allocation (e.g. out-of-memory on iOS) caused a hard crash (EXC_BAD_ACCESS) instead of a recoverable error.
+- **Metal memory leaks** (#27758): Missing autorelease pools caused memory leaks during Metal operations.
+- **Meta tensor split state propagation** (#27574): Tensor-parallel mode on the Meta backend dropped split state, causing assertion failures.
+- **Grammar `\-` in character classes** (#27591): The GBNF grammar parser rejected `\-` (escaped hyphen) in character classes even though the grammar generator produced it, breaking tool-call grammars.
+- **Server: prefilled assistant + tool calls** (#27626): When `--prefill-assistant` was enabled and the last assistant message contained tool calls, the tool calls were silently stripped. Now rejects this combination with a clear error.
+- **Draft-MTP with embeddings** (#27400): MTP speculative decoding crashed when the input batch used embeddings instead of token IDs.
+- **Video moov atom parsing** (#27596): Videos with the moov atom at the end of the file failed to load in multimodal processing.
+- **Nemotron 3.5 Lightning conversion** (#27729): The converter miscounted attention layers when using transformers >= 5.6, producing incorrect head_count_kv metadata.
+- **GLM conversion regression** (#27655): A regression in index_tensors broke GLM model conversion.
+- **Mamba-2 single-token GEMV** (#27513): Mamba-2 in/out projections dispatched GEMV (one row at a time) instead of GEMM (batched), hurting prefill performance. Now flattened for batch dispatch.
+- **KV cache whole-context restore** (#qwen4exp series): Restoring a whole-context state with multiple streams cleared already-restored streams on each iteration, losing all but the last sequence.
+- **Quantizer memory** (#27795, qwen4exp series): The quantizer's working buffer was sized at `nelements * 4` bytes regardless of target type, wasting ~150 GB on models with very large tensors. Now sized exactly, and large tensors are processed in row bands capped at 1 GiB.
+- **Various backend fixes**: Vulkan warp-size clamping (#27726), SYCL tq2_0 unsupported marking (#27660), WebGPU infinity handling in ARGSORT/TOP_K (#27538), Hexagon RMS_NORM_MUL weight-offset for grouped norms (#27798), OpenCL binary kernel additions (#27768).
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15 digest) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum and added `load_mtp`).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode` enum** and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+
+New gaps introduced in this batch:
+
+- **BREAKING — `llama_model_params` struct layout changed again**: A new `lazy_mode` field (enum `llama_lazy_mode`) was inserted after `load_mode`, further shifting all subsequent field offsets. The bindings' struct definition is now two fields behind upstream (`load_mode` + `lazy_mode` replacing three bools, plus the new insertion).
+- **BREAKING — `llama_model_quantize_params` struct layout changed**: A new `max_buf_size` field (`size_t`) was appended, changing the struct size. Code passing this struct by value may read uninitialized memory for the new field.
+- **New enum `llama_lazy_mode`**: Values `LLAMA_LAZY_MODE_OFF` (0), `LLAMA_LAZY_MODE_AUTO` (1), `LLAMA_LAZY_MODE_ON` (2). Not defined in bindings.
+- **`LLAMA_SESSION_VERSION` bumped to 10**, **`LLAMA_STATE_SEQ_VERSION` bumped to 3**: Session state files from newer llama.cpp builds are incompatible with older versions. Not reflected in bindings constants.
+
+### Other / Internal
+
+- **Build**: llama.cpp version 0.2.0 → 0.3.0; ggml 0.21.0 → 0.22.0; release workflow improvements; ccache moved to HF buckets (#27699); ccache-clear improvements (#27504, #27602); CI cache bucket made public (#27728).
+- **CI**: Windows ARM64 ROCm DLL bundling (#26973); ROCm Ubuntu job restored (#27399) with content-based compiler check; Metal tensor-split test added (#27598); test-llama-archs now runs test-save-load-state across all architectures (#27755); UI build restructured — npm build disabled by default, prebuilt artifact reused (#27706); OpenVINO updated to 2026.3.1 (#27843).
+- **CUDA**: MMQ unblocked for MoE on sm_60/Pascal (#26264); POOL_1D support (#27573).
+- **Metal**: Per-op source split with parallel compilation (#26561) — 8→20 metal libraries compiled in parallel; per-device FA-vec tuning for M1 Pro, M2 Ultra, M3 Max, M4, M4 Pro, M5, M5 Max, M5 Pro (#26570, #27824, #27863, #27875); chunked SSD MMA for Mamba-2 prefill optimization (#26647); null-check OOM fix (#25371); memory leak fixes (#27758).
+- **Vulkan**: LIGHTNING_INDEXER op for DSV4 (#27453); hoisted row IDs and expert count in shaders (#26686); cross_entropy_loss and back (#27216); PAD_REFLECT_1D (#26586); warp-size clamping for >64 warps (#27726); tiled transpose for permuted CONT.
+- **SYCL**: Q2_K reordered MMVQ+ESIMD kernels re-added (#27490); quantized KV decode on BMG via TILE (#26689); F16 KV cache bind-in-place for oneDNN SDPA (#27468); tq2_0 marked unsupported (#27660).
+- **Hexagon**: Multi-NPU support (IQ9, IQ10) with fully async backend (#26501) — non-host buffers, DMA pipelining, fence-based synchronization, ALLREDUCE with fused ADD, multi-device profiling; ABS and LOG unary ops (#27786).
+- **OpenCL**: Binary kernels for MoE q4_0/mxfp4 dp4a (#27768).
+- **RPC**: Event and async backend APIs (#18626); Apple RDMA transport (#26421).
+- **KleidiAI**: Build system reworked (#26077) for ARM CPU acceleration.
+- **Server UI**: Major overhaul — browser-style conversation tabs (#27263); settings and MCP servers moved to dialog-based views (#27744); per-conversation tool policy replacing MCP overrides (#27745); chat form actions UI/UX improvements (#27746); dialog component restyling (#27743); ESLint config updates (#27700).
+- **Converters**: Nemotron-H LoRA GGUF fix (#27356); Nemotron 3.5 Lightning layer fix (#27729); GLM index_tensors regression fix (#27655); qwen4exp PLE streaming with LazyChunkedTensor; ndarray conversion guard (#27869).
+- **Quantization**: Working memory cap to avoid loading huge tensors into RAM (#27795); output buffer sized exactly (#qwen4exp); row-band dequantize/quantize for >1 GiB tensors; tensor_type_fallback for 32-block types with odd ncols.
+- **Other**: DeepSeek V4 tensor split (`-sm tensor`) support (#26490); MiniMax-01 graph simplification (#27790); ggml_clamp fix (#27644); concat op row-level memcpy optimization (#24575); JSON abstraction layer (#27511); repetition_penalty from generation_config.json (#27659); Pillow-accurate resize algorithm for multimodal (#27594); WebP via ffmpeg (#27520); ggml_rope_set_offset usage (#27521); subprocess.h update (#27409); common device_info loop skip when not printing (#26692); KV cache context-per-slot (#24124).
