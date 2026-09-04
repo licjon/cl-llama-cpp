@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: d7bd3bfcad3e29c7e49fd26f38c79ee3e9a3fd6b
+Last covered upstream commit: 427291b5b34cd914a31b3fd3b61a68f6184f4b9f
 
 ---
 
@@ -250,3 +250,89 @@ New gaps introduced in this batch:
 - **Converters**: Nemotron-H LoRA GGUF fix (#27356); Nemotron 3.5 Lightning layer fix (#27729); GLM index_tensors regression fix (#27655); qwen4exp PLE streaming with LazyChunkedTensor; ndarray conversion guard (#27869).
 - **Quantization**: Working memory cap to avoid loading huge tensors into RAM (#27795); output buffer sized exactly (#qwen4exp); row-band dequantize/quantize for >1 GiB tensors; tensor_type_fallback for 32-block types with odd ncols.
 - **Other**: DeepSeek V4 tensor split (`-sm tensor`) support (#26490); MiniMax-01 graph simplification (#27790); ggml_clamp fix (#27644); concat op row-level memcpy optimization (#24575); JSON abstraction layer (#27511); repetition_penalty from generation_config.json (#27659); Pillow-accurate resize algorithm for multimodal (#27594); WebP via ffmpeg (#27520); ggml_rope_set_offset usage (#27521); subprocess.h update (#27409); common device_info loop skip when not printing (#26692); KV cache context-per-slot (#24124).
+
+---
+
+## 2026-09-04 — 136 commits since last digest
+
+### New Features
+
+- **Tencent Hy 4 (hy_v4) architecture** (#28127): Full support for Tencent's Hy 4 model (HYV4ForCausalLM), including conversion, GGUF constants, arch enum, model graph, and tests. Notably, this architecture uses per-layer `n_ff_exp` values, meaning each layer can have a different MoE FFN size.
+- **NVIDIA Nemotron-3-Puzzle-75B (NemotronHPuzzle)** (#25444): Adds the Puzzle variant of Nemotron-H, which has heterogeneous MoE layers — each layer can have a different number of active experts and FFN size. Introduces per-layer `n_ff_exp(il)` and `n_expert_used(il)` accessors throughout the codebase, replacing the old scalar fields.
+- **DFlash2 speculative decoding improvements** (#27310): The DFlash encoder is now fused into the KV cache injection decode, eliminating a device-to-host round trip and a second graph build per round. Separately, missing NVFP4 scale parameters for Q/K/V projections in DFlash2 drafts were fixed (#28000), which was causing near-zero speculative acceptance.
+- **Metal sparse flash attention** (#28098): A new sparse attention path for Metal that compacts the finite entries of the attention mask into an index list, letting the FA kernel skip masked-out KV positions entirely. Particularly useful for models with QSA (block-level sparse attention) like Qwen3.8-Flash-Next.
+- **Metal 4.0 Tensor API** (#27461): On M5+ and A19+ hardware, Metal 4.0 tensor operations are now available, compiled into a separate metallib.
+- **Metal top-k radix implementation** (#28073): A radix-based top-k selection on Metal for large k values (needed by models like Qwen3.8 with 512+ experts).
+- **CUDA sparse flash attention for DSV4/GLM** (#27970): GPU-accelerated sparse attention similar to the Metal path, targeting DeepSeek V4 and GLM architectures.
+- **CUDA MoE weighted expert reduction fusion** (#25952): Fuses the multiply-view-add chain in the MoE combine tail into a single kernel, eliminating intermediate global memory traffic. Handles k=2..15 in a single runtime-k kernel.
+- **CUDA MoE fusion extended to speculative decoding** (#27621): The earlier MoE GLU fusion and topk-router fusion were limited to single-token batches; now they work for multi-token speculative decoding as well.
+- **CUDA XOR swizzle for flash attention K/V tiles** (#25635): XOR-swizzled shared memory layout for flash attention K and V tiles, reducing bank conflicts on NVIDIA GPUs.
+- **AVX2 batched GEMM for IQ models** (#27402): Large-batch prompt processing for grid IQ quantization types on x86 CPUs is substantially faster, using a new panelized decode and 8x8 GEMM kernel.
+- **Qwen3.8-Flash-Next (qwen4exp) improvements**: Recurrent state rollback support (#28123) — makes MTP speculative decoding practical by avoiding full state serialization on each round (183 vs 123 tok/s measured). Indexer head summation optimized (#28023) — prompt processing improved ~9% by eliminating redundant transposes. KV cell n-gram history lookup (#28040) uses the sequence position index directly instead of rebuilding a hash map each ubatch (+4.9% generation speed). Sequence scan early-exit (#28011) for 32-51% generation speed improvement at long contexts.
+- **`n_expert_used_max()` helper** (#28323): A new internal function that returns the maximum `n_expert_used` across all layers, needed for models with heterogeneous MoE like Puzzle.
+- **`SWIGLU_CLAMP` op** (#27930): New ggml operation for SwiGLU with activation clamping, used by BailingMoE3. Implemented on CPU and Vulkan.
+- **Vulkan top-k radix select for k >= 1024** (#28032): Vulkan shader for radix-based top-k, specifically for Qwen3.8-Flash-Next's 512-expert routing.
+- **ROCm top-k radix for long rows** (#27466): Same radix top-k approach on AMD GPUs.
+- **OpenCL Adreno xmem SDPA path** (#26331): A new scaled dot-product attention path for Adreno GPUs using extended memory access patterns.
+- **OpenCL extended elementwise and data-movement ops** (#27633): Nine new unary ops (sgn, step, elu, hardswish, hardsigmoid, floor, ceil, round, trunc), vectorized f32 copy, and multi-type CONCAT support on OpenCL.
+- **CUDA concurrent streams for multi-GPU graph splits** (#28198): Multi-GPU setups can now optimize graph splits concurrently, previously blocked by a single-GPU guard.
+- **llama.cpp version 0.4.0** (#28386): Version bump with ggml 0.23.0.
+
+### Bug Fixes
+
+- **Gemma4 vision handling** (#28335): Fixed incorrect vision input processing for the Gemma4 model.
+- **Metal GLU dispatch with ne00=1** (#28306): The GLU kernel dispatch crashed when the first dimension was 1.
+- **Metal memory leaks from missing autorelease pools** (#27883): Additional leak fixes in Metal operations beyond the prior batch's fixes.
+- **Metal memory query under low-memory conditions** (#27701): The available-memory query could return incorrect values or crash when the system was low on memory.
+- **Metal null-pipeline crash for F16 src1** (#25648): Missing F16 mul_mat kernels caused a null pipeline dereference instead of a clean error.
+- **Vulkan FA dequant path engagement** (#28190): The flash attention dequant path only engaged when the KV cache was completely full due to an incorrect stride check; now activates correctly for single-stream queries.
+- **Vulkan `VK_KHR_shader_bfloat16` extension** (#28155): The extension was requested even on devices that don't support it.
+- **OpenCL out-of-bounds reads in Adreno image kernels** (#27632): The q4_K decode GEMV fetched past valid rows on a padded grid, and the image KQ/KQV GEMM tile contracts were not enforced at the dispatch level.
+- **Hexagon CPY fence bug** (#28033): Incorrect fencing in the copy operation.
+- **s390x q5_1 uninitialized accumulator** (#28332): The `v_acc` variable in the q5_1 dot product was used uninitialized.
+- **conv_transpose_2d multi-batch** (#26132): Only the first batch was computed; all subsequent batches returned zeros. Fixed on CPU and Metal.
+- **Hadamard matrix copy crash during context shift** (#27967): Copying the Hadamard matrix to the k_rot tensor crashed when the unquantized K cache had no buffer assigned.
+- **Grammar generation for empty object schemas** (#28279): GBNF grammar generation produced invalid output for empty `{}` JSON schemas.
+- **Server data: URL handling for video/audio** (#27735): `input_video` and `input_audio` rejected data: URLs that worked fine for images, and only image MIME types were accepted.
+- **Server `--docker-repo` mode detection regression** (#27416): (Carried from prior batch, now landed.)
+- **ggml backend crash on inaccessible search path** (#28271): An inaccessible directory (e.g. a WebDAV mount or removed CWD) in the backend search path caused an uncaught `filesystem_error`, now gracefully skipped.
+- **Qwen3.8-Flash-Next (qwen4exp) fixes** (#27941): Sequence copy, block position keying, multimodal input, CUDA abort, and KV cache NaN collapse all fixed. Tensor split mode disabled for this arch since it doesn't work correctly.
+- **WebGPU crash on non-4-aligned offset** (#28045): `ggml_backend_tensor_get` crashed when the buffer offset wasn't a multiple of 4.
+- **KV cache non-contiguous restore performance** (#27991): Restoring state into fragmented KV cells took 25-63 seconds (1.4M tiny copies); now batched into contiguous runs (224 copies, 221-424ms for same data).
+- **Quantizer row-slab streaming** (#27830): Fixes thread starvation during quantization.
+- **Finetune: no KV cache** (#27199): Training mode crashed when no KV cache was allocated.
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15 and 2026-08-28 digests) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum, then added `lazy_mode` enum — two fields behind).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_model_quantize_params` struct** is missing the `max_buf_size` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode`**, **`llama_lazy_mode`** enums and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+
+No new llama C API surface changes (`include/llama.h`) were introduced in this batch of 136 commits. The per-layer `n_ff_exp(il)` / `n_expert_used(il)` refactoring (#25444) is an internal C++ change that does not alter the public C API.
+
+### Other / Internal
+
+- **Build**: llama.cpp version 0.3.0 → 0.4.0; ggml 0.22.0 → 0.23.0; ggml compile definitions replaced with `version.h.in` to avoid full recompilation on version bumps (#28364); BoringSSL updated to 0.20260903.0; cpp-httplib updated to 0.54.0/0.54.1; `ggml_op_alloc_size_may_expand()` made private (#28379); xcframework metallib build support (#28163).
+- **CI**: More jobs moved to ccache-buckets (#28375); OpenVINO tests disabled (#28347); ccache-action bumped to v1.2.24 (#28083); autorelease pool check added (#27884); unzip check (#28082); Snapdragon CI updated to new run script (#28293); HF-jobs enabled on server-cuda (#28258).
+- **CUDA**: MMVQ→MMQ crossover tuned for SM87 (#28285); `GGML_CUDA_PEER_MAX_BATCH_SIZE` removed (#28177); fast `mm_ids_helper` path generalized to any `n_expert_used` by rounding to next power-of-two (#27978); MoE weighted reduction fusion (#25952); concurrent streams per split for multi-GPU (#28198); XOR swizzle FA tiles (#25635).
+- **Metal**: Extensive per-device FA-vec tuning contributions — M1/M1 Max/M1 Ultra, M2/M2 Pro/M2 Max, M3/M3 Pro/M3 Max/M3 Ultra, M4 Pro, A18 Pro (#27932, #28078, #28088, #28122, #28015, #28017, #27940, #28236, #28152, #27915, #27999, #27963, #28373, #28396); sparse FA (#28098); Metal 4.0 Tensor API (#27461); top-k radix (#28073); concat support for quantized types (#28116); null-pipeline safety (#25648); shared-memory padding assertions (#27951); fix GLU ne00=1 (#28306); fix memory query under low memory (#27701); more autorelease pool fixes (#27883).
+- **Vulkan**: FA dequant path fix (#28190); top-k radix select for k≥1024 (#28032); IQ3_S larger batch support (#27449); mat-vec row tuning for Strix Halo RDNA3 (#27909); `mul_mat_id` K-padding fix (#27925); fastdiv function consolidation (#27526); `VK_KHR_shader_bfloat16` conditional request (#28155); QSA fusion for qwen4exp (#28032).
+- **SYCL**: Fused `RMS_NORM+MUL+ADD` and `ADD+ADD` residual chains (#27610); MKL FA refactored to global var (#26863); peer-to-peer copy API (#27550); Q4_K multi-column MMVQ optimization (#27062); TOP_K split for long rows (#27847); Intel GPU free memory via L0 API (#27968); host-pinned memory 2GB limit (#27559); `--fit` algorithm improved for SYCL (#27629); Kronecker FWHT for sizes 384/640/768/1280 added then reverted (#28016, #28184).
+- **HIP/ROCm**: ROCm updated to 10.0.0 (#27803); RDNA3 MMQ config tuned (#26284); Q2_0 dot-product optimized with native perm on gfx1201 (#26753); radix TOP_K for long rows (#27466).
+- **OpenCL (Adreno)**: xmem SDPA path (#26331); extended elementwise/data-movement ops (#27633); quant lm_head / decode GEMV optimizations for speculative decoding (#26477); Intel Xe-LP quant path tuning (#26438); better matmul paths for A7X and X2E generations (#27640); out-of-bounds fix in image kernels (#27632).
+- **Hexagon**: MUL_MAT and MUL_MAT_ID fusion (#28202); F16 unary op support (ABS) (#28228); CPY fence fix (#28033); device discovery and on-demand session allocation (#27785); missing FARF logs (#28217).
+- **WebGPU**: Non-4-aligned offset crash fix (#28045); MUL_MAT added to ops needing extra alloc (#28071).
+- **CPU**: AVX2 batched GEMM for IQ models (#27402); SpacemiT IME kernel sources conditionally added (#27961); s390x q5_1 fix (#28332); KleidiAI documentation updated (#26078).
+- **RPC**: Avoid serializing buffers from other servers in multi-server setups (#26500); Apple RDMA teardown error spew fixed (#27908); pre-RDMA macOS version fix (#27815); `ggml_backend_op_alloc_size_may_expand` helper (#27960).
+- **KV cache**: Non-contiguous restore batched per contiguous run (#27991) — 100x faster state restore into fragmented caches; n-gram lookup via sequence position index (#28040); sequence scan early-exit (#28011); Hadamard matrix null-buffer guard (#27967).
+- **Server**: `preserve_reasoning` kwarg enabled by default (#28174); data: URL support for video/audio (#27735); pytest-xdist for parallel server tests (#28298); build info output stream configurable (#28322); const propagation in mtmd API (#28307, #28310); `mtmd_tokenize_from_parts()` added (#28250).
+- **Server UI**: MCP image attachment fix (#28089); conversation export from database (#27432); copy button for grouped agentic responses (#27832).
+- **Converters**: DSpark bias_vl tensor skip for DSV4 (#28294); NemotronHPuzzle per-block MoE config and official BF16 checkpoint support (#25444); idefics3 preproc fix (#28273); Qwen3-TTS 0.6B proj_in and FFN precision fixes (#28231).
+- **Quantization**: Row-slab streaming to avoid thread starvation (#27830); RAM peak prevention at model loading (#27483).
+- **Other**: GBNF grammar fix for empty object schemas (#28279); `n_expert_used_max()` helper (#28323); model layer arrays loaded with `n_layer_all` (#28173); `n_layer_nextn` loaded early (#28159); lazy tensor handling improved (#27837); `--lazy-mode` CLI rename (#27969); YaRN `n_ctx_train` autoscaling (#28030); finetune no-KV-cache fix (#27199); DeepSeek V4 vision support (#28154); gemma4-assistant fix (#28183); ssm_a tensor noscan flagging (#28121); whole-source rebuild on commit fix (#28278); `npx` removed from package.json scripts (#28270).
