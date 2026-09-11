@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 427291b5b34cd914a31b3fd3b61a68f6184f4b9f
+Last covered upstream commit: 8ea290247c87ced2ab245b056ffe96dbcf90d36c
 
 ---
 
@@ -336,3 +336,79 @@ No new llama C API surface changes (`include/llama.h`) were introduced in this b
 - **Converters**: DSpark bias_vl tensor skip for DSV4 (#28294); NemotronHPuzzle per-block MoE config and official BF16 checkpoint support (#25444); idefics3 preproc fix (#28273); Qwen3-TTS 0.6B proj_in and FFN precision fixes (#28231).
 - **Quantization**: Row-slab streaming to avoid thread starvation (#27830); RAM peak prevention at model loading (#27483).
 - **Other**: GBNF grammar fix for empty object schemas (#28279); `n_expert_used_max()` helper (#28323); model layer arrays loaded with `n_layer_all` (#28173); `n_layer_nextn` loaded early (#28159); lazy tensor handling improved (#27837); `--lazy-mode` CLI rename (#27969); YaRN `n_ctx_train` autoscaling (#28030); finetune no-KV-cache fix (#27199); DeepSeek V4 vision support (#28154); gemma4-assistant fix (#28183); ssm_a tensor noscan flagging (#28121); whole-source rebuild on commit fix (#28278); `npx` removed from package.json scripts (#28270).
+
+---
+
+## 2026-09-11 — 101 commits since last digest
+
+### New Features
+
+- **Spark 2.5 (Spark2_5ForCausalLM)** (#27868): Full support for iFlyTek's Spark 2.5 model architecture, including conversion, GGUF constants, and model graph.
+- **Metal fusion table + fusion debug framework** (#28164): All fusable op patterns for Metal are now declared in a single table instead of scattered across the codebase. Includes a new gated_delta_net + cache-copy fusion that writes recurrent state snapshots directly into the KV cache, eliminating a trailing copy. Also adds a generic fusion-stats API for counting how many times each fusion pattern fires, and a regression test framework with a committed per-device baseline (MTL.csv) to catch silent fusion regressions.
+- **Metal idle-thread fix for IQ mul_mv kernels** (#28086, #28692): When a row has fewer than 32 chunks, most threads in a simdgroup were idle. A new row-split dispatch path via function constants divides work among threads, improving utilization for small models and short rows. Applied to iq3_xxs, iq1_s, iq1_m, iq2_xxs, iq2_xs, iq2_s, and iq3_s kernels.
+- **Vulkan UNARY+MUL fusion** (#27220): Fuses GELU/SIGMOID/SILU/SOFTPLUS activations with a following MUL into a single kernel dispatch, eliminating intermediate global memory traffic. Handles broadcast shapes, views between the pair, and the "OP-on-B" pattern where the activation is on the smaller operand (e.g. shared-expert gating). Includes gap-tolerant scheduling that hoists zero-compute view nodes to make the pair adjacent.
+- **Vulkan DeepSeek-V4 hyper-connection fused ops** (#26578): Three new Vulkan shaders — `dsv4_hc_comb` (full 20-iteration Sinkhorn normalization in registers), `dsv4_hc_pre`, and `dsv4_hc_post` — replacing ~137 strictly-ordered node executions per site. The Sinkhorn comb alone was 32% of decode op time on Strix Halo.
+- **Vulkan TQ1_0 quantization support** (#27765): Complete TQ1_0 (ternary 1-bit) support for Vulkan — mat-mul, mat-vec, mat-vec-id, dequant, and get_rows. Includes a coopmat2 path and optimized trit decoding using packed powers-of-3 in a 32-bit constant.
+- **Vulkan RMS_NORM fusion extensions** (#28024): Supports RMS_NORM+MUL+ADD(+MUL) and RMS_NORM+VIEW+SET_ROWS patterns, plus IMROPE extension for ROPE+VIEW+SET_ROWS fusion. ~4% improvement on Gemma4.
+- **SYCL batched L2_NORM kernel** (#28222): Batches consecutive L2_NORM operations in the graph dispatch, cutting L2_NORM dispatches in half (12480→6240) and device time by 43% on Arc Pro B70.
+- **SYCL Kronecker FWHT support restored** (#28016/#28254): Re-adds Kronecker product Fast Walsh-Hadamard Transform support for sizes 384, 640, 768, and 1280, after a previous revert.
+- **Convert: `--fuse-qkv` flag** (#22780): New converter flag that fuses separate Q/K/V weight tensors into a single QKV tensor during HF-to-GGUF conversion, potentially improving inference efficiency for compatible architectures.
+- **Convert: explicit `recurrent_layers` for Qwen3-Next/3.5** (#28208): Writes the full boolean array of which layers are recurrent vs. full-attention, fixing a bug where non-uniform layer patterns were silently reconstructed incorrectly from the interval-based fallback.
+- **Precompiled headers + unity build** (#28091): Build system now uses precompiled headers for common includes and a unity build for model sources, reducing full build times from ~1503s to ~993s (34% faster).
+- **`--log-jsonl` argument** (#28437): New CLI option for structured JSON Lines logging output.
+- **Kimi-K3 recurrent-state rollback** (#28466): Enables efficient speculative decoding by supporting rollback of recurrent state without full serialization.
+- **`ggml_prec` specification update** (#26675): Adds `GGML_PREC_BF16` and reworks the precision API with new functions for querying and setting precision on MUL_MAT and MUL_MAT_ID operations.
+
+### Bug Fixes
+
+- **Vulkan argsort data race and OOB access** (#28705): The inner loop of argsort had a data race caught by Vulkan Validation Layers, and argsort_large had out-of-bounds accesses.
+- **Vulkan FA dequant path on PowerVR** (#28341): Vulkan shader compilation failed with `VK_ERROR_UNKNOWN` on Imagination PowerVR GPUs for every dmmv shader using subgroup reduction with size ≥16. Falls back to shared-memory reduction.
+- **Vulkan FILL exceeding maxComputeWorkGroupCount** (#28592): On Intel GPUs running Qwen 3.8 Flash Next, the FILL operation exceeded the maximum workgroup count limit. Fixed by distributing workgroups in 2D.
+- **Vulkan 32-bit platform handle usage** (#22892): On 32-bit platforms, Vulkan non-dispatchable handles caused compilation errors due to disabled implicit conversions in Vulkan-Hpp.
+- **CUDA divergent barrier in F16 flash attention** (#27870): A divergent barrier (where not all threads in a warp reach the same sync point) was fixed.
+- **CUDA races in mmid and mmf** (#28475): Data race conditions fixed in matrix-multiply-id and matrix-multiply-fused kernels.
+- **Metal memory leak in early return** (#28399): Missing autorelease pool on an early-return path caused a memory leak.
+- **Metal mul_mm_id token tile skip** (#28301): The MoE matrix multiply kernel now correctly skips the empty half of a 32-row token tile when an expert doesn't fill it, avoiding wasted computation.
+- **MTP context KV cache allocation** (#28630): Fixed incorrect KV cache allocation for MTP (multi-token prediction) contexts on deepseek2, glm4moe, and cohere2moe architectures.
+- **Server: speculation after an image** (#28715): The speculative decoder received the token count instead of the actual position after an image input, breaking all drafters (not just DFlash).
+- **Server: DFlash with vision models** (#28587): DFlash speculative decoding failed to decode multimodal chunks because images reported a fixed offset, preventing the drafter from allocating new tokens.
+- **Server: LRU hang on multiple requests for same model** (#28539): When a waiter abandoned the queue while its model was still loading, subsequent requests for the same model would hang forever due to uncounted free slots.
+- **Server: checkpoint min-step eviction** (#28302): For prompts shorter than `checkpoint_min_step`, the spacing eviction rule dropped the checkpoint needed for resumption, forcing hybrid/recurrent models to re-prefill from scratch.
+- **GDN normalization fix** (#28068): Gated delta net Q/K normalization was using `max`-based clamping (torch.nn.functional.normalize) instead of the correct `rsqrt`-based formula with epsilon inside the root, matching the flash-linear-attention reference. This was a silent correctness bug that affected all GDN models.
+- **Grammar max repetition threshold** (#28469): Fix for the max repetition handling in GBNF grammars.
+- **`llama_sampler_chain_n` return type** (#28631): Changed from `int` to `int32_t` for consistency. This is ABI-compatible on all mainstream platforms.
+- **Jinja null `in` operator** (#28620): Templates defaulting an optional variable to `none` and then testing membership in a map hit an error instead of returning false as Jinja does.
+- **ggml backend crash on inaccessible search path** (#28271 carry): An inaccessible directory in the backend search path (WebDAV mount, removed CWD) now gracefully skipped.
+- **OpenCL non-contiguous conv2d** (#28503): Non-contiguous input strides were not handled correctly in conv2d.
+- **Lazy tensor loading disabled on iGPUs** (#28326): Lazy tensor loading was causing a regression on integrated GPUs; now defaults to off for iGPUs in AUTO mode.
+- **0-sized ids tensor crash** (#28739): Offloading selected experts with a zero-sized ids tensor caused a crash.
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15, 2026-08-28, and 2026-09-04 digests) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum, then added `lazy_mode` enum — two fields behind).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_model_quantize_params` struct** is missing the `max_buf_size` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode`**, **`llama_lazy_mode`** enums and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+
+The only API-level change in this batch is `llama_sampler_chain_n` changing its return type from `int` to `int32_t` (#28631). The existing binding declares `:int` which maps to the same underlying C type on all platforms where llama.cpp builds, so **no binding update is needed** for this change.
+
+### Other / Internal
+
+- **Build**: Precompiled headers and unity build for models (#28091) — 34% build time reduction; `release.sh` sed fix for macOS (#28700); container image semver tagging workflow (#28394); missing headers added (#28566); nix expressions updated (#28145).
+- **CI**: test-backend-ops moved to dedicated ci/run.sh step (#28740); Metal fusion regression test framework (#28164); sanitizer tests fixed (#28583); cache keyed to sanitizer matrix (#28708); npm GHA cache disabled (#28600); pytest workers set to 1 for server-self-hosted (#28603); Windows ARM64 CUDA updated to 13.4.1 GA (#28687); `ty` bumped to 0.0.78 (#28548); hf-jobs expanded (#28693).
+- **CUDA**: Flash attention tuning for gfx1201/RDNA4 (#28102); branchless Q4_K/Q5_K unpack with L2 prefetch on DGX Spark (#26705); MoE MMQ N-tile sizing for RDNA3 (#28552, reverted then re-landed); configurable FA quant compilation (#28079); gfx90c HIP support (#26454).
+- **Metal**: FA-vec tunings for M2 Max (#28458); mul_mm_id token tile skip (#28301); memory leak in early return (#28399); fusion table and debug framework (#28164); IQ kernel idle-thread fixes (#28086, #28692).
+- **Vulkan**: UNARY+MUL fusion (#27220); DSV4 hyper-connection fused ops (#26578); TQ1_0 support (#27765); RMS_NORM fusion extensions (#28024); spec constant for mul_mat type_a (#25773); argsort race/OOB fix (#28705); iq4_xs dedicated mat-vec (#28426); f16 B-type matmul for Intel coopmat1 (#27471); FILL 2D workgroup distribution (#28592); CPU writes for idle context (#28618); topk_moe fusion for prefill (#28422); small-M optimizations for Qwen (#28457); PowerVR shared-memory reduction fallback (#28341); command-buffer debug labels (#28101); type-aligned GET_ROWS (#28253); 32-bit handle fix (#22892).
+- **SYCL**: Batched L2_NORM kernel (#28222); Kronecker FWHT restored (#28254); memory allocation tracing (#27631); test-backend-ops special-casing dropped (#28688).
+- **OpenCL (Adreno)**: A8 Q4_0 mm binary kernel (#28268); non-contiguous conv2d fix (#28503); Q4_K/Q5_K weights pack selection (#28402).
+- **Hexagon**: Vectorized RoPE theta cache, NEOX rotate, and inplace mode (#28628); RELU and LEAKY_RELU ops (#28585).
+- **CPU**: s390x Q1_0 vector intrinsic support (#28606); s390x q4_0 repack (#28667); MSVC+Clang ggml_vld1q_u32 fix (#28284).
+- **Server UI**: Major chat rendering performance overhaul (#28460) — lazy viewport-based message mounting, turn-section caching, sibling-map memoization, tool-block parse deferral, compositor-based animations; UI assets embedded via CMake (#28445).
+- **Converters**: Nemotron H conversion expanded (#28689); Hy4-preview HC tensor mapping refactored (#28451); Granite family parameter counts fixed (#28643); Qwen3-Next/3.5 explicit recurrent_layers (#28208); `--fuse-qkv` flag (#22780).
+- **Models**: GDN normalization corrected to rsqrt (#28068); dead switch branches cleaned up (#28669); MTP context KV cache fix (#28630); Kimi-K3 recurrent-state rollback (#28466); Granite3 MoE parameter count fix (#28632).
+- **Other**: `ggml_prec` reworked with BF16 and new query API (#26675); chat parsers split into per-template files (#27764); L2_NORM batch array initialization (#28553); quantize-fns test extended for nrc=2/i8mm (#16234); lazy loading disabled on iGPUs (#28326); HIP prop.integrated revert (#28604); `--mmap`/`--mlock`/`--dio` officially deprecated (#28334); numpy pinned to 2.2.6 (#28654); jinja null `in` fix (#28620); fusion test tolerance adjustments (#28691); server test tolerance for shared pool abort (#28759).
