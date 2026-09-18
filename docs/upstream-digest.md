@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 8ea290247c87ced2ab245b056ffe96dbcf90d36c
+Last covered upstream commit: 50631b3d2c569ad8e5c112090cd28570b1268ee0
 
 ---
 
@@ -412,3 +412,88 @@ The only API-level change in this batch is `llama_sampler_chain_n` changing its 
 - **Converters**: Nemotron H conversion expanded (#28689); Hy4-preview HC tensor mapping refactored (#28451); Granite family parameter counts fixed (#28643); Qwen3-Next/3.5 explicit recurrent_layers (#28208); `--fuse-qkv` flag (#22780).
 - **Models**: GDN normalization corrected to rsqrt (#28068); dead switch branches cleaned up (#28669); MTP context KV cache fix (#28630); Kimi-K3 recurrent-state rollback (#28466); Granite3 MoE parameter count fix (#28632).
 - **Other**: `ggml_prec` reworked with BF16 and new query API (#26675); chat parsers split into per-template files (#27764); L2_NORM batch array initialization (#28553); quantize-fns test extended for nrc=2/i8mm (#16234); lazy loading disabled on iGPUs (#28326); HIP prop.integrated revert (#28604); `--mmap`/`--mlock`/`--dio` officially deprecated (#28334); numpy pinned to 2.2.6 (#28654); jinja null `in` fix (#28620); fusion test tolerance adjustments (#28691); server test tolerance for shared pool abort (#28759).
+
+---
+
+## 2026-09-18 — 127 commits since last digest
+
+### New Features
+
+- **HrmTextForCausalLM (DFM Mimir 1B)** (#27625): A novel dual-stack architecture where two transformer stacks (low, high) alternate over the same token stream. Includes sigmoid-gated attention, SwiGLU FFN, parameterless RMS norms, a learned embedding scale, and pointer-deduplicated tensor saving for looped architectures. The KV cache holds one entry per pass (128 blocks for Mimir 1B), so memory cost and decode speed scale with loop depth.
+- **Maple 20B-A1B** (#27000): New ternary MoE architecture with 256 experts (8 active), sliding-window attention interleaved with global attention at 3:1 ratio, partial rotary embeddings, and SwiGLU gate clamping. Uses TQ1_0/TQ2_0 ternary quantization. Registered between MAMBA2 and JAMBA in the architecture list.
+- **Model Saver: 15 more architectures roundtrip** (#29042): The model saver now writes SWA (sliding window attention) patterns and MLA SWA geometry for all SWA-using models, enabling bit-exact save/reload roundtrips for plamo3, gemma3, cohere2, cohere2moe, olmo2, exaone-moe, afmoe, mimo2, spark2_5, muse-glimmer, mellum, laguna, granite_swa, dots3note, and maple.
+- **LoRA loading from FILE pointer** (#28993): New `llama_adapter_lora_init_from_file_ptr()` API function that loads a LoRA adapter from an already-open FILE pointer, supporting GGUFs embedded at arbitrary offsets within larger files. Also fixes data-section alignment for embedded GGUFs.
+- **SYCL radix top-k select** (#28670): GPU-resident TOP_K for large k values (up to 2048+), replacing the CPU fallback that was triggered for k > 32. Uses a radix-select algorithm whose memory footprint is independent of k. Particularly important for Qwen3.8-Flash-Next which uses k=2048 in 12 layers per token. Multi-workgroup parallelization added for single-row cases.
+- **OpenVINO stateful decode + GPU MoE optimization** (#28638): Major OpenVINO backend update — stateful decode for Gemma-4 with per-layer head sizes, GPU MoE expert fusion, requantized grouped 8-bit experts, shared compiled models across contexts, cacheless encoder model support on NPU, RoPE/norm translation optimization, and SoftPlus decomposition.
+- **Vulkan sparse Flash Attention** (#28105): Sparse FA support for DeepSeek V4 and GLM architectures on Vulkan, including decode vector support with CM2 f16vec4 binding.
+- **HIP AllReduce for ROCm** (#27825): Enables multi-GPU AllReduce operations on AMD ROCm.
+- **CUDA graph support for MTP draft** (#28549): CUDA graphs are now used for MTP (multi-token prediction) speculative decoding, reducing launch overhead.
+- **Metal FA kernels for HSK=96, HSV=64** (#28599): New flash attention kernel instantiation for MiniCPM3, which has asymmetric key/value head dimensions (96 and 64 respectively). Without this, `-fa auto` would abort on the missing kernel.
+- **Qwen4exp hyper-connection ops** (#28901, #28988): Hyper-connection operations and RMS_NORM+MUL fusion enabled for Qwen3.8-Flash-Next on Vulkan.
+- **JSON schema internal representation** (#28736): New `common_chat_schema` type system for JSON schemas with an optimizer, replacing raw JSON manipulation in grammar generation. Supports proper type resolution, `$ref` handling, and empty schema semantics.
+- **LOG_JSON macro** (#28586): Structured JSON logging macro for server-side structured data output.
+- **DeepSeek V3.2/V4 chat parser delimiters** (#29008): Message delimiters added to the DeepSeek V3.2/V4 chat template parser.
+- **Qwen3-coder complex type parsing** (#28742): Improved schema support and grammar handling for complex types in the Qwen3-coder chat template.
+- **llama-bench --version** (#28971): The benchmark tool now supports `--version` to print build info.
+- **Server: model downloads at model limit** (#28530): The server now allows downloading models even when the model count limit is reached.
+- **llama.cpp version 0.4.1** (#28900): Version bump; ggml bumped to 0.24.0.
+
+### Bug Fixes
+
+- **SECURITY: RPC use-after-free → remote code execution** (#24292): The RPC server cached compute graphs with direct pointers to backend buffers. After a buffer was freed, the next GRAPH_RECOMPUTE would dereference dangling pointers. An unauthenticated remote client could reshape the freed memory via ALLOC_BUFFER/SET_TENSOR to leak libc addresses and hijack buffer vtable pointers for arbitrary code execution. Fixed by discarding all cached graphs when any buffer is freed.
+- **ggml-cpu heap corruption from PCH include order** (#28882): The precompiled header included `<new>` before `ops.h`, making CACHE_LINE_SIZE resolve to 256 in C++ but 64 in C. This undersized the rope work buffer, causing a heap-buffer-overflow that corrupted the heap and crashed in `ggml_compute_forward_rope_flt`. Fixed by disabling the ggml-cpu PCH and removing the `std::hardware_destructive_interference_size` branch.
+- **Metal NaN in mul_mm_id for activations exceeding f16 range** (#26223): The MoE matrix-multiply kernel narrowed src1 to half precision for simdgroup MMA. Activations above 65504 overflowed to inf, and the accumulator propagated NaN across entire 8x8 tiles. Affected Mistral Small 4 (128 experts) which has activations reaching ~1e5. Fixed with a power-of-two rescaling that is exact in binary floating point and a no-op when values already fit.
+- **ggml allocation failure crash prevention** (#28149): Added null checks after memory allocation calls to prevent hard crashes on allocation failure.
+- **ggml graph buffer reservation failure** (#26070): Graph buffer reservation failures are now handled gracefully instead of crashing.
+- **GGUF embedded alignment** (#28993): A GGUF embedded at a non-zero file offset had its data section padded from file offset 0 instead of the GGUF start, returning wrong tensor data. Also adds bounds-check error instead of assert for unaligned mmap.
+- **SpacemiT int16 transpose** (#25161): Copy-paste bug called the int32 transposition function for int16 data, reading 2x bytes per element and producing corrupted results in 14 of 16 matrix positions.
+- **Vulkan im2col buffer_reference alignment** (#28996): Missing explicit alignment annotation caused 16-byte aligned writes through a pointer advanced by 2 or 4 bytes, triggering Vulkan validation errors.
+- **Vulkan argsort_large NV driver bug workaround** (#28975): Workaround for an NVIDIA driver bug in the argsort_large compute shader.
+- **RPC hash-cache polluting disk with activations** (#28789): The RPC file cache was hashing and storing every transferred tensor above a threshold, including activations — accumulating 1.4 TB/day of useless cache. Now restricted to weight tensors only, and saves only on confirmed hash misses. Wire format changed (RPC_PROTO_MAJOR_VERSION bumped).
+- **TP split state for fused QKV on gemma4, qwen35** (#28965): Tensor-parallel split state was calculated from `n_embd` instead of `n_head * n_embd_head_k`, which differs for models like Gemma4 (5376 vs 8192).
+- **cmake build with GGML_CPU=OFF and GGML_CUDA=ON** (#29026): Build was broken when CPU backend was disabled.
+- **gguf-py Q8_1 block size** (#29036): Incorrect block size (was wrong, now corrected to 2+2+32).
+- **WebGPU GET_ROWS supports_op condition** (#28978): Source stride checking was missing for vec4 alignment in GET_ROWS.
+- **Nemotron-H expert FFN zero divisor** (#28779): When MTP tail layers had 0 for both n_ff and n_expert_used, the division-by-zero killed the process at load time with SIGFPE. Now reports the malformed metadata.
+- **SYCL function signature for split buffer type** (#28981): Incorrect function signature corrected.
+- **SYCL oneDNN scratchpad pool free order** (#28704): The scratchpad memory pool was being freed in the wrong order.
+- **CUDA/HIP im2col access patterns** (#28013): Improved memory access patterns for the im2col operation.
+- **ggml-cuda BF16 fallback** (#28846): Devices without BF16 hardware acceleration (pre-Ampere NVIDIA, pre-RDNA3 AMD) now fall back to F32 instead of using broken BF16 paths.
+- **OpenCL abort bugs** (#27630): Several conditions where the OpenCL backend would abort instead of handling errors gracefully.
+- **WebUI /tools endpoint polling** (#28646): When `--tools` was disabled, the UI re-fetched the tool list before every chat message (returning 403 each time). Now detects the disabled state and stops retrying.
+- **Server router child state framing** (#28747): Logger color-reset escape sequences leaked into the command pipe, breaking state command parsing and leaving model downloads stuck.
+- **Grammar find+insert optimization** (#26885): Replaced two consecutive O(log n) lookups with a single insert-attempt and switched copy-then-move to move-then-copy for intermediate states, significantly reducing allocations during grammar parsing.
+- **Various**: cmake PCH removal (#28892), models get_key_or_arr fixes (#28868), mimo2 SWA pattern load (#28865), Vulkan MUL_MAT_ID BN/2 tail (#28923), OpenCL warnings (#28984), jinja integer dot properties (#28817), cmake timestamp fix for PCH on clang (#28816), RPC skip ACCEL devices (#29020).
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15, 2026-08-28, 2026-09-04, and 2026-09-11 digests) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum, then added `lazy_mode` enum — two fields behind).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_model_quantize_params` struct** is missing the `max_buf_size` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode`**, **`llama_lazy_mode`** enums and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+
+New gap introduced in this batch:
+
+- **New function `llama_adapter_lora_init_from_file_ptr()`**: Loads a LoRA adapter from an open FILE pointer, analogous to the existing `llama_model_load_from_file_ptr()`. The bindings have `llama_adapter_lora_init` (path-based) but not this new FILE*-based variant. Not breaking — this is additive.
+
+### Other / Internal
+
+- **Build**: llama.cpp version 0.4.0 → 0.4.1; ggml 0.23.0 → 0.24.0; precompiled headers removed after causing heap corruption (#28892); cmake switched from CMAKE_SOURCE_DIR to PROJECT_SOURCE_DIR for add_subdirectory compatibility (#28771); cpp-httplib updated to 0.56.0 (#28787); API/ABI compatibility check added to release workflow (#28947, #28579).
+- **CI**: ubuntu-latest changed to ubuntu-24.04 (#29079); android-actions/setup-android bumped to 4.0.4 (#29065); GHA cache disabled for copilot (#29068); KleidiAI runners bumped 22.04 → 24.04 (#28885); CUDA Windows x64 builds updated to 13.4.1 (#28930); MUSA build reduced to 1 arch (#28944); editorconfig/code-style checks moved to ubuntu-slim (#28854); self-hosted CI triggered on ci/run.sh changes (#28859); test-backend-ops parallel capped at 2 with 3600s timeout (#28833); various cache and runner fixes.
+- **CUDA**: i16/i32 DUP enabled (#28897); row-contiguous SUM_ROWS support (#26308); BF16 fallback on unsupported hardware (#28846); CUDA graphs for MTP draft (#28549); HIP MoE ncols_opt heuristic broadened to RDNA3.5 (#28935); HIP fattn-mma fp32 accumulation on MFMA/CDNA (#28576); HIP AllReduce enabled (#27825).
+- **Metal**: FA kernels for HSK=96/HSV=64 for MiniCPM3 (#28599); NaN fix in mul_mm_id via power-of-two rescaling (#26223); FA test sizes reduced (#28842).
+- **Vulkan**: IQ3_S MMQ matmul kernels (#28822); sparse Flash Attention for DSV4/GLM (#28105); qwen4exp hyper-connection ops (#28988, #28901); mul_mat_id expert limit raised to 1024 (#28501); MUL_MAT_ID BN/2 tail unconditional (#28923); buffer and debug code split into separate files (#28732); im2col alignment fix (#28996); NV argsort_large workaround (#28975); NV queuesubmit mutex workaround (#28830); MoE ncols_opt noshuffle alignment for q4_K/q5_K/q8_0 (#28575).
+- **SYCL**: Radix top-k select for large k (#28670); ssm_conv SiLU fusion (#28929); oneDNN scratchpad fix (#28704); split buffer type signature fix (#28981); mem error fix for unsupported zes API (#28227); tq1_0 graceful unsupported handling (#28681).
+- **OpenCL (Adreno)**: A8 Q6_K and Q4_K non-MoE binary kernels (#28678, #28677); generic ssm_scan (#28881); noshuffle row-alignment for q4_K/q5_K/q8_0 (#28575); various warning fixes (#28984); abort bug fixes (#27630); MoE expert matmul batch-size gating for speculative decoding (#27637).
+- **Hexagon**: K-quant Q4_K/Q6_K kernel implementation (#28994); im2col update for 1D and padded ops (#29103); HMX flash-attention head_dim padding for non-64-multiple sizes (#26539); multi-device model split support (#28589); rope probe zeroed-param acceptance (#28995); contiguous fast-path and hvx_copy_uu fix (#28886); DMA-based contiguous copy (#28906).
+- **WebGPU**: GET_ROWS vec4 alignment fix (#28978); tensor binding block-size alignment (#28382); Dawn updated to recent version (#28683).
+- **CPU**: F16 input support for FWHT (#27779); s390x non-VXE build guard (#28775); ggml-cpu PCH/CACHE_LINE_SIZE fix (#28882).
+- **RPC**: Use-after-free security fix (#24292); hash-cache restricted to weights (#28789); ACCEL device skip (#29020); linking fix for BUILD_SHARED_LIBS=OFF (#28492).
+- **Server**: Subproc handling refactored (#28555); model downloads at model limit (#28530); router child state framing fix (#28747); missing headers added (#28795); UI cache added (#28802).
+- **Converters**: Maple ternary MoE converter (#27000); HrmTextForCausalLM converter with fused gqkv remapping (#27625); model saver SWA pattern for 15 architectures (#29042).
+- **Other**: Grammar find+insert coalescing (#26885); common_chat_schema internal representation (#28736); vocab ufakzeka pre-tokenizer (#29033); jinja dot property integer literals (#28817); Nemotron MTP support extended (#29018); llama_n_rs_seq moved before llama_decode (#28749); models get_key_or_arr fixes (#28868); mimo2 SWA pattern fix (#28865); nemotron-h layer_norm_epsilon-only metadata (#28989); qwen4exp rms_norm+mul fusion (#28896); cmake PCH timestamp fix for clang (#28816); pi model disclosure env var (#28853).
