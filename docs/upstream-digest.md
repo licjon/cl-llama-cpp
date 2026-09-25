@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 50631b3d2c569ad8e5c112090cd28570b1268ee0
+Last covered upstream commit: 4b1a27fa0eb875bbca4f6cfe936e3d65adc685c0
 
 ---
 
@@ -497,3 +497,107 @@ New gap introduced in this batch:
 - **Server**: Subproc handling refactored (#28555); model downloads at model limit (#28530); router child state framing fix (#28747); missing headers added (#28795); UI cache added (#28802).
 - **Converters**: Maple ternary MoE converter (#27000); HrmTextForCausalLM converter with fused gqkv remapping (#27625); model saver SWA pattern for 15 architectures (#29042).
 - **Other**: Grammar find+insert coalescing (#26885); common_chat_schema internal representation (#28736); vocab ufakzeka pre-tokenizer (#29033); jinja dot property integer literals (#28817); Nemotron MTP support extended (#29018); llama_n_rs_seq moved before llama_decode (#28749); models get_key_or_arr fixes (#28868); mimo2 SWA pattern fix (#28865); nemotron-h layer_norm_epsilon-only metadata (#28989); qwen4exp rms_norm+mul fusion (#28896); cmake PCH timestamp fix for clang (#28816); pi model disclosure env var (#28853).
+
+---
+
+## 2026-09-25 — 147 commits since last digest
+
+### New Features
+
+- **`llama_batch_ext` API** (#24669): A new extended batch API that provides richer batch construction — tokens and embeddings can be mixed in a single batch, with explicit functions for setting embedding state. Supplements the existing `llama_batch` API and adds `llama_batch_ext_init`, `llama_batch_ext_free`, `llama_batch_ext_add_embd`, and `llama_batch_ext_set_embd_state`.
+- **`llama_prec_policy` + model-driven W4A4** (#24364): New precision policy API allowing models to specify W4A4 (4-bit weight, 4-bit activation) quantization paths. Adds the `llama_prec_policy` type for model-level precision control with MXFP4 dispatch on supported CUDA hardware.
+- **Ling 3.0 VL (vision-language)** (#29151): Multimodal image input for the Ling 3.0 (Bailing V3) model family, integrated into the BailingMoeV3 architecture with mRoPE sections for vision tokens.
+- **DFlash for HunyuanOCR** (#28890): DFlash speculative decoding now works with HunyuanOCR models, with layer-input tap registration and converter fixes for HunYuan targets. Includes DFlash/DSpark vision target conversion (#29339).
+- **MiMo-V2.6 conversion** (#29257): Converter support for the MiMo-V2.6 model, including hoisting the K3 mxfp4 repack into the base converter.
+- **Gemma4 DSpark draft** (#29226): DSpark speculative decoding support for Gemma 4, including SWA/full-attention inference and tied output weights.
+- **Ling 3.0 chat parser** (#28682): Dedicated chat template parser for Ling 3.0 (Bailing V3) that handles the pre-opened `<think>` block and tool calls appearing before `</think>`, matching the vLLM/SGLang behavior.
+- **Server: bind to multiple addresses** (#28690): `llama-server` can now listen on multiple network addresses simultaneously for high-availability setups.
+- **Server: OpenAI video_url content type** (#27921): Accepts the standard OpenAI `video_url` content type and `data:` video URIs for video input, not just the non-standard `input_video`.
+- **Server: input_image in function_call_output** (#22575): Images can now be included in function call output messages in the chat API.
+- **Server: env vars for sampling params** (#27380): Temperature, top-p, min-p, repeat-penalty, presence-penalty and frequency-penalty can now be set via `LLAMA_ARG_*` environment variables for systemd-style configuration.
+- **Server: dedup draft HF model** (#27934): The `dedup-cache-models` preset now correctly deduplicates draft models downloaded from Hugging Face.
+- **Metal MoE + SSM_CONV fusion** (#28948): Major Metal kernel fusion additions — top-k MoE routing (softmax+argsort+get_rows), MoE weighted expert reduction (mul+view+add chain), RMS_NORM+SCALE, and SSM_CONV+SILU. All use Metal function constants for zero-overhead selection. Reduces kernel launch count significantly for MoE models.
+- **Metal FWHT for block widths > 512** (#29095): Fast Walsh-Hadamard Transform extended to block widths 1024–8192 using a threadgroup-based kernel with 256 threads per row.
+- **Metal F16 FWHT input** (#29094): FWHT kernels now accept F16 source data directly instead of requiring an F32 conversion copy.
+- **Metal sparse FA optimization** (#29377): Sparse flash attention index caching in shared memory with unrolled loads for better occupancy.
+- **Metal arbitrary hc in dsv4_hc_pre** (#29169): The DSV4 hyper-connection pre-op now supports any head count (not just hc=4), needed for Kimi-K3's variable layer-depth residual stack.
+- **CUDA fused RMS_NORM+SCALE** (#29393): Fuses the RMS_NORM + SCALE pattern into a single kernel, reducing host-side launch overhead by ~96 launches per ubatch on GDN models (Qwen3.8-27B). +4.2–4.8% on speculative decoding cold prefill.
+- **CUDA conv3d implicit GEMM** (#29137): New 3D convolution kernel using implicit GEMM for GPU-accelerated volumetric operations.
+- **CUDA conv2d implicit GEMM** (#29135): Accelerated 2D convolution via implicit GEMM, complementing the existing direct convolution.
+- **CUDA F16 CONV_2D_DW** (#29064): Half-precision kernel for depthwise 2D convolution.
+- **CUDA contiguous tensor conversion** (#29155): A new vectorized kernel converts contiguous tensors four elements at a time (512 bytes per warp vs 128), yielding ~1.3% prefill improvement.
+- **Vulkan int8 coopmat1 matmul for AMD RDNA3/4** (#27952): Integer 8-bit cooperative matrix matmul covering q4_0, q4_1, q5_0, q5_1, q3_k, q4_k, q5_k, q6_k, iq4_nl, iq4_xs, mxfp4, and nvfp4 quantization types. Includes double-buffering and workgroup scheduling for cache proximity.
+- **Vulkan IQ4_XS MMQ/MMV kernels** (#28415): Dedicated matmul and matvec kernels for IQ4_XS quantization.
+- **Vulkan Intel Xe FA optimization (2/3)** (#24406): Split-k flash attention optimization kernels for Xe-LPG Plus, Xe2, and Xe3 Intel GPUs.
+- **Vulkan Adreno cooperative matrix tuning** (#29328): KHR cooperative matrix support tuned for Qualcomm Adreno mobile GPUs.
+- **Hexagon HMX-optimized GATED_DELTA_NET** (#29199): Hardware matrix extension-optimized GDN with HVX threading, DMA pipelining, and f16 exp() for better HVX utilization.
+- **Hexagon 64-bit DMA + buffer overhaul** (#29197): Major rework of buffer management and DMA handling for 64-bit address mappings, secondary DMA ring fallback, and per-op DMA audit.
+- **Hexagon TOP_K** (#29113), **GEGLU_QUICK** (#29114), **I32 GET_ROWS** (#29116), **ROLL** (#29105), **I32 CPY/CONT** (#29379), **Q5_K quant** (#29123): Several new operations and quantization type support for the Hexagon DSP backend.
+- **llama.cpp version 0.5.0** (#29333): Version bump with ggml 0.25.0–0.25.3.
+
+### Bug Fixes
+
+- **CUDA CUB argsort corruption** (#28389): The CUB radix sort was using the same buffer for both input and output keys, causing the sort to partially overwrite its own input during ping-pong passes. This produced corrupted permutations that manifested as garbage indices in downstream get_rows, particularly on Maxwell/CUDA 12.5.
+- **LFM2 audio mel preprocessor** (#29403): The mel spectrogram preprocessor used a clamped log floor instead of `log(x + 2^-24)`, a periodic Hann window instead of symmetric, and epsilon inside the sqrt instead of added to stdev. This caused 4.5–6.5% of transcription outputs to differ from the reference implementation.
+- **Tensor split for fused QKV with uneven K/V heads** (#29294): Tensor splitting was incorrect when Q/K/V are fused and K and V have different head sizes, producing wrong results in tensor-parallel mode.
+- **Server token counting crash on sleep** (#29309): The `/tokenize` and `/detokenize` endpoints crashed when the server was in sleep mode instead of waking it up.
+- **Server router eviction races** (#29217): Models loaded via the fast path had no queue entry, so the tick loop evicted them immediately. Also, requests for a model being stopped were sent to the dying child process.
+- **Server --api-key-file forwarding** (#28938): In router mode, `--api-key-file` was forwarded to children, causing `--api-key` clients to get 401 errors and internal router calls (stream lookup/delete) to fail silently.
+- **Grammar numeric truncation** (#29382): Large token IDs were truncated during grammar rule parsing due to integer narrowing.
+- **Mamba time-step projection** (#28832): The input to the time-step projection was not made contiguous, potentially producing incorrect results for non-contiguous tensors.
+- **Metal graph capture + empty graphs** (#29390): Graph capture had a redundant reset and did not handle empty (zero-node) graphs, causing assertion failures.
+- **Metal mask bounds in FA** (#29220): Incorrect mask bounds in the flash attention block pre-pass could read out of bounds.
+- **Metal FA support checks** (#29122): The flash attention support detection had incorrect conditions.
+- **Vulkan build with legacy GLSLC** (#29373): Build failed with older GLSLC versions lacking the `cooperativeMatrix` API. Added preprocessor guards and filtered unsupported FA kernels.
+- **Vulkan hidden internal symbols** (#29139): After #28732, internal symbols were exported, so a duplicate dlopen/dlclose by `ggml_backend_load_all()` interposed them and destroyed the live `vk_instance`, causing assertion failures.
+- **Vulkan conv_2d/conv_3d misalignment** (#29365): Misaligned data access in convolution shader operations.
+- **CUDA sm_70 tile compilation** (#29224): A 5-argument `load_ldmatrix` template only defined `tile<16,8>`, so Volta's `tile<8,4>` failed to compile.
+- **ggml_permute dimension/stride truncation** (#29227): Value truncation in `ggml_permute` could corrupt tensor dimensions and strides for large tensors.
+- **Jinja unary +/- before variables** (#29244): Expressions like `items[:-n]` and `indent[:-indent_factor]` now parse correctly — unary operators bind at multiplicative precedence.
+- **Jinja dangling reference** (#29279): A lambda held a local cast pointer, triggering `-Werror=dangling-reference`.
+- **JSON enum handling** (#28518): Missing `common_json_value` handling for enum values caused silent failures.
+- **Muse Glimmer tool-call parser** (#29242): Tool calls appearing first in the model output were not parsed correctly.
+- **Gemma4 required tool grammar** (#29115): Incorrect grammar generation for required tools in Gemma4 chat templates.
+- **PEG invalid UTF-8** (#29161): Invalid UTF-8 sequences in the AST caused crashes; now returns maximal subparts per Unicode recommendations.
+- **JSON schema escaped hyphen** (#29127): `\-` in regex patterns within JSON schemas was rejected.
+- **ggml ubsan error in graph_nbytes** (ggml/1644): Undefined behavior sanitizer error fixed.
+- **MUSA PH1 operator failures** (#29193): Six fixes for the Moore Threads PH1 (MTT S5000) — 16-byte copies, CUB enablement, cooperative launch, shared memory limit, MMQ disablement for correctness, and GATED_DELTA_NET enablement. pp512 went from 964 to 2119 t/s with GDN on GPU.
+- **HIP IQ2/IQ3 optimization** (#27962): SWAR-based `__vsub4`/`__vcmpne4` replacements for the broken HIP built-in implementations.
+
+### Capability Gaps
+
+All previously identified breaking API changes (from the 2026-08-15, 2026-08-28, 2026-09-04, 2026-09-11, and 2026-09-18 digests) remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum, then added `lazy_mode` enum — two fields behind).
+- **`llama_context_params` struct** is missing the `n_outputs_max_per_seq` field.
+- **`llama_model_quantize_params` struct** is missing the `max_buf_size` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode`**, **`llama_lazy_mode`** enums and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+- **`llama_adapter_lora_init_from_file_ptr()`** — still unbound (additive, not breaking).
+
+New gaps introduced in this batch:
+
+- **New `llama_batch_ext` API**: `llama_batch_ext_init()`, `llama_batch_ext_free()`, `llama_batch_ext_add_embd()`, `llama_batch_ext_set_embd_state()`, and the `llama_batch_ext` type are not present in `bindings.lisp` or `*binding-deps*`. The existing bindings use `llama_batch_get_one`/`llama_batch_init`/`llama_batch_free` which still work, but the new API provides richer functionality (mixed token+embedding batches, embedding state control). Not breaking — additive.
+- **New `llama_prec_policy` type** (#24364): A new precision policy type for controlling W4A4 quantization paths at the model level. Not present in bindings. Not breaking — additive, and only relevant for models with MXFP4 activation quantization on supported hardware.
+
+### Other / Internal
+
+- **Build**: llama.cpp version 0.4.1 → 0.5.0; ggml 0.24.0 → 0.25.0 → 0.25.1 → 0.25.2 → 0.25.3; cpp-httplib updated to 0.57.0 then 0.57.1; cmake `find_package` now allows repeated calls for llama (#29228).
+- **CI**: Python jinja tests enabled (#29302); build-self-hosted refactored into backend-specific workflows (#28991); HF-jobs runners updated; CUDA upgraded to 13.4 for Ubuntu release builds (#29202); Level Zero SDK updated to v1.33.1 for SYCL (#29230); Snapdragon builds published in release workflow (#29007); MUSA CI moved to PH1/MTT S5000 (#29193).
+- **CUDA**: Fused RMS_NORM+SCALE (#29393); conv2d and conv3d via implicit GEMM (#29135, #29137); F16 CONV_2D_DW (#29064); vectorized contiguous tensor conversion (#29155); sparse FA re-enabled for DSV4 prefill with templated scan (#29298); MMVQ→MMQ crossover tuned for SM70/Volta (#28912); FA tuned for Gemma 4 on Ampere+ (#29152); FA shared memory swizzle refactored (#28536); top-k MoE always-fire fix (#28432).
+- **Metal**: MoE+SSM_CONV fusion (#28948); FWHT >512 and F16 input (#29095, #29094); sparse FA optimization (#29377); FA per-dtype library split (#29329); FA-vec table keyed by GPU family instead of SKU (#29075); arbitrary hc in dsv4_hc_pre (#29169); f32×bf16 mul_mv (#28741); qwen4exp hc ops (#29000); gate mul_mm_id src1 rescale behind ggml_prec (#29029); graph capture fix (#29390); mask bounds fix (#29220); FA support checks fix (#29122); macOS 27 SDK deprecation warnings (#29136); fusion pattern op list simplified (#29206); IQ1_M prefix sums per block (#28706).
+- **Vulkan**: Int8 coopmat1 for RDNA3/4 (#27952); IQ4_XS kernels (#28415); Intel Xe FA split-k (2/3) (#24406); Adreno coop matrix tuning (#29328); hidden symbols fix (#29139); conv_2d/conv_3d misalignment (#29365); legacy GLSLC build fix (#29373).
+- **SYCL**: Sparse FA (#28796); extended MMVQ GLU fusion + rms_norm+scale + ssm_conv+silu fusions (#28931); get_rows_back op (#25266); gated DSV4_HC_PRE/HC_POST (#29132); MKL-FA softmax coalesced loads (#28918); pinned memory device context fix (#28895); mul_mat_hadamard fp16 UT support (#29218); compile warning fixes.
+- **OpenCL (Adreno)**: Binary kernels for Q4_0, Q4_K, Q5_K, Q6_K non-MoE dp4a (#29055, #29056, #29057, #29401); flash_attn_f32_f16 binary kernel (#29046).
+- **Hexagon**: HMX-optimized GATED_DELTA_NET (#29199); 64-bit DMA overhaul (#29197); TOP_K, GEGLU_QUICK, I32 GET_ROWS, ROLL, I32 CPY/CONT, Q5_K quant; direct-mapped DMA cache (#29282); dynamic quantizer improvements (#29395); multi-sequence concat_2d (#29344); DMA for contiguous dim1 CONCAT (#29404).
+- **HIP/ROCm**: IQ2/IQ3 SWAR optimization (#27962); HIP_VERSION bump for fp8 (#29231).
+- **CPU**: ARM NEON/I8MM repack kernels for Q1_0 (#23492).
+- **WebGPU**: Fused GDN+CPY (#28976).
+- **RPC**: get_alloc_size cache key includes nb (#29283); fs_create_directory_with_parents simplified (#29432).
+- **Server**: Default pytest workers changed to 4 (#29376); log file configurable via preset (#29334); no log file forwarded to children (#29212); model-conversion causal-compare-logits recipe (#29305); improved startup logs (#29125).
+- **Server UI**: SVG use/animation elements in preview (#28962); close button for toasts (#28246); WEBM video upload (#28622); mobile breakpoint and overflow fixes (#29108).
+- **Converters**: MiMo-V2.6 (#29257); Gemma4 DSpark (#29226); DFlash/DSpark vision targets (#29339); fuse-qkv for muse-glimmer (#29203); causal-compare-logits recipe (#29305).
+- **gguf-py**: ByteLevel processing defaults bos/eos to False (#29422); TemplateProcessing final word on add_special_token (#29417).
+- **Other**: Sampler probe size reduced (#29285); Gemma4 FA shape perf tuning (#28450); test-backend-ops regex -o filter (#29204); test-llama-archs configurable stdev and --arch regex (#29133); test-save-load-state per-model results table (#29316) and NMSE logits comparison (#29238); env vars for sampling params (#27380); llama-context graph input reporting (#26625); common unicode path helpers extracted (#29415).
