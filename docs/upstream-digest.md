@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 4b1a27fa0eb875bbca4f6cfe936e3d65adc685c0
+Last covered upstream commit: bed0a856606ee4a24a164066f73d2379447033f5
 
 ---
 
@@ -601,3 +601,78 @@ New gaps introduced in this batch:
 - **Converters**: MiMo-V2.6 (#29257); Gemma4 DSpark (#29226); DFlash/DSpark vision targets (#29339); fuse-qkv for muse-glimmer (#29203); causal-compare-logits recipe (#29305).
 - **gguf-py**: ByteLevel processing defaults bos/eos to False (#29422); TemplateProcessing final word on add_special_token (#29417).
 - **Other**: Sampler probe size reduced (#29285); Gemma4 FA shape perf tuning (#28450); test-backend-ops regex -o filter (#29204); test-llama-archs configurable stdev and --arch regex (#29133); test-save-load-state per-model results table (#29316) and NMSE logits comparison (#29238); env vars for sampling params (#27380); llama-context graph input reporting (#26625); common unicode path helpers extracted (#29415).
+
+---
+
+## 2026-10-02 — 179 commits since last update
+
+### New Features
+
+- **GLM-5.3-Flash (GLM5-Next) architecture** (#27773): A large new hybrid architecture combining recurrent layers (conv + delta-net state) with attention and a learned k-pool sparse indexer for dynamic sparse attention. Includes multi-stream support, sparse FA for DSA prefill, and a custom HyperConnections (mHC) graph builder. A significant addition to the model zoo.
+- **Qwen4Exp MTP** (#29761): Adds multi-token prediction speculative decoding layers to the Qwen4Exp architecture, allowing faster generation through draft-then-verify.
+- **Nimble decision model** (#29844): New model architecture support for the "nimble decision" model family.
+- **MiMo DFlash support** (#29650): Enables DFlash speculative decoding for MiMo models, including conversion and feature extraction.
+- **Probabilistic speculative sampling** (#27694): Replaces greedy argmax drafting with probabilistic sampling and rejection-sampling verification for simple draft and MTP speculative decoding. Falls back to greedy for grammar-constrained requests. Should improve output quality during speculative decoding.
+- **SystemOne API** (#29818): New `/v1/systemone` server endpoint for the "laya", "julia-1", "lev", "openjev", and "kev" model families, including vision support and shared prompt prefix handling.
+- **`llama_get_causal_attn()`** (#28876): New public API function to query whether a context is currently using causal attention. Used by the server to decide whether RANK-pooling reranking requests can be split across batches (causal LLM rerankers like Qwen3 can, bidirectional cross-encoders cannot).
+- **`llama_prefetch_rows()`** (#29599): Internal API to prefetch model weight rows ahead of computation, improving throughput when using memory-mapped models. Supports both POSIX and Windows.
+- **Classifier pooling for rerankers** (#29627): Adds `pooling_type_cls` to model parameters, allowing ModernBERT-style rerankers to use CLS-token or mean pooling. Previously all rerankers were forced into a single pooling strategy.
+- **Multimodal embeddings endpoint** (#29556): The server's `/v1/embeddings` endpoint now accepts OpenAI-style typed content arrays with image, video, and audio inputs (useful for models like Qwen3-VL-Embedding).
+- **LLM-jp-4.1 Harmony chat handler** (#29681): Dedicated chat template handler for the Japanese LLM-jp-4.1 model family, which uses a GPT-OSS format variant with different special token handling.
+- **Jinja template improvements**: `dict()` builtin (#29477), `sameas` test (#29448), coerced array attributes (#29574), noncall test statements with arg (#29443), loop scope copy optimization (#29776).
+- **BF16 unary/GLU/binary/scale ops** (#29675): BF16-native compute paths on CPU and CUDA for unary ops (relu, silu, gelu, etc.), GLU variants, binary ops (add, mul, sub), and scale. Avoids FP32 conversion round-trips for BF16 models.
+- **Tiled mul_mat for k-quants on CPU** (#27851): Major CPU performance improvement (3-6x for large matrix multiplies) using a tile-based matmul strategy that unpacks quantized weights into int8 tiles and computes 16x16 micro-kernels. Optimized for both AVX2 and AVX-512.
+
+### Bug Fixes
+
+- **Transposed tensor copy corruption** (#27663): Fixed a CUDA bug where copying transposed tensors could corrupt non-contiguous destination buffers.
+- **Quantization rounding crash** (#29817): Fixed a crash/assertion failure during imatrix-based quantization when degenerate input groups produced infinite or NaN scale values. Affects q2_K, q4_K, q5_K, q4_1, and q5_1 quant types.
+- **soft_max_back aliasing bug** (#27096): Fixed incorrect output in the CPU soft_max_back kernel when the destination tensor aliased src1 (the softmax output). The old multi-step sequence overwrote src1 before reading it.
+- **Recurrent memory invalid assert** (#29799): Fixed an assertion failure in recurrent memory management.
+- **Integer overflow in GGUF** (#29384, #26979): Fixed integer overflow when computing tensor sizes, and added validation to reject tensors whose padded size wraps around to zero. Prevents potential buffer overflows from crafted GGUF files.
+- **K/V state cleanup after failed restores** (#27530): Fixed dangling data left in KV cache and recurrent state after a failed sequence restore, which could cause NaN propagation in subsequent inference.
+- **Speculative decoding token order** (#29019): Fixed incorrect layer-input ordering during speculative decoding that caused wrong results when batch tokens were reordered internally.
+- **Kpool re-pool bound overflow** (#29805): Fixed an off-by-one that caused graph reallocation abort when the KV cache was completely full.
+- **CUDA IQ4_NL short row overflow** (#29683): Fixed out-of-bounds reads in the IQ4_NL dequantization kernel for rows shorter than QK_K.
+- **Vulkan cache slice wrong results** (#28956): Fixed incorrect results when a mul_mat read a batched slice of a larger KV cache buffer on Vulkan, affecting every head past the first.
+- **CUDA Volta FA breakage** (#29803): Fixed two broken flash attention cases on Volta (V100) GPUs.
+- **Model loading speed** (#29598): Fixed a performance issue where crafted GGUF files with many keys could hang the server for a very long time during loading.
+- **Server service worker stale UI** (#29565): Fixed an issue where browsers kept showing a cached built-in UI even after switching to a custom `--path` or `--no-ui`.
+- **LoRA conversion crash for Qwen3.5** (#28324): Fixed a crash when converting LoRA adapters targeting V-head reorder layers in Qwen3.5.
+- **Causal attention scheduler thrash** (#28751): Fixed expensive unnecessary scheduler re-reserves when toggling `causal_attn` for vision inputs (up to 7.6x speedup for multi-image Gemma 4 inputs).
+- **get_rows_back bounds check** (#29575): Added row bounds checking to prevent out-of-bounds access.
+- **C++ ODR violation** (#29504): Fixed a One Definition Rule violation in common declarations that could cause subtle linking bugs.
+
+### Capability Gaps
+
+New API surface NOT present in `src/bindings.lisp`:
+
+- **`llama_get_causal_attn(ctx)`** (#28876): Returns whether the context is currently using causal attention. This is a new getter added to `llama.h`. The bindings already have `llama_set_causal_attn` but lack the corresponding getter. **Actionable**: straightforward one-line `defcfun` addition.
+
+Previously noted gaps that remain:
+
+- **`llama_batch_ext` API**: `llama_batch_ext_init()`, `llama_batch_ext_free()`, etc. still not bound. The old `llama_batch` API continues to work.
+- **`llama_prec_policy` type**: Still not bound. Only relevant for MXFP4 activation quantization paths.
+
+### Other / Internal
+
+- **Build**: cpp-httplib updated to 0.58.0 (#29407); BoringSSL updated to 0.20260929.0 (#29669); CCCL pinned to 3.4.3 for CUDA CI (#29792); oneAPI toolkit updated to 2026.1 (#29273); Windows ARM64 MSVC builds enabled (#28362); MUSA `__CUDA_ARCH__` definition fixed (#29508).
+- **CI**: Models backend check added (#29651); `GGML_SCHED_DEBUG_REALLOC=1` enabled for ctest (#29514); MUSA Docker images rebuilt from SDK base (#29624, #29481); zdnn backend CI added (#29541); t4-medium used for CUDA jobs (#29842); Python `ty` bumped to 0.0.84 (#29529).
+- **ggml**: `alloc_buffer_n` and `get_alloc_size_n` added to buffer type interface (#23671) for multi-buffer splitting; graph inputs now collected from all input leafs (#29634) to fix scheduler instability; input tensors required to be `GGML_OP_NONE` (#29647); F16 dot products accumulated in F32 on AVX512-FP16 (#29545).
+- **CUDA**: Fused shared experts into MMVQ (#29184); sm_70/Volta routed to Turing MMVQ tuning table (#29753, ~3% V100 speedup); FP16 tile FA configs tuned for head sizes 40-112 (#26289); NVFP4 compute type handled on cuBLAS path (#29173); bitonic argsort extended beyond 1024-wide rows (#28957); F16 input added to FWHT (#29096); Nemotron 3 Puzzle SSM state size 96 (#28717); BF16 ops added (see New Features).
+- **Metal**: Tensor API flash attention kernel for F16 KV (#29570) with 512/576-wide heads, attention sinks, ALiBi and logit softcap; bf16 math for mxfp4 mul-mat (#29770); FWHT perf optimizations (#29602); temporary private transfer buffers released (#29777); 0-element fusion nodes allowed (#29426); left/circular padding in PAD op (#29561).
+- **Vulkan**: MoE-aware mul_mat_id tile selection (#29182); fused qwen4exp SCALE→SIGMOID→SCALE→hc_post chain (#29520); descriptor set reuse for constant bindings (#29280); F32 2-aligned A matrix loads (#29254); GDN shader tuning + Intel fix (#29476); Samsung 32KB shared memory large tile disabled (#28531); Adreno argsort fix (#29469); logging for pipeline compile issues (#29794).
+- **SYCL**: Large register file for D=512 FA vec kernels (#29062); slow oneDNN reference matmul/fattn avoided (#28985); Q8_0 ESIMD DMMV and wide-load MMVQ (#29186); FWHT kernels for widths above 512 (#29243); tensor allreduce sync with pinned host buffers (#29604).
+- **OpenCL**: BF16 sigmoid for bf16 models (#29787); Adreno E17 subgroup broadcast (#29698); A8 Q8_0 non-MoE dp4a binary kernel (#29439); binary kernel loading condition refined (#29503); Q5_K Adreno gemm_nonshuffle fix (#29555).
+- **Hexagon**: Q2_K and Q3_K quant support (#29717); shared strided DMA for CPY/CONCAT (#29685); ALLREDUCE scatter mode optimization (#29757); F16 activation ops (#29209); GELU_ERF/GEGLU_ERF (#29631); tiled Q4_0/Q8_0 GET_ROWS (#29511); backend sampler support (#29502); concat optimization (#29673); software divide detection tooling (#29449); workqueue race fix (#29785).
+- **HIP**: HIP packed byte subtraction optimized (#29478); fattn-mma enabled on CDNA for DKQ>256 large batches (#28907); template skip fix for DKQ>256 mfma (#29559); DGX Spark guard for gqa_ratio 20 (#29572).
+- **CPU**: BF16 in src1 of mul_mat accepted (#28937); tiled flash attention for non-vector-multiple head dims on x86 (#29423).
+- **WebGPU**: BF16 support for MUL_MAT/MUL_MAT_ID/GET_ROWS (#29358); SSM_SCAN binding aliasing fix (#29750); unaligned writes fix (#29471).
+- **OpenVINO**: GET_ROWS on weight views from base Constants (#28381); unaligned batch-stride views rejected (#29603).
+- **RPC**: RDMA completion channel to avoid spinning (#29440).
+- **Server**: HTTP 400 for invalid embedding requests (#29060); service worker cleanup for custom UIs (#29565); causal LLM reranker batch splitting (#28876); Muse Glimmer JSON schema fix (#29615); wake_fd warning fix on Windows (#29479); pytest workers=1 skip fix (#29610).
+- **Server UI**: Model download pipeline (#27959); model memory-fit estimation (#27957); Hugging Face Hub data layer (#27947); model id grammar for sidecars/quants (#27946); shared model display primitives (#29644); type-safe API types (#29582).
+- **Converters**: PLaMo-2/3 BOS/EOS settings honored (#29734); PLaMo-2/3 `</s>` kept NORMAL (#29580); PLaMo-3 YaRN scaling parameters exported (#29528); Gemma embedding scale for DFlash drafts (#29802); `--add-bos` option for run-org-model (#29558); LoRA conversion fix for Qwen3.5 V-head reorder (#28324).
+- **Batch API migration**: Server, speculative decoding, and multimodal migrated to `llama_batch_ext` (#29385, #29601).
+- **Tests**: Recurrent state rollback refactored (#29426); causal_attn toggle test (#29724); models backend check (#29651); `GGML_SCHED_DEBUG_REALLOC` enabled (#29514); ggml init fixes (#29554); failed state restore cleanup coverage (#27530).
+- **Other**: Memory-mapped model loading optimized to avoid double tensor copies (#29749); speculative decoding stops accepting draft tokens at EOG (#29638); CLI exits on stdin EOF (#29722); model loading speed fix for many-key GGUFs (#29598); fs_write_atomic for safe downloads (#29642); HF cache path fixes on Windows (#29475); qwen4exp mask construction optimized (#29824); graph input collection stabilized (#29634).
