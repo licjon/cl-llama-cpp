@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: bed0a856606ee4a24a164066f73d2379447033f5
+Last covered upstream commit: 10a60cf303566e10d6a7a2774c17d2085503d87b
 
 ---
 
@@ -676,3 +676,103 @@ Previously noted gaps that remain:
 - **Batch API migration**: Server, speculative decoding, and multimodal migrated to `llama_batch_ext` (#29385, #29601).
 - **Tests**: Recurrent state rollback refactored (#29426); causal_attn toggle test (#29724); models backend check (#29651); `GGML_SCHED_DEBUG_REALLOC` enabled (#29514); ggml init fixes (#29554); failed state restore cleanup coverage (#27530).
 - **Other**: Memory-mapped model loading optimized to avoid double tensor copies (#29749); speculative decoding stops accepting draft tokens at EOG (#29638); CLI exits on stdin EOF (#29722); model loading speed fix for many-key GGUFs (#29598); fs_write_atomic for safe downloads (#29642); HF cache path fixes on Windows (#29475); qwen4exp mask construction optimized (#29824); graph input collection stabilized (#29634).
+
+---
+
+## 2026-10-09 — 169 commits since last digest
+
+### New Features
+
+- **K2 Horizon dense and MoVA** (#29535): Full support for the K2 Horizon model family, including dense and MoVA (Mixture of Visual Adapters) variants. Adds a custom Unicode pre-tokenizer, Jinja `selectattr`/`rejectattr` sequence indices, reasoning and tool-call chat template parsing, and response schema enforcement. A large architecture addition with extensive converter, model graph, and test coverage.
+- **Clef decision model (text-only)** (#29831): Adds the Clef decision model architecture — a classifier that outputs option probabilities rather than generating text. Includes server integration via a `/v1/systemone` endpoint.
+- **Clef vision input** (#29969): Extends the Clef decision model to accept image input alongside text, with multi-dimensional position handling in the server batch.
+- **Cohere2 vision** (#30062): Adds image processing support for the Cohere2 model family.
+- **EmbeddingGemma2 (text+vision+audio)** (#30054): New model supporting text, vision, and audio modalities for the EmbeddingGemma2 architecture.
+- **LiquidAI d1-3B** (#30110) and **d1-omni-600M** (#30114): Two new LiquidAI decision models, the latter with audio input and conformer-based speech processing.
+- **LFM2.5-Encoder-350M/230M** (#29862): Registers the `Lfm2BidirectionalForMaskedLM` architecture for bidirectional LFM2.5 encoder models.
+- **PPLX-Decider** (#30044): New model architecture support for the PPLX decider model.
+- **GLM5-Next MTP speculative decoding** (#29928): Adds a multi-token prediction graph for GLM5-Next (GLM-5.3-Flash), including headless NextN optimization (6.9ms→0.33ms kernel time for catch-up), MTP-only and trunk-only GGUF file loading, and crop helpers shared across architectures.
+- **PLaMo-3 tokenizer** (#30045): Implements PLaMo-3's pre-segmentation rules (boundary insertion before runs of identical characters or spaces), adds `LLAMA_VOCAB_TYPE_PLAMO3` to the API, and fixes PLaMo-3 token configuration (#29843) and FIM tokens (#30090).
+- **GPU MoE expert cache** (#29887): A new GPU-side LRU cache for MoE experts kept in host memory, avoiding repeated host-to-device copies when the same experts are reused. Controlled by a new `moe_cache_size` field in `llama_context_params`. Multi-GPU support added in #30112.
+- **Mixed token+embedding batches** (#29622): Allows a single batch to contain both token IDs and raw embeddings, with a constant-topology graph using `ggml_build_forward_select` for the mixed case. Previously tokens and embeddings had to be in separate batches.
+- **Greedy sampling for temperature-zero chains** (#29797): When temperature is zero and no grammar, dynamic temperature, or probability output is requested, the sampler now uses direct greedy selection instead of going through the full distribution sampling pipeline. Also greedily selects after a final top-k with k=1.
+- **Classifier activation support for rerankers** (#29692): Adds `classifier_activation` metadata in GGUF for reranker models, allowing ModernBERT to use exact GELU (#30108) instead of the default tanh GELU.
+- **Server: context checkpoints in slot save/restore** (#26004): Checkpoints are now preserved across slot save/restore, so a restored slot can roll back to a checkpoint instead of re-processing the entire prompt.
+- **Server: models manager UI** (#29583, #30228): A full model management interface in the server web UI — model discovery, downloading, favoriting, context length display, and filtering. Includes drawer/sheet overlay components, a grouped list, and a searchable input.
+- **Server: default port changed to 9931** (#30159): The server now defaults to port 9931 instead of 8080.
+- **Server: accumulated text/token parse input** (#29876): The server now collects both generated text and raw token sequences for parser input, with a new tokenize helper that aligns tokens with bytes.
+- **RPC: tensor split mode** (#26610): Adds `-sm tensor` support for the RPC backend, enabling tensor-parallel splitting across RPC servers.
+- **Imatrix: activation-based statistics** (#14891): A new `--activation-statistics` mode for imatrix computation that calculates entropy, cosine similarity, L2 norm, and Euclidean-Cosine Score from activations rather than just weight statistics.
+- **Selective expert copying refactored** (#29943): Expert copying logic moved from ggml backend internals to user-space code, with a new `ggml_backend_sched_set_alloc_deps` API for declaring allocation dependencies.
+- **llama.cpp version 0.6.0** (#29997): Version bump; ggml bumped to 0.26.0.
+
+### Bug Fixes
+
+- **SECURITY: ggml_acc OOB write with negative offset** (#30135): `ggml_acc_impl` narrowed a `size_t` offset to `int32_t` without checking that it fits, so a large offset truncated to a negative value. The sign-extension then wrapped the bounds assertion and allowed an out-of-bounds write below the destination buffer.
+- **CUDA MMQ out-of-bounds reads** (#29953): Fixed out-of-bounds memory reads in the matrix-multiply-quantized kernels.
+- **CUDA MMQ memory fault when n_expert >> n_ubatch** (#29941): When the number of experts greatly exceeded the micro-batch size, the MMQ kernel could access invalid memory.
+- **CUDA CCCL version guard overflow** (#29453): The CCCL (CUDA C++ Core Libraries) version check compared major and minor independently, so CCCL 4.x evaluated as "< 3.1" even though it's newer. This silently disabled the strided-iterator path and caused a quiet performance loss.
+- **CUDA round issue under MSVC** (#30229): Fixed a rounding disagreement between CPU and GPU code paths when compiled with MSVC.
+- **CUDA PAD kernel row overflow** (#30147): The PAD kernel failed for more than 65535 rows or slices due to exceeding CUDA grid dimension limits. Fixed with a looped kernel.
+- **CUDA norm family kernels for large ne[2]/ne[3]** (#28175): Fixed incorrect results when tensor dimensions 2 or 3 exceeded CUDA grid dimension limits.
+- **CUDA FWHT block widths > 512** (#29100): Extended the CUDA Fast Walsh-Hadamard Transform to handle block widths 1024–8192 with a new block-level kernel.
+- **Vulkan rms_norm workgroup count overflow** (#30145): Fixed a workgroup count overflow in the RMS normalization kernel.
+- **Vulkan TOP_K for +inf/NaN inputs and k=1** (#30107): Fixed three bugs — NaN and +inf were never counted, leaving ballots empty and causing hangs or wrong indices; the k=1 path compared float bits as signed integers, ordering negative values backwards.
+- **Vulkan stale prealloc_y reuse** (#29591): Fixed incorrect results from stale buffer reuse across flash attention and soft_max operations.
+- **Vulkan AMD iGPU slow checkpoint read** (#30049): Fixed a performance regression reading checkpoints on AMD integrated GPUs.
+- **Metal MUL_MAT+ADD fusion when residual is a MUL_MAT** (#30100): When both operands of a fused ADD were mat-mul outputs (e.g. W1@u + W2@v), the fusion logic picked the wrong operand as the residual, adding garbage data. This caused Clef decision model probabilities to collapse toward uniform.
+- **Metal excess threadgroup memory in quantized FA** (#29340): Fixed incorrect threadgroup memory allocation in quantized flash attention.
+- **K-pool scatter data race** (#29994): When sequences shared KV cache cells, pooled keys were written from multiple scatter entries concurrently, causing a data race on the CPU backend.
+- **K-pool unexpected graph reallocation** (#29958): Both qwen4exp and glm5-next built graph shapes dependent on runtime state that the worst-case reserve couldn't predict, causing decode-time re-reserves that could abort under `GGML_SCHED_DEBUG_REALLOC`.
+- **KV cache rotation metadata** (#28498): Rotation metadata is now saved exactly and validated on restore, preventing silent corruption when restoring state with mismatched KV cache rotation settings.
+- **Chat PEG parser use-after-free** (#29942): A `TOOL_ID` node arriving after `TOOL_CLOSE` wrote through a dangling pointer to a destroyed optional, causing a double-free.
+- **Chat parser infinite recursion** (#30088): A tool named `call` caused infinite recursion in the parser due to a naming collision with grammar rules. Rules are now indexed by position.
+- **N-gram speculative drafts rejected at temp > 0** (#29924): After truncation, n-gram draft tokens were being rejected due to incorrect position handling.
+- **Server: laya abort** (#29903): Fixed an abort crash by limiting `n_batch` to `n_ubatch` for embedding models.
+- **Recurrent state rollback test** (#29923): Fixed a test that was incorrectly resetting the anchor cell during recurrent rollback.
+- **Sampling graph kept static** (#30223): The sampling graph's topology now stays constant across ubatches, preventing GGML_SCHED_NO_REALLOC aborts during decode.
+- **ggml CLAMP on non-contiguous views** (#29517): Both CUDA and CPU CLAMP operations now respect tensor strides for dimensions 1–3.
+- **DFlash output head sharing** (#30111): Fixed incorrect weight sharing in the DFlash output head.
+- **Jinja TranslateGemma parser** (#30096): Fixed the Jinja parser to handle the TranslateGemma chat template correctly.
+- **OpenCL kernel compilation for A6x GPUs** (#30176): Workarounds for Adreno A6x shader compiler crashes on kernels with many arguments and `get_local_size` constant-folding.
+- **Graph embedding reorder** (#30160): Fixed embedding construction logic for `get_rows` in models like Gemma4.
+
+### Capability Gaps
+
+All previously identified breaking API changes remain unresolved in `src/bindings.lisp`:
+
+- **`llama_sampler_init_penalties`** still uses the old 4-argument signature (upstream now requires `n_vocab` as the first argument).
+- **`llama_sampler_init_dry`** still passes `n_ctx_train` (upstream removed it).
+- **`llama_model_params` struct** still has `use_mmap`/`use_direct_io`/`use_mlock` bools (upstream replaced them with `load_mode` enum, then added `lazy_mode` enum — two fields behind).
+- **`llama_context_params` struct** is missing `n_outputs_max_per_seq` and now also **`moe_cache_size`** (see below).
+- **`llama_model_quantize_params` struct** is missing the `max_buf_size` field.
+- **`llama_version()`**, **`llama_ftype_name()`**, **`llama_model_ftype()`**, **`llama_load_mode_name()`/`llama_load_mode_from_str()`**, **`llama_model_n_layer_nextn()`**, **`llama_vocab_get_suppress_tokens()`**, **`llama_sampler_copy()`** — all still unbound.
+- **`llama_load_mode`**, **`llama_lazy_mode`** enums and **`LLAMA_FTYPE_MOSTLY_Q2_0`** — still not defined.
+- **`llama_adapter_lora_init_from_file_ptr()`**, **`llama_batch_ext` API**, **`llama_prec_policy` type**, **`llama_get_causal_attn()`** — all still unbound (additive, not breaking).
+
+New gaps introduced in this batch:
+
+- **BREAKING — `llama_context_params` struct layout changed again**: A new `moe_cache_size` field (`size_t`) was inserted after `type_v`, further shifting all subsequent fields (abort callback, etc.). Combined with the already-missing `n_outputs_max_per_seq`, the struct layout is now two fields behind upstream.
+- **`LLAMA_VOCAB_TYPE_PLAMO3` (= 8)** added to the vocab type enum. The bindings define this enum but only go up to `:plamo2 6`, missing both `:test 7` and `:plamo3 8`.
+- **`LLAMA_SESSION_VERSION` bumped to 11**, **`LLAMA_STATE_SEQ_VERSION` bumped to 4**: Session/sequence state file format versions incremented (checkpoint appendix support). The bindings do not track these constants.
+
+### Other / Internal
+
+- **Build**: llama.cpp version 0.5.0 → 0.6.0; ggml 0.25.x → 0.26.0; cpp-httplib updated to 0.58.0 → 0.60.0 → 0.60.1; LibreSSL updated to 4.3.3; `ggml_backend_sched_set_alloc_deps` API added for selective expert copy (#29943); API/ABI compatibility checks limited to libllama and libmtmd (#30038).
+- **CI**: Release workflow improvements — `run-name` for publish release (#30214), deploy key for tag pushing (#29937), Docker workflow permissions (#29979), winget URL formatting (#29978); Windows LLVM builds require Ninja multi-config (#29959); Windows ARM64 Vulkan release added (#29954); test-llama-archs backend init for GGML_BACKEND_DL (#30034); Metal virtual device test disabled (#29993); HIP quality check ignoring 320/256 FA kernel spill (#30212); AGENTS.md revamped (#29656).
+- **CUDA**: Improved top-k algorithm selection with radix/bitonic/DeviceTopK decision boundary (#28713); per-thread stream for buffer-init padding memset (#28782); BF16 XIELU support (#29955); MMVF for thin f16/bf16 mul_mat at small batch (#29633); whole-tile FA scheduling for two-stage kernels (#29435); swizzling code refactored (#29612); removed redundant copies after SSM_SCAN (#29807); GDN state columns per warp (#30087); byte-stride ROLL (#29547); BF16/FP16 conversion chunking (#29442); arbitrary-stride unary ops (#29781).
+- **Metal**: Few-row MMA mat-mul for all src0 types (#29869, #30065); MUL_MAT+ADD fusion fix (#30100); 128/96 FA kernels (#30209); excess threadgroup memory fix in quantized FA (#29340).
+- **Vulkan**: Sparse FA for quantized K/V (#29639); sparse FA extended to coopmat2 (#30003); TOP_K fix for inf/NaN (#30107); stale prealloc_y fix (#29591); AMD iGPU checkpoint read fix (#30049); RMS_NORM workgroup overflow (#30145); FA shmem write bounds (#29988); null vkEnumerateInstanceVersion check (#29872); RDNA4 mat_vec tuning (#29934); revert mul_mat_id tile selection (#29936).
+- **SYCL**: GLM MLA prefill acceleration with MKL flash attention (#29171); Q5_K reorder-layout MMVQ and fused GLU (#29375); grouped MoE XMX GEMM (#29245); IQ3_S multi-column MMVQ (#29500); FWHT optimizations (#29605); fattn_kv_buffers cleanup (#27689); duplicate block-size defines removed (#29507); pinned ring buffer for bulk uploads (#29608); fused delta-net alpha gate (#29687); mixed GPU FA fix (#29071).
+- **OpenCL (Adreno)**: A6x kernel compilation workarounds (#30176); OOB read fix in xmem GEMM (#30041); webgpu flash_attn supports_op fix (#28205).
+- **Hexagon**: IM2COL DMA ring overflow fix (#30189); CPY/CONCAT/CONT/DUP overhaul to use DMA/HVX (#30067); Q6_K weight dequant speedup (#30121); tiled Q4_K and Q6_K GET_ROWS (#30115); improved GELU accuracy (#30104); alloc_buffer_n support (#30126); SSM_CONV DMA pipelining (#29971); pool_1d/pool_2d support (#29995); matmul and flash-attention scalability (#29974).
+- **WebGPU**: 2D workgroup dispatch for 1D ops (#30219); DUP support via CPY path (#30216); f16 support for fill/set_rows (#29897); flash_attn supports_op fix for overlapping KV (#28205); no Dawn native features on WASI (#27069).
+- **CPU**: Q8_0 IME1 matrix kernel for SpacemiT X60 (#28479); BF16/FP16/FP32 K tails in tinyBLAS on x86 (#29806).
+- **HIP**: -O0 for host code in debug builds (#29795).
+- **OpenVINO**: Major update to 2026.4.1 (#29852) — stateful execution, GPU MoE fusion, fused gate_up experts, requantized 8-bit experts, per-device enumeration, memory reporting, remote context abort, reshaping view tensors, rebinding cached decoders, MTMD ops; CI fixes (#30037) — skip unselected graph branches, inp_scale_rows token dim, Q4_1/Q4_K GPU skip, FILL output type, CONCAT quantized reject, build_rs single gather.
+- **Server**: Port default to 9931 (#30159); models manager UI (#29583, #30228); checkpoints in slot save/restore (#26004); accumulated text/token parse (#29876); partial media truncation rejection (#24076); vision for Clef (#29969); laya abort fix (#29903); dead preset key fix (#29938); port 9931 UI settings (#29668); webui locale formatting (#27990).
+- **Converters**: K2 Horizon conversion (#29535); Clef conversion (#29831); Cohere2 vision (#30062); compressed-tensor mixed-precision NVFP4 (#28636); Qwen3.5 embedding models (#27920); Qwen3-TTS CustomVoice variant guard (#29179); PLaMo-3 token config (#29843, #30045, #30090); text_config fallback for transformers 5.18 (#30040); LFM2.5-Encoder registration (#29862).
+- **Models**: NextN row cropping consolidated into shared helpers (#30017); nextn tensor flags shared (#30097); gather path removed from glm5-next sparse attention (#30042); nextn extraction re-reserve (#30020); recurrent state gather refactored (#29856); DFlash output head sharing fix (#30111).
+- **KV cache**: Rotation metadata saved exactly and validated on restore (#28498); non-contiguous restore batched for performance.
+- **Sampling**: Greedy selection for zero-temperature chains (#29797); sampling graph kept static across ubatches (#30223).
+- **Other**: Chat API refactored (#30210); chat rule indexing (#30088); chat parser UAF fix (#29942); TranslateGemma parser fix (#30096); vendor deep nested JSON patch (#30253); ilocale include for imatrix (#30079); meta backend host views (#30217); ALLOC_DEPS batch-independent (#29986); ModernBERT exact GELU (#30108); classifier_activation support (#29692); llama-bench -fitc respect (#28331); server model I/O modalities reporting (#29987).
