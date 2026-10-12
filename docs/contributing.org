@@ -1,4 +1,4 @@
-*Translations: [[../CONTRIBUTING.ja.org][日本語]]*
+*Translations: [[/CONTRIBUTING.ja.org][日本語]]*
 
 * Contributing
 
