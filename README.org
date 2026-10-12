@@ -1,4 +1,4 @@
-*Translations: [[file:README.ja.org][日本語]]*
+*Translations: [[README.ja.org][日本語]]*
 
 * cl-llama-cpp
 

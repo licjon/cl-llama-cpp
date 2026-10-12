@@ -1,4 +1,4 @@
-*Translations: [[file:docs/contributing.org][English]]*
+*Translations: [[docs/contributing.org][English]]*
 
 * コントリビューション
 
