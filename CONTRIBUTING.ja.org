@@ -1,0 +1,108 @@
+*Translations: [[file:docs/contributing.org][English]]*
+
+* コントリビューション
+
+** 言語ポリシー
+
+日本語翻訳に関する変更（このファイルや =README.ja.org= など）は日本語で提出できます。
+
+*コードに関するプルリクエストおよびIssueはすべて英語で提出してください。* コードレ
+ビュー、コミットメッセージ、PRの説明、Issue報告は英語を使用してください。これによ
+り、すべてのコントリビューターがディスカッションに参加できます。
+
+** テストスイートの実行
+
+*** スモークテスト（モデル不要）
+
+スモークテストはコンディション、ハンドル述語、バリデーションロジック、およびロード
+済みモデルを必要としないその他の動作をカバーします:
+
+#+begin_src bash
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+Roswellの場合:
+
+#+begin_src bash
+ros -e '(ql:quickload "cl-llama-cpp/tests")' \
+    -e '(asdf:test-system "cl-llama-cpp/tests")'
+#+end_src
+
+*** インテグレーションテスト
+
+インテグレーションテストにはGGUFモデルファイルが必要で、環境変数で指定します:
+
+| 変数                   | 使用するテスト                                 |
+|------------------------+------------------------------------------------|
+| =LLAMA_TEST_MODEL=       | 生成、トークナイゼーション、チャット、KVキャッシュテスト |
+| =LLAMA_TEST_EMBED_MODEL= | 埋め込みテスト                                 |
+| =LLAMA_TEST_LORA=        | LoRAアダプターテスト                           |
+
+#+begin_src bash
+LLAMA_TEST_MODEL=/path/to/model.gguf \
+LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+LLAMA_TEST_LORA=/path/to/adapter.gguf \
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+未設定の変数がある場合、その変数に依存するテストはスキップされます。
+=LLAMA_TEST_MODEL= のみの設定で、ほとんどのインテグレーションテストを実行できます。
+
+** 高レベルラッパーの追加
+
+=%llama= 関数が存在するが高レベルラッパーがない場合、一般的なパターンは:
+
+1. *バインディングを見つける* — =src/bindings.lisp= で、=llama_= プレフィックスを除い
+   たC名を検索（例: =llama_get_logits= → =get-logits= でgrep）。
+
+2. *ラッパーを追加* — =src/= の適切なソースファイルに追加。関連するサブシステムの既
+   存パターンに従う（生成は =generation.lisp=、KVキャッシュは =kv-cache.lisp= など）。
+
+3. *依存関係を登録* — 関連するソースファイルの先頭にある =*binding-deps*= に =%llama=
+   シンボルを追加。=check-binding-deps= はバインディング再生成後の破損検出にこのリス
+   トを使用します。
+
+4. *パッケージからエクスポート* — =src/packages.lisp= の =cl-llama-cpp= パッケージの
+   エクスポートリストにシンボルを追加。
+
+5. *事前バリデーションを追加* — =check-type=（型エラー用）および
+   =signal-input-validation-error=（範囲、非空チェック用）で入力を検証。既存のラッ
+   パーのパターンを参照。無効な入力はsegfaultではなく、クリーンなLispコンディショ
+   ンを生成すべきです。
+
+6. *テストを書く* — =tests/= の適切なテストファイルに追加。関数がモデルを必要とする
+   場合、インテグレーションテストスイートで使用されているモデルスキップヘルパーで
+   ガードしてください。
+
+7. *ドキュメント* — =docs/api-reference.org= の適切なセクションに追加。
+
+** バインディングの再生成
+
+llama.cppサブモジュールがバンプされると、=%llama= バインディングを新しいヘッダーか
+ら再生成する必要があります。詳細は[[upgrading-llama-cpp.org][llama.cppのアップグレード]]を参照してください。
+パイプライン全体（サブモジュール → リビルド → c2ffi spec → CLAW → fixups →
+bindings.lisp）、シンボルdiff出力の解釈方法、および破損した高レベルラッパーの修正
+方法が説明されています。
+
+クイックリファレンス — 再生成後にすべてが動作することを確認:
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp" :force t)
+(cl-llama-cpp:check-binding-deps)
+#+end_src
+
+** プルリクエスト
+
+- PRを開く前にスモークテストを実行してください。モデルファイルがある場合はインテグ
+  レーションテストも推奨されますが、モデルファイルを持たないコントリビューターには
+  必須ではありません。
+- PRごとに1つの論理的な変更。バインディング再生成、新しいラッパー、バグ修正を分離
+  すると、よりクリーンな履歴になります。
+- APIは不安定です。既存の高レベルラッパーへの破壊的変更は =master= で許容されます —
+  PR説明に記載してください。
+- 新しい高レベルラッパーには少なくとも1つのテストと =docs/api-reference.org= エント
+  リを含めてください。サンプルは歓迎されますが必須ではありません。

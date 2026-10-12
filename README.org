@@ -1,3 +1,5 @@
+*Translations: [[file:README.ja.org][日本語]]*
+
 * cl-llama-cpp
 
 Local LLM inference for Common Lisp. Run GGUF models in-process on your CPU or
