@@ -1,3 +1,5 @@
+*Translations: [[file:../CONTRIBUTING.ja.org][日本語]]*
+
 * Contributing
 
 ** Running the Test Suite

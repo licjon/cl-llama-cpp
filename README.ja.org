@@ -1,0 +1,315 @@
+*Translations: [[file:README.org][English]]*
+
+* cl-llama-cpp
+
+Common Lispでローカル LLM 推論。GGUFモデルをプロセス内でCPUまたはGPU上で実行し、
+テキスト生成、チャット、埋め込み、文法による出力制約、コンテキスト状態のフォーク、
+サンプラーパイプラインの構成が可能です。[[https://github.com/ggml-org/llama.cpp][llama.cpp]]をCFFI経由で利用しています。
+
+生成された =%llama= レイヤーは完全な公開C API（881関数、38列挙型、59構造体）を網羅
+しています。より高レベルな =cl-llama-cpp= パッケージは、Lispらしいマクロ、型付きハン
+ドル、構造化されたコンディションで一般的なワークフローをラップします。=%llama= は実装
+の詳細ではなく、サポートされたファーストクラスのエスケープハッチです。高レベルラッ
+パーが存在しない場合は、C関数を直接呼び出してください。ラッパーの不在が作業の妨げ
+になることはありません。
+
+*開発中 / ベータ版。* APIは不安定であり、予告なく変更される場合があります。
+
+** セットアップ
+
+Common Lispとllama.cppにある程度慣れていると役立ちますが、どちらも初めての場合は、
+[[docs/guides/cloud-quickstart.org][クラウドVMクイックスタート]]ガイドで、素のUbuntu GPUインスタンスからすべての手順を説明
+しています。AIコーディングアシスタントも初期セットアップを行えます — 以下のインス
+トールのヒントをご覧ください。
+
+** 要件
+
+- *SBCL*（推奨、*スレッドセーフティに必須*）— llama.cppは浮動小数点例外を発生さ
+  せますが、SBCLは =llama-defun=（ライブラリコード）および
+  =with-llama-compatible-fp-environment=（下流の =%llama= 呼び出し）を介して自動的に
+  マスクします。スレッドセーフティ保証（バックエンドライフサイクルのmutex、CASに
+  よるアトミックなハンドル解放、abort/logコールバックのロック）はSBCLプリミティブ
+  （=sb-thread:make-mutex=、=sb-ext:cas=）で実装されています。非SBCL実装ではこれら
+  はno-opにコンパイルされます。シングルスレッドでの使用は動作しますが、バックエン
+  ドライフサイクルへの並行アクセスや、明示的な =free-model= / =free-context= 呼び出
+  しとGCファイナライザの競合は安全ではありません。
+- [[https://github.com/ggml-org/llama.cpp][llama.cpp]] 共有ライブラリとしてビルド（=libllama.so= / =libllama.dylib=）
+- [[https://cffi.common-lisp.dev/][CFFI]] および [[https://github.com/cffi/cffi][cffi-libffi]]
+- [[https://github.com/trivial-garbage/trivial-garbage][trivial-garbage]]
+- [[https://codeberg.org/shinmera/form-fiddle][form-fiddle]]
+
+Linuxでテスト済み。macOSも動作するはずです（=.dylib= は対応済み）。Windowsは未テストです。
+
+** インストール
+
+ヒント: Claude Code、Codex、OpenCodeなどのAIコーディングアシスタントを使用している
+場合、cl-llama-cppのインストールと検証を依頼できることがあります。例:「このリポジ
+トリからcl-llama-cppをインストールし、必要に応じてllama.cppをビルドし、Common Lisp
+の依存関係をすべて満たし、examplesが実行できることを確認してください。」インストー
+ルに失敗した場合は、アシスタントの操作を以下のインストールガイドと比較してください。
+
+このリポジトリにはllama.cppがgitサブモジュールとして含まれています:
+
+#+begin_src bash
+git clone --recursive https://github.com/licjon/cl-llama-cpp
+cd cl-llama-cpp/llama.cpp
+cmake -B build -DBUILD_SHARED_LIBS=ON
+cmake --build build -j$(nproc)
+#+end_src
+
+CUDAによるGPUアクセラレーションの場合は、=-DGGML_CUDA=ON= を追加:
+
+#+begin_src bash
+cmake -B build -DBUILD_SHARED_LIBS=ON -DGGML_CUDA=ON
+cmake --build build -j$(nproc)
+#+end_src
+
+Metal、Vulkan、その他のバックエンドオプションについては、[[https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md][llama.cppビルドドキュメント]]を参照してください。
+
+ライブラリローダーは =llama.cpp/build/bin/= にある =libllama.so= を自動的に検出します。
+または、システムライブラリパスのどこかにインストールしてください。
+
+このディレクトリをASDFソースレジストリ（例: =~/common-lisp/=）に配置またはシンボリッ
+クリンクしてください:
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp")
+#+end_src
+
+Roswellユーザー: =~/.roswell/local-projects/= にクローンすると自動的に検出されます。
+Quicklispユーザー: 先に =ql:register-local-projects= を実行してください。
+
+** クイックスタート
+
+#+begin_src lisp
+(use-package :cl-llama-cpp)
+
+(with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 2048)
+    (princ (generate ctx "The capital of France is"
+                     :max-tokens 64 :temp 0.7))))
+#+end_src
+
+ストリーミング:
+
+#+begin_src lisp
+(with-model (model "/path/to/model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 2048)
+    (generate ctx "Once upon a time"
+              :max-tokens 128 :temp 0.9
+              :token-callback (lambda (tok)
+                                (write-string tok)
+                                (force-output)
+                                t))))
+#+end_src
+
+KVキャッシュ再利用によるマルチターンチャット — 各ターンは新しいトークンのみをデコード:
+
+#+begin_src lisp
+(with-model (model "/path/to/chat-model.gguf" :n-gpu-layers 99)
+  (with-context (ctx model :n-ctx 4096)
+    (let ((session (make-chat-session ctx
+                     :system-prompt "You are a helpful assistant.")))
+      (format t "~A~%"
+              (chat-session-send session "What is Common Lisp?"
+                                 :max-tokens 256))
+      (format t "~A~%"
+              (chat-session-send session "Tell me more about CLOS."
+                                 :max-tokens 256)))))
+#+end_src
+
+** 高レベルAPI
+
+- *テキスト生成* — =generate= は15のサンプリング戦略（temperature、top-k/p、min-p、
+  mirostat v1/v2、XTC、DRY、typical-p、top-n-sigma、dynamic temperature、
+  repetition/frequency/presenceペナルティ、logitバイアス、greedy）に対応。
+  呼び出し元が提供するdraft/verify/acceptクロージャ（=:speculative-fns=; 既製のプリ
+  ミティブについては[[*Commonモジュール][Commonモジュール]]の =speculative= および =ngram-map= システムを参照）
+  による投機的デコーディング。再利用可能なサンプラー設定オブジェクト
+  （=make-sampler-config=）と明示的なサンプラーチェーン（=with-sampler-chain=、個別の
+  =make-*-sampler= コンストラクタ）。承認されたトークンを追跡するトークン履歴リング
+  バッファ（=make-token-history=）、デバッグ用の =token-history-prev-str= 付き。
+- *チャット* — シンプルセッション（フルヒストリープリフィル）とインクリメンタルセッ
+  ション（=make-chat-session= / =chat-session-send=: KVキャッシュ再利用により、ター
+  ンごとのプリフィルコストは新しいトークンのみに比例; 投機的デコーディング用の
+  =:speculative-fns= をサポート）。チャットテンプレートフォーマットと安全なマルチター
+  ントークナイゼーション（=format-chat=、=tokenize-chat=）。
+- *制約付き生成* — GBNF文法、トリガーワード付きの遅延文法、インフィル。文法優先再
+  サンプリング（=:grammar-first t=）は最初に文法制約を適用し、文法がすべての候補を
+  拒否した場合は制約なしサンプリングにフォールバック — upstreamの
+  =common_sampler= の再サンプリングパターンに一致。
+- *並列デコーディング* — =generate-parallel= は共有フォワードパスで複数のプロンプト
+  を同時に実行。独立したコンテキストは別々のスレッドで並行実行可能（スレッドセーフ
+  ティ保証にはSBCLのみ; 要件を参照）。
+- *埋め込み* — =embed= オプショナルな正規化付き; =:embeddings t= でコンテキストを作成。
+- *LoRAアダプター* — =with-lora= / =apply-lora= スケール制御付き。
+- *KVキャッシュ* — =prefill= はサンプリングなしでトークンをキャッシュにデコード（コ
+  ンテキストフォーキングのプリミティブ）; クリア、コピー、シフト、分割、シーケンス
+  ごとの位置クエリ。
+- *セッション状態* — ディスクへの保存/読み込み（プロセス再起動後も維持）またはイン
+  メモリオクテットベクター（コンテキストフォーキング、スナップショット）。
+- *GGUFインスペクション* — =with-gguf= は重みのロードやバックエンドの初期化なしに、
+  ファイルレベルのメタデータ、型付きKVエントリ（配列を含む）、テンソル情報を読み取り。
+- *リソースプランニング* — =estimate-memory=、=validate-configuration=、
+  =suggest-configuration=、=feasibility-report= でモデルロード前に確認。=with-context=
+  でのオプショナルな事前作成ガードレール（=:validation :warn/:error=）。
+- *イントロスペクション* — モデル説明とメタデータ、アーキテクチャプロパティ、コンテ
+  キスト設定、バックエンドデバイス列挙、システム機能。
+- *パフォーマンス* — =with-perf= マクロ、構造化タイミングデータ、サンプラータイミング。
+- *ロギング* — llama.cppのログ出力をLispコールバックにルーティング（=set-log-callback=）。
+- *バックエンドライフサイクル* — =with-backend=、=ensure-backend=、NUMA初期化、スレッ
+  ドプール管理、abortコールバック。
+
+コンディションは =llama-error= を継承し、構造化されたスロットを持ちます（例:
+=model-load-error= は =path= を、=decode-error= は =code= を、=input-validation-error= は
+function/argument/value/reasonを保持）。リソースロードのコンディションはデバッガ用
+のインタラクティブリスタートも確立します: 異なるパラメータで再試行、CPUのみ使用、
+LoRAスキップなど。
+
+高レベルでまだラップされていないもの（=%llama= を直接使用）:
+
+- モデル量子化
+
+*** チャットテンプレート互換性
+
+=format-chat= はllama.cppのC言語レベルのテンプレートエンジン
+（=llama_chat_apply_template=）を通じてメッセージをレンダリングします。このエンジン
+は既知のテンプレートパターンの固定セットを認識しますが、任意のJinjaを解釈しません。
+
+一部の新しいモデルは、ツール呼び出しマークアップやカスタム制御トークンなど、エンジ
+ンが理解できないテンプレートを埋め込んでいます。そのようなモデルの場合、モデル自体
+には問題がないにもかかわらず、=format-chat= は =chat-template-error= をシグナルします。
+
+その場合、3つの回復方法があります:
+
+- *テンプレートを事前に指定。* =format-chat= または =tokenize-chat= に =:template= を渡
+  します。=list-chat-templates= の組み込み名（例: ="gemma"=、="llama3"=）または完全な
+  テンプレート文字列を使用します。
+
+- *リスタートを使用。* デバッガで =use-default-template= はllama.cppの汎用chatmlテン
+  プレートで再試行し、=use-template= は指定したテンプレートで再試行します。
+
+- *下流で設定。* cl-llama-cpp上に構築されたライブラリは同じ設定を公開します — 例え
+  ば [[https://github.com/licjon/cl-llm-backend][cl-llm-backend/llama]] の =make-llama-backend= は =:chat-template= を受け付けます。
+
+モデルのファミリに一致する組み込みテンプレートを選択すると、通常、正しいフォーマッ
+トが復元されます。注意点: 大きく異なるターンマーカーで訓練されたモデルは、エラーな
+くフォーマットできても生成品質が低下する場合があります。テンプレートを切り替えた後
+はサンプル生成を確認してください — =model-chat-template= でモデルが実際に期待してい
+た埋め込みテンプレートを表示できます。
+
+** 低レベル =%llama= アクセス
+
+=%llama= はサポートされたファーストクラスのレイヤーであり、実装の詳細ではありません。
+881のすべての公開C関数が利用可能です。命名規則は =llama_= プレフィックスを削除し、ア
+ンダースコアをハイフンに変換します（=llama_decode= → =%llama:decode=、
+=LLAMA_SPLIT_MODE= → =%llama:split-mode=）; =ggml_= および =gguf_= プレフィックスは保持
+されます。高レベルハンドルから生のポインタを抽出するには =llama-model-pointer=、
+=llama-context-pointer= 等を使用します。
+
+=%llama= の直接呼び出しは =with-llama-compatible-fp-environment= 内で実行し、SBCLの
+FPトラップをマスクする必要があります。高レベルAPIは =llama-defun= を介して自動的にこ
+れを処理します。
+
+命名規則、構造体と列挙型の使用法、実例（モデル量子化を含む）については、
+[[docs/low-level.org]] を参照してください。
+
+** Commonモジュール
+
+=cl-llama-cpp/common= はllama.cpp自身の =common/= レイヤーをミラーします: 公開C API
+ではカバーされないC++内部に依存するオプションの拡張機能。各拡張機能は
+=cl-llama-cpp/common/= プレフィックス下の独自のASDFシステムであり、単一の統合C++
+shimライブラリ（=libllama-common-shim.so=、初回ロード時に自動ビルド）を共有します。
+このモジュールは以前の =cl-llama-cpp-extras= リポジトリからマージされました。
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/common/chat")
+#+end_src
+
+| システム                             | 提供機能                                                                |
+|--------------------------------------+-------------------------------------------------------------------------|
+| =cl-llama-cpp/common/json-schema=      | JSON Schema → GBNF文法変換（制約付き生成用）                            |
+| =cl-llama-cpp/common/json-partial=     | ストリーミングJSONヒーラー — 生成中の不完全なJSONをパース                |
+| =cl-llama-cpp/common/chat=             | チャットテンプレートレンダリング（Jinja）とツール呼び出しパース           |
+| =cl-llama-cpp/common/speculative=      | n-gram予測による自己投機的デコーディング                                 |
+| =cl-llama-cpp/common/ngram-map=        | ハッシュマップルックアップによるn-gram投機的トークンドラフティング        |
+| =cl-llama-cpp/common/reasoning-budget= | =<think>...</think>= 推論ブロック用トークンバジェットリミッター            |
+| =cl-llama-cpp/common/imatrix-loader=   | 量子化ワークフロー用の重要度行列ローディング                             |
+| =cl-llama-cpp/common/fit=              | 自動GPUメモリフィッティング（=n-gpu-layers=、コンテキスト、テンソル分割） |
+
+各システムには対応する =/tests= システムがあり（例: =cl-llama-cpp/common/chat/tests=）、
+[[*テストの実行][コアテスト]]と同じ方法で実行可能です。
+
+[[file:common/README.org][common/README.org]] で拡張機能ごとの使用法、シグナル、リスタートを参照してください。
+
+サンプルはコアライブラリのexamplesとは別に =examples/common/= に配置されています:
+
+| ファイル                         | デモ内容                |
+|----------------------------------+-------------------------|
+| =examples/common/json-schema.lisp= | JSON Schema制約付き生成 |
+
+** サンプル
+
+#+begin_src lisp
+(asdf:load-system "cl-llama-cpp/examples")
+#+end_src
+
+| ファイル                         | デモ内容                                                             |
+|----------------------------------+----------------------------------------------------------------------|
+| =examples/incremental-chat.lisp=   | KVキャッシュ再利用によるマルチターンチャット: ターンごとO(1)プリフィル |
+| =examples/tool-calling.lisp=       | チャットテンプレート + XML解析によるツール呼び出し                    |
+| =examples/sampler-showcase.lisp=   | 文法、遅延文法、拡張サンプラー                                        |
+| =examples/sampler-comparison.lisp= | 全サンプリング戦略の比較                                             |
+| =examples/parallel.lisp=           | =generate-parallel=: 共有パスでの複数プロンプト                        |
+| =examples/parallel-threads.lisp=   | 別々のLispスレッドでの並行コンテキスト                                |
+| =examples/kv-cache.lisp=           | assert駆動検証によるKVキャッシュ操作                                  |
+| =examples/context-fork.lisp=       | インメモリ状態スナップショットとコンテキストフォーキング               |
+| =examples/lora.lisp=               | LoRAアダプターのロードと適用                                         |
+| =examples/resource-planning.lisp=  | VRAM推定と設定バリデーション                                         |
+| =examples/introspection.lisp=      | モデルメタデータ、テンソル一覧、システム情報                          |
+| =examples/backend-lifecycle.lisp=  | スレッドチューニング、abortコールバック、時間制限付き生成             |
+| =examples/perf-and-logging.lisp=   | タイミング、スループット計算、ログキャプチャ                          |
+
+** ドキュメント
+
+- [[docs/api-reference.org][APIリファレンス]] — 関数、コンディション、リスタートの完全なリファレンス
+- [[docs/getting-started.org][はじめに]] — 一般的なパターンのガイド付きウォークスルー
+- [[docs/guides/][ガイド]] — サンプラー、文法、KVキャッシュ、埋め込み、LoRA、並列処理、リソースプランニング、クラウドクイックスタート
+- [[docs/low-level.org][低レベル %llamaアクセス]] — C APIの直接呼び出し
+- [[docs/upgrading-llama-cpp.org][llama.cppのアップグレード]] — サブモジュールとバインディングの同期
+- [[docs/contributing.org][コントリビューション]] — テストの実行、ラッパーの追加、PRガイドライン
+
+** cl-llama-cppで構築されたプロジェクト
+
+- [[https://github.com/licjon/cl-llm-backend][cl-llm-backend]] — プロバイダー非依存のLLMバックエンドプロトコル; =llama= バックエン
+  ドはcl-llama-cppを設定、チャットテンプレート処理、ストリーミングでラップ。
+- [[https://github.com/licjon/cl-llama-chat][cl-llama-chat]] — cl-llama-cpp用ターミナルインターフェース。自動モデル設定とサンプ
+  リング設定をまたいだデュアルブランチレスポンス選択を提供。
+- [[https://github.com/licjon/clos-alchemy][clos-alchemy]] — CLOSクラスをスキーマとして使用し、文法制約付きLLM生成による非構造
+  化テキストからの構造化データ抽出。
+
+** テストの実行
+
+スモークテスト（モデル不要）:
+
+#+begin_src bash
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+インテグレーションテストにはGGUFモデルファイルが必要で、環境変数で指定します
+（=LLAMA_TEST_MODEL=、=LLAMA_TEST_EMBED_MODEL=、=LLAMA_TEST_LORA=）:
+
+#+begin_src bash
+LLAMA_TEST_MODEL=/path/to/model.gguf \
+LLAMA_TEST_EMBED_MODEL=/path/to/embedding-model.gguf \
+LLAMA_TEST_LORA=/path/to/adapter.gguf \
+sbcl --eval '(ql:quickload "cl-llama-cpp/tests")' \
+     --eval '(asdf:test-system "cl-llama-cpp/tests")' \
+     --eval '(quit)'
+#+end_src
+
+** ライセンス
+
+MIT
