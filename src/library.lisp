@@ -6,8 +6,8 @@
     (pushnew submodule-lib cffi:*foreign-library-directories* :test #'equal)))
 
 (cffi:define-foreign-library libllama
-  (:unix (:or "libllama.so.1" "libllama.so"))
   (:darwin (:or "libllama.1.dylib" "libllama.dylib"))
+  (:unix (:or "libllama.so.1" "libllama.so"))
   (t (:default "libllama")))
 
 (cffi:use-foreign-library libllama)
