@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 5047748f114564fcf271e6a648f60e2d2eae6264
+Last covered upstream commit: 669204ee2b9004845b34f26466a91d003edc98aa
 
 ---
 
@@ -1068,3 +1068,76 @@ New gaps introduced in this batch:
 - **Converters**: Qwen tensor merge on convert (#31028); LFM3 family (#31252, #31257, #31275); LiquidAI d1 (#31275); Limite (#29433); MiniCPM-OCR-Jev (#30980); Soprano TTS (#28607); LFM3-Audio codec decoder quantization (#31386).
 - **Models**: DSV4.1 flash (#31086); Mistral "Le Chonk" DSA/DSpark (#31376); glm5-next QSA without kq_mask (#31009); MiniMax-M3 quant scale forwarding (#31097); DSV4 simple batch splitting removed (#31300); moe amax rescaling denied for -sm tensor (#31081).
 - **Other**: Batched tensor copy API (#30881); MUL_MAT_ID -1 index skip (#26631); grammar recursion depth limits (#31153, #29755, #30242); DRY sampler CPU exhaustion fix (#31035); deferred tools and tool_reference content parts (#31256); reasoning budget forcing on prompt end tag (#31374); chat qwen3-coder separator fix (#30557); jinja select/selectattr fix (#31059); gguf-py np_roundf sign fix (#31310); 4D tensor quantization fix (#30820); GGUF merge truncation check (#31044); RPC recv_msg length_error catch (#31204); RPC rdma_recv bounds check (#30399); mtmd LFM2 resize fix (#30943); model pin resolution on real HF repo layouts (#30548); test speed improvements (#31145); CODEOWNERS refresh (#31316).
+---
+
+## 2026-11-06 — 162 commits since last digest
+
+### New Features
+
+- **Version 0.9.0** (#31646): llama.cpp bumped to version 0.9.0; ggml bumped to 0.29.0.
+- **Ripple model** (#31692): New architecture support for Ripple (ricursiveai), a recurrent model family.
+- **Xing4_0 model** (#31589): New architecture for the xing4_0 model.
+- **Metis-1.6 model** (#31134): Support for Metis-1.6 models, a new LLM architecture.
+- **Clover model** (#31306): New architecture support for Clover.
+- **GLM-5.3 next sm tensor** (#30499): Extended support for GLM-5.3 models with next-sm speculative decoding tensors.
+- **Drama-3 TTS** (#31613): Text-to-speech support for the Drama-3 model family.
+- **Chatterbox TTS + CFG** (#30993, #31698): Full Chatterbox TTS model support, including classifier-free guidance as GGUF metadata.
+- **Pocket TTS voices without cloning** (#31429): Pocket TTS can now use preset voices without requiring voice cloning.
+- **Nemotron 3.5 Transcribe** (#31471): Speech-to-text transcription support for Nemotron 3.5.
+- **NCCL multi-node tensor parallelism** (#28967): Enables distributing inference across multiple machines using NCCL, a significant scaling capability.
+- **MoE expert cache (LRFU/ClassLRU)** (#31233): Hybrid expert caching strategy combining least-recently/frequently-used eviction with class-aware LRU, reducing memory pressure for large MoE models.
+- **MTP hidden state save/restore** (#30141): Multi-token prediction speculative decoding can now persist its hidden state across sessions.
+- **Flash attention ext_rows for multi-seq** (#29510): More efficient unified KV handling when multiple sequences share a context, improving batched inference throughput.
+- **Reference-counted server checkpoints** (#30137): The server now uses reference-counted checkpoints instead of deep-copying state, reducing memory usage during speculative decoding.
+- **YaRN truncate=false** (#30206): The YaRN RoPE scaling extension can now be used without truncating context, allowing smoother long-context extrapolation.
+- **Jinja map('filter')** (#24033): The template engine now supports `map('filter')`, improving chat template expressiveness.
+- **NVFP4 LFM3 GGUFs** (#31608): LFM3 models can now be quantized to NVIDIA's FP4 format.
+- **LFM3 tensor split** (#31431): LFM3 models can now be split across multiple GPUs.
+
+### Bug Fixes
+
+- **CLI crash on invalid UTF-8** (#31563): The CLI no longer crashes when fed prompts or files containing malformed UTF-8 sequences.
+- **KV shifting correctness** (#31683): Fixed incorrect KV cache shifting that could produce garbled output after context rotation; also added per-model build_rope and tests.
+- **On-device state copy for quantized KV** (#30541): State save/restore was copying wrong sizes when the KV cache used quantized types, potentially corrupting saved sessions.
+- **BF16 computation fix** (#31609): Corrected a bf16 numerical issue affecting models using bfloat16 weights.
+- **KV-cache 0-row sequences** (#31570): The KV cache no longer returns 0 rows for sequences without cells, which could cause division-by-zero in attention.
+- **Shared-KV attention rotation** (#31406): Fixed incorrect rotation of attention tensors in layers that share KV heads across groups.
+- **imatrix --nextn crash** (#31522): Fixed a segfault when running importance matrix generation with the --nextn flag.
+- **InternVL CLS token order** (#30886): Corrected the CLS token ordering for InternVL vision models, which could degrade image understanding quality.
+- **Gemma 4 image resize** (#30922): Gemma 4 images are now resized without letterbox padding, matching the model's expected input format.
+- **ggml_roll signed overflow** (#30375): Avoided undefined behavior from signed integer overflow in the roll bounds check.
+- **Q8_1 correction sum** (#31247): Potential fix for an accumulation error in Q8_1 dequantization on CUDA.
+- **MoE NaN sanitization** (#31005): Post-bias NaN values in MoE expert selection on CUDA are now sanitized, preventing silent corruption in mixture-of-experts routing.
+- **NVFP4 scale lookup OOB** (#31079): Fixed an out-of-bounds read in the Vulkan NVFP4 UE4M3 scale lookup table.
+- **Maxwell CUDA build** (#31787): Fixed a build failure on older NVIDIA Maxwell GPUs.
+- **Metal copy kernel non-contiguous** (#31581): Fixed a Metal kernel for copying to non-contiguous destination tensors in dimension 0.
+- **Qwen3-coder think block stripping** (#31380): The think block is now correctly stripped from Qwen3-coder output when reasoning_format is set to none.
+- **HF tag matching in quant names** (#31620): Fixed `-hf` model resolution when the quant tag appeared as a substring of a longer name (e.g. Q4_K matching Q4_K_S).
+- **ggml view bounds** (#31584): Views are now bounded by the bytes their strides actually reach, catching out-of-bounds accesses earlier.
+- **Server session update validation** (#31714): The server now rejects non-object payloads in session update requests, preventing crashes from malformed input.
+- **SYCL CPY rounding** (#31120): Fixed incorrect rounding in f32-to-quantized copy operations on SYCL, which could introduce quantization errors.
+- **CUDA graph eviction** (#30662): Prevented premature eviction of CUDA graphs that were about to be reused, avoiding unnecessary recompilation.
+- **DSV4.1 partial offload tests** (#31292): Fixed context tests failing when DeepSeek V4.1 was only partially offloaded to GPU.
+
+### Capability Gaps
+
+No new public API functions were added to `include/llama.h`, `include/ggml.h`, or `include/ggml-backend.h` in this range. All changes were to internal implementation, backends, models, and tooling. **No new binding gaps introduced.**
+
+### Other / Internal
+
+- **Backend — Hexagon**: Conv_2d optimizations and conv_3d support (#31814); lightning indexer (#31289); TOP_K_MASK op (#31552); faster TOP_K for backend sampler (#31279); tiled HVX permute (#31446); DSV4_HC_PRE/POST ops (#30953); set_tensor_n and repacking robustness (#31744); DMA stride fix (#31442).
+- **Backend — Vulkan**: ReBAR detection to avoid BAR allocations when unavailable (#31658); FWHT kernels for block widths above 512 (#29772); RDNA3/4 large-tile split-K optimization (#30280); tensor-parallel allreduce (#25051); small-n split-K tuning for RDNA3/4 (#30146); redundant scan avoidance (#31266); large coopmat matmul re-enabled on AMD proprietary driver 26.10.1+ (#31587); test-fusion interface (#30769); combined K+V f16 scratch size check in FA dequant (#30487); maxStorageBufferRange pre-check skip (#31114).
+- **Backend — OpenCL**: q6_k multi-column tiled GEMV (#31758); q5_k GEMV for Adreno X2 (#31694); initial iq4_xs (#31339) and iq3 (#31338) support; q2_0 GEMV improvement (#31577); f16/i32/i16/bf16 repeat (#31782); non-contiguous sigmoid (#31687); DSV4_HC_PRE/POST (#31623); topk_mask (#31441); FWHT (#31434); FA decode performance improvement (#31633).
+- **Backend — Metal**: Fused DeepSeek-V4/V4.1 and GLM MoE routing (#31615); mul_mm for 32 ≤ K < 64 (#30982); fusable node groups kept inside one command buffer (#31688).
+- **Backend — CUDA/HIP**: MFMA lightning indexer for CDNA2/gfx90a (#29050); linearized MoE data layout for MMQ/MMF (#31047); fused NVFP4 gate/up matmuls and GLU in MMQ (#31296); gathered batched tensor reads into mapped host memory (#31391); highest compiled arch used in get_mmvq_mmid_max_batch (#31679).
+- **Backend — WebGPU**: Batched tensor API (get_tensor_n/set_tensor_n) (#31473); MEAN support (#31591); ARANGE support (#31455); scratch alloc size monotonicity fix (#31422); maxBufferSize from get_max_size (#31348).
+- **Backend — SYCL**: Fast comm_exchange on Intel Arc Pro B70s (#30956); dmmv code cleanup (#31325); PkgConfig for LevelZero (#31076).
+- **Backend — z/Architecture (zdnn)**: Shared host buffers (#31481); fattn test fix (#31583).
+- **Backend — CPU**: vm_allocate instead of posix_memalign on all Apple platforms (#31437); RVV code gated on target extension (#31607); clang-cl AVX512 BF16 build fix (#31276).
+- **Conversion**: Resolved quantized_layers from source tensor names (#31611); original tensor names in _flush_nvfp4_experts (#31427); GGUF split merge shard mismatch rejection (#31579).
+- **Server**: Simplified Windows MCP command resolution (#31728); realtime error events instead of crashes (#31632); /v1/responses extra_params fix (#30959); shared decision prefixes capped at first output (#30710); context setters simplified (#29730).
+- **Server UI**: Right-click context menus for chats, tabs, messages and models (#31545); PDF attachment thumbnails (#31468); disabled server-refused model deletion (#31305); alert dialog styling alignment (#31312); queued steering message isolation (#31304); interrupted tool call state display (#31314); model pre-selection and reload fixes (#31326); sidebar click interception fix (#31712); Playwright demo video harness (#31318).
+- **GGUF-py**: External chat templates now take precedence over tokenizer_config (#31717); merge pair validation covers all pairs (#31631).
+- **Build/CI**: CUDA 13.5 for release builds (#31788); cmake RC file generation without .rc.in (#31718); explicit thread linkage (#31414); Python 3.14 wheel adjustments (#31534); numpy dependency fix (#31508); CI self-hosted CPU jobs on HF or GitHub (#31439); build-cmake-pkg ccache fix (#31705); unused model generation removed (#31412); HIP VGPR spill ignore list update (#31550); Gemma 4 enabled in test-llama-archs (#31401); isnan/signbit std:: qualification (#31791); hardware_concurrency override in CI (#31797).
+- **Vendor updates**: BoringSSL to 0.20261105.0 (#31757); cpp-httplib to 0.65.0 (#31731); miniaudio to 0.11.26 (#31459).
+- **Other**: HF token restricted to huggingface.co hosts (#31730); common_get_path_from_env() deleted (#31444); u8path() dropped in favor of generic_string() (#31681, #31682); RPC code aligned with common.cpp (#31684); sidecar underscore disallowed (#31639); Qwen4exp conv state tail optimization (#31443); LFM3 reshape for 2D mm (#30831); NVFP4 scales in Qwen2 build_ffn (#31657); Gemma4 assistant ctx_other/flash attention fix (#31635); delta_net_base conv state refactor (#30878); DFlash hidden feature device copies (#31506); constraint type after GPT-OSS final channel (#31556); models recursive fix (#31749); graph MTP conv snapshots in one set_rows (#31660); NextN layer skip accounting (#31569); docs fixes (#31530, #31463, #31249, #31487, #31546).
