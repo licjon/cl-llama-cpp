@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 669204ee2b9004845b34f26466a91d003edc98aa
+Last covered upstream commit: 29b52d398b294509746ec0a3f28948a3107c0213
 
 ---
 
@@ -1141,3 +1141,109 @@ No new public API functions were added to `include/llama.h`, `include/ggml.h`, o
 - **Build/CI**: CUDA 13.5 for release builds (#31788); cmake RC file generation without .rc.in (#31718); explicit thread linkage (#31414); Python 3.14 wheel adjustments (#31534); numpy dependency fix (#31508); CI self-hosted CPU jobs on HF or GitHub (#31439); build-cmake-pkg ccache fix (#31705); unused model generation removed (#31412); HIP VGPR spill ignore list update (#31550); Gemma 4 enabled in test-llama-archs (#31401); isnan/signbit std:: qualification (#31791); hardware_concurrency override in CI (#31797).
 - **Vendor updates**: BoringSSL to 0.20261105.0 (#31757); cpp-httplib to 0.65.0 (#31731); miniaudio to 0.11.26 (#31459).
 - **Other**: HF token restricted to huggingface.co hosts (#31730); common_get_path_from_env() deleted (#31444); u8path() dropped in favor of generic_string() (#31681, #31682); RPC code aligned with common.cpp (#31684); sidecar underscore disallowed (#31639); Qwen4exp conv state tail optimization (#31443); LFM3 reshape for 2D mm (#30831); NVFP4 scales in Qwen2 build_ffn (#31657); Gemma4 assistant ctx_other/flash attention fix (#31635); delta_net_base conv state refactor (#30878); DFlash hidden feature device copies (#31506); constraint type after GPT-OSS final channel (#31556); models recursive fix (#31749); graph MTP conv snapshots in one set_rows (#31660); NextN layer skip accounting (#31569); docs fixes (#31530, #31463, #31249, #31487, #31546).
+
+---
+
+## 2026-11-20 — 420 commits since last digest
+
+### New Features
+
+- **llama.cpp 1.0.0** (#32190): Major version bump. The ggml tensor library also reached 1.0.0. Signals API stability commitment from upstream.
+- **Batch API migration to `llama_batch_ext`** (#32306, #32356): The old `llama_batch` struct and `llama_decode`/`llama_encode` functions are now deprecated. The new `llama_batch_ext` API and `llama_process()` function replace them, supporting richer per-token metadata and extended embedding operations.
+- **API pruning** (#30565, #29801): Dozens of long-deprecated compatibility shims were removed from the public headers, including `llama_new_context_with_model`, `llama_load_model_from_file`, `llama_free_model`, `llama_token_bos`, `llama_token_is_eog`, `llama_set_warmup`, `llama_sampler_init_grammar_lazy`, and many `llama_token_*` wrappers. The modern replacements (e.g. `llama_init_from_model`, `llama_vocab_bos`) are now the only path.
+- **DFlash/NextN speculative decoding overhaul** (#32016): The DFlash speculative decoding system was refactored with a new public API surface including `llama_dflash_variant` enum, model query functions (`llama_model_dflash_variant`, `llama_model_dflash_selector_top_k`, `llama_model_target_layer_ids`), and a full set of NextN embedding/device buffer functions for chaining draft heads.
+- **FP8 KV-cache support** (#28392): Adds the ability to use FP8 (E4M3) format for key-value caches, reducing memory usage for large contexts.
+- **OCP FP8 for CUDA** (#28413): Adds Open Compute Project FP8 data type support to CUDA backends.
+- **BF16 for ROPE, SET_ROWS, RMS_NORM** (#32387, #32135): BF16 (bfloat16) support extended to more core operations on CPU and CUDA, reducing precision loss in mixed-precision inference.
+- **Fused NORM + MUL (+ ADD) on CUDA** (#32454): Kernel fusion combining normalization with element-wise multiply/add, improving inference throughput.
+- **MoE cache CPU share** (#30966): New `moe_cache_cpu_share` parameter lets a fraction of MoE cache misses be computed on CPU instead of uploaded to GPU, with a tuning script.
+- **Inkling 2 model family** (#32217, #32694, #32429, #32430): Full support for Inkling 2 text and vision, including attention mask fixes and mmproj conversion.
+- **Domyn Edge 4B** (#32559), **Zaya1 8B** (#32071), **MiniMax-M3.1** (#32301), **Kimi-K3.1-Pro** (#31779): New model architectures.
+- **DFlash2 for Recursive Ripple-65B** (#31904): DFlash2 speculative decoding support for the Ripple-65B model.
+- **Gemma 4 optimized multi-seq prompt processing** (#32342): Faster prompt processing for multi-sequence Gemma 4 queries.
+- **TTS expansion**: Kokoro TTS (#32413) with G2P template dictionaries (#32397), zonos3-mini TTS (#32020), drama3 voice cloning (#32586), Pocket TTS temperature via API (#31655), server `/v1/audio/speech` endpoint (#31763).
+- **Multi-modal additions**: MageVL-Cowork (#31819), voxcpm2 (#32443), YuE2-3B (#32369), fish audio s2 (#32330), higgs v3 STT / vibevoice-ASR (#32329), tiny-voca (#32427), gemma 4 audio stream (#31965), Minimax-Music3 (#32435), Qwen3-TTS ICL/reference mode (#32438).
+- **Metadata array access** (#32397): New `llama_model_meta_arr_n` / `llama_model_meta_arr_str` API for reading GGUF metadata string arrays (used for TTS dictionaries).
+- **External PLE file loading** (#31185): Models can now load PLE (Positional Length Extension) data from external files.
+- **Server: reasoning effort 400 response** (#32332): Server now returns HTTP 400 when a template rejects the requested reasoning effort level, instead of silently ignoring it.
+- **Server: MCP proxy private URLs** (#32633): New `--ui-mcp-proxy-allow-private-urls` flag for the web UI's MCP tool proxy.
+- **Server: responses API json_schema** (#26145): The responses API now supports `text.format.json_schema` conversion to completions grammar.
+
+### Bug Fixes
+
+- **Sticky NaN in recurrent state** (#31913): Fixed a bug where NaN values could persist in recurrent model hidden states, corrupting all subsequent generation.
+- **GROUP_NORM for ne03 > 1** (#31852): Metal backend fix for group normalization with batched non-contiguous inputs.
+- **MUL_MAT_ID abort on AMD** (#32385): Fixed crash with odd source column counts in MoE matrix multiplication on AMD GPUs.
+- **Metal mul_mv overflow** (#32221): Fixed 32-bit destination offset overflow in Metal matrix-vector multiplication.
+- **M-RoPE position warning** (#32287): Silenced false non-consecutive position warnings for multi-resolution RoPE.
+- **SSRF protection** (#32115, #32098, #32113, #32120): Multiple server-side request forgery fixes for CORS proxy and media URLs, plus DNS rebinding protection.
+- **Connection reuse after streaming** (#30492): Fixed HTTP connection reuse bug after streamed responses.
+- **v1/realtime sleep state** (#32567) and **output lang** (#31982): Fixes for the realtime API endpoint.
+- **output_config.effort dropped** (#32321): Fixed reasoning effort being silently dropped in `/v1/messages`.
+- **imatrix GGUF metadata leak** (#32000): Fixed filepath information leaking into quantized model metadata.
+- **json_schema not nested** (#28697): Fixed response_format when json_schema isn't wrapped in the expected container.
+- **allOf with plain types** (#31834): Fixed grammar generation for JSON schema `allOf` containing simple types.
+- **YuE2 projector loading** (#32606): Fixed multi-modal projector initialization for YuE2.
+- **k-pool layout on sequence edits** (#32137): Fixed k-pool layout prefix being lost during sequence edit operations.
+- **MoE regression on HIP** (#32344): Fixed a performance regression for MoE models on AMD HIP.
+- **CUDA lightning indexer shared memory** (#31803): Fixed bank conflicts in the DeepSeek V4 lightning indexer kernel.
+- **Metal SOLVE_TRI out-of-bounds** (#32103), **FA output buffer** (#31662), **NSMakeRange** (#32602): Multiple Metal kernel boundary fixes.
+- **Vulkan fp32 FA shmem overflow** (#32244), **MoltenVK out-of-bounds** (#31890): Vulkan memory safety fixes.
+- **Infinite recursion in PEG parser** (#32282): Fixed stack overflow in debug builds when dumping PEG grammar.
+- **Empty stop strings** (#32093): Server no longer crashes on empty stop string arrays.
+- **Escape control chars in tool arguments** (#31937): Fixed tool call argument strings containing control characters.
+- **Invalid UTF-8 in PEG tool calls** (#31861): Sanitization of invalid UTF-8 in tool call argument parsing.
+- **KV-cells O(n) scan** (#32380): Fixed a performance issue where sequence removal triggered an O(n_cells) scan.
+
+### Capability Gaps
+
+**CRITICAL — Bindings broken at next pin update:**
+
+- **`llama_new_context_with_model` REMOVED**: Our `%llama:new-context-with-model` binding references a function that no longer exists. Must migrate to `llama_init_from_model` (which is already the upstream replacement).
+- **`llama_set_warmup` REMOVED**: Our `%llama:set-warmup` binding references a function that was deleted entirely. No direct replacement; user code should do warmup runs manually.
+- **`llama_token_bos` REMOVED**: Our `%llama:token-bos` binding references a removed deprecated wrapper. Must migrate to `llama_vocab_bos`.
+- **`llama_token_is_eog` REMOVED**: Our `%llama:token-is-eog` binding references a removed deprecated wrapper. Must migrate to `llama_vocab_is_eog`.
+- **`llama_sampler_init_grammar_lazy` REMOVED**: Our `%llama:sampler-init-grammar-lazy` binding references a removed function. Must migrate to `llama_sampler_init_grammar_lazy_patterns` (already in binding-deps).
+
+**Deprecated — will break in a future release:**
+
+- **`llama_batch_get_one`**, **`llama_batch_init`**, **`llama_batch_free`**: Our core batch operations (`%llama:batch-get-one`, `%llama:batch-init`, `%llama:batch-free`) are now deprecated. Must plan migration to `llama_batch_ext_init` / `llama_batch_ext_free` / `llama_batch_ext_add_token`.
+- **`llama_decode`**, **`llama_encode`**: Our `%llama:decode` and `%llama:encode` are deprecated in favor of `llama_process()` with process type flags.
+
+**New API surface not bound:**
+
+- **`llama_process()`**: The replacement for decode/encode — not yet in our bindings.
+- **`llama_batch_ext_*` family**: The full extended batch API — not yet bound.
+- **NextN / speculative decoding API**: ~15 new functions for NextN embeddings, layer input access, device buffers, and context pairing (`llama_set_embeddings_nextn`, `llama_get_embeddings_nextn_ith`, `llama_set_ctx_state_src`, `llama_get_ctx_other`, etc.).
+- **DFlash model query functions**: `llama_model_dflash_variant`, `llama_model_dflash_selector_top_k`, `llama_model_target_layer_ids`, `llama_model_target_layer_ids_n`.
+- **Metadata array access**: `llama_model_meta_arr_n`, `llama_model_meta_arr_str`.
+- **`moe_cache_cpu_share`**: New context parameter field.
+- **`defrag_thold` removed from `llama_context_params`**: Struct layout change — if our bindings hardcode the struct, this will cause memory corruption.
+
+### Other / Internal
+
+- **Vulkan**: stream-k MUL_MAT (#28528); Intel FA prefill kernel (#29357); BF16 for various ops (#32202); TOP_K_MASK (#31544); GATED_DELTA_NET (#30207); deterministic tie selection in radix top-k (#31931); batched tensor copy API (#31418); RDNA3/4 FA optimization (#31323); narrow-N MUL_MAT (#31990); UMA Intel copies (#32024); tiled-transpose concat for Qwen (#30591); GROUP_NORM 2D workgroup (#31930); device keepalive (#29267); SPIRV-Headers include (#31416); mixed-signedness MMQ (#31045); CM2 dequantized KV (#31526); device fault buffer (#32008).
+- **CUDA**: few-row MMQ (#32065, #31533); V100 MoE MMQ (#32504); duplicate expert IDs (#32505); cooperative softmax (#28982); Pascal DP4A tuning (#31352); quantized matvec fusion disabled on Pascal (#32239); 64-bit dst offsets (#32374); SKU-aware FP16/BF16 precision gating (#30672); Orin MMVQ optimization (#31268); MMQ precision in MoE fallback (#31345); conv2d fastdiv/F32 (#32492, #32482); pool_1d block reductions (#31855); sm70/sm103 FA configs (#27997, #30099); graph state refactored (#32001, #31919); CUDA graphs cluster dims compat (#31284); VMM pool halved (#30542); graph reuse skip compat check (#32004); BF16 MMVF (#31959); FA head sizes 40/72 (#30285); NVFP4 epilogue fusion (#26048); stream-k MoE MMQ fixup (#32067); RDNA tuning (#32389, #32308); HIP BLAS workspace (#31838); warp primitives refactor (#31617).
+- **Metal**: implicit GEMM for CONV_2D (#28069); CONV_2D split-K for all chips (#32542); norm chain fused MUL/ADD (#32300); ggml_tri select (#30711); F8_E4M3 decode without ldexpf (#32477).
+- **OpenCL**: decomposed FA for Adreno (#32046); multiple A7 binary kernels (Q4_K, Q5_K, Q6_K, Q8_0); f32 MUL_MAT_ID (#31783); f16/non-contig silu (#32319); dp4a for KQ mm (#32577); arange (#31829); spec verification (#31831); FA adjustable KV padding (#32522).
+- **WebGPU**: timestep embedding (#31695); POOL_2D (#32250); COUNT_EQUAL (#31578); PAD_REFLECT_1D (#31877); COL2IM_1D (#31708); group norm (#31490); f32 FTZ dequant fix (#32140); per-head FA masks (#32394); 2D copy indexing fix (#32576).
+- **Hexagon**: SSM_SCAN (#31921); TIMESTEP_EMBEDDING (#32228); Q5_0/Q5_1 (#32094); IQ2_XXS/NVFP4 (#31954); fused RMS_NORM_MUL (#31822); n_hvx cleanup (#31857); mmap stacking (#32144); 64-bit handle truncation fix (#30952); FA no-mask tail fix (#32243); auto HTP loading (#31781); clang-cl Windows ARM64 fix (#32011).
+- **SYCL**: device-side MoE scheduler (#30156); oneDNN FA cache thread-safe (#31138); AOT >4GB fix (#31873); cached device-id (#31126, #32013); CLAMP strided view fix (#31784); exact rounding in CPY (#31465); VRAM overflow rejection (#31285); f16 SWIGLU_OAI (#30857); fast division in bin-bcast (#32213); FA MKL mask broadcast fix (#31536); nix package (#31066); oneDNN fused SDPA ungated for Alchemist (#31574); oneAPI 2026.2 / oneDNN 2026.1 (#31540).
+- **CPU**: 4x4 simd_gemm on ARM NEON (#32128); x86 VNNI Q2_0 dot product (#26348); F32 flash attention V accumulation (#29810); SpacemiT IME2 MXFP4 repack (#31776); SpacemiT RVV GATED_DELTA_NET routing (#31897); all threads for large GET_ROWS (#32514); F32 src1 switch (#31854); llamafile BF16/Q8_0 vxe (#31866); s390x Q0/QK support (#32203, #32600).
+- **OpenVINO**: expanded model support, NPU/GPU optimization (#32172); CI trigger updates (#32593); ops matrix docs (#32259).
+- **RPC**: improved loading times (#29413); graceful endpoint failures (#30415).
+- **Backend scheduler**: tests (#27258); prefetch only split inputs (#32100); reuse scheduler when params compatible (#32009); graph result reuse (#32089); new split at incompatible weight (#31775); don't upload unread inputs (#31419).
+- **Build/CI**: Ubuntu 26.04 runners (#31529); LLVM 22 / 22.1.8 (#32548, #32565); Python 3.14/3.15 wheel support (#32199); docker vX.Y.Z tags (#32388); HIP quality check fixes (#32183, #32331); ROCm gfx1151 Strix Halo runners (#31567); spec dec CI testing trigger (#32281); dead snakes removed (#32084); Windows SYCL MKL DLLs (#32005); ccache sizes (#32185); qdc timeout reduction (#32148).
+- **Vendor updates**: cpp-httplib to 0.66.0 and 0.67.0 (#32049, #32563); LibreSSL 4.4.1 (#32106); stb_image sync (#32305).
+- **Jinja template engine**: scope-chain key lookup (#32396); json sort_keys=true (#32366); chained comparisons and argument unpacking (#32072); 4 missing features (#32352); reduced rendering overhead (#32023).
+- **Server refactoring**: slot_sched module with prompt running hash (#32154); MCP discovery skip for router children (#32359); MCP tool call cancellation on disconnect (#32025); enable packing for d1-2B/d1-Omni-2B (#32553); slot cache cleared on lora change (#30367).
+- **Tokenization/Grammar**: BPE rank loading extracted (#30962); PLaMo-2/3 tokenizer speedup (#32249); unicode continuation check (#31070); left factoring optimization (#29557); Sarvam byte fallback tokens (#32006).
+- **UI overhaul**: Llama Chat moved to SvelteKit 3 with service worker; npm-publishable as `@ggml-org/llama-chat`; 63% first-load JS reduction; Storybook; design system tokens; voice messages with live waveforms; model discovery search dialog; full-screen diagram preview; live markdown editor; conversation tabs; collapsible sidebar sections; phone-native layout; dark mode fixes.
+- **IQ2 creation speedup** (#31910): Caching optimization for IQ2 quantization.
+- **MUL_MAT src1 precision tests** (#31896): New gating mechanism for src1 precision in matrix multiplications.
+- **YaRN truncation on more backends** (#30802): Extended YaRN RoPE truncation config to OpenVINO, SYCL, Vulkan, WebGPU, RPC.
+- **TRI backward pass** (#30712): Implements the backward pass for triangular operations (useful for training/fine-tuning).
+- **Windows unbuffered model load** (#26014): Faster model loading on Windows by bypassing filesystem buffering.
+- **Rotate K/V read order** (#32407): Better L2 cache hit rates by rotating the key/value read order during attention.
+- **MoE random routing** (#29539): `LLAMA_MOE_RANDOM_ROUTING=1` env var for benchmark-only random expert selection.
+- **`defrag_thold` removed from `llama_context_params`**: This deprecated field was removed from the context params struct.
