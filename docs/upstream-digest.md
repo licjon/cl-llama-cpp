@@ -1,7 +1,7 @@
 # llama.cpp Upstream Digest
 
 Pin at last update: 4988f6e866057afd130c1515ecef0c9bab9a15f8
-Last covered upstream commit: 29b52d398b294509746ec0a3f28948a3107c0213
+Last covered upstream commit: 8e23278c7c36f4429fb237467d50e2935a91e655
 
 ---
 
@@ -1247,3 +1247,83 @@ No new public API functions were added to `include/llama.h`, `include/ggml.h`, o
 - **Rotate K/V read order** (#32407): Better L2 cache hit rates by rotating the key/value read order during attention.
 - **MoE random routing** (#29539): `LLAMA_MOE_RANDOM_ROUTING=1` env var for benchmark-only random expert selection.
 - **`defrag_thold` removed from `llama_context_params`**: This deprecated field was removed from the context params struct.
+
+---
+
+## 2026-11-27 — 226 commits since last update
+
+### New Features
+
+- **RAON-1-mini-preview model** (#32176): Full support for the RAON hybrid attention architecture, including a new pre-tokenizer with NFC normalization, MXFP8 weight dequantization, and a custom chat template. A new hybrid model family from Krafton.
+- **Hy4 Flash (hy_v4_flash) model** (#32960): Tencent's Hunyuan V4 Flash architecture — a hybrid attention model with sparse context selection via a pooled indexer, MLA layers, sliding-window attention, and Engram tables. Includes vision support.
+- **Inkling 2 DSpark speculative decoding** (#32218): Speculative decoding support for the Inkling 2 architecture using DSpark draft models.
+- **DFlash2 for Inkling 2 Mini** (#33073): DFlash2 speculative decoding support added to Inkling 2 Mini.
+- **Hibiki real-time full-duplex audio** (#32491): Support for the Kyutai Hibiki model, enabling real-time full-duplex audio (simultaneous speech input/output) through the multimodal pipeline.
+- **Automatic target-BPW/size quantization** (#15550): A major new quantization feature — `--target-bpw` and `--target-size` options let the quantizer automatically choose optimal per-tensor quant types to hit a file size or bits-per-weight target at lowest error, using Lagrangian optimization with imatrix data. Adds new fields to `llama_model_quantize_params`.
+- **Named tool choice** (#31564): The server now supports selecting specific tools by name (not just "auto" or "none"), including tool choice subsets for constrained tool calling.
+- **FP8/NVFP4 quantization scales** (#28898): Infrastructure for per-tensor, per-channel, and per-expert quantization scales, enabling native FP8 (E4M3) and NVFP4 inference with proper scale handling across all backends.
+- **BF16 src1 for MUL_MAT/MUL_MAT_ID** (#32533, #32677): Matrix multiplications can now take BF16 activations on CPU, CUDA, and Metal, improving MoE decode throughput (up to +25% on Apple Silicon).
+- **GDN replay instead of rollback** (#31669): Gated Delta Net recurrent models (Qwen3.5, Qwen3.6, BailingMoE3, Kimi K3, etc.) now use token replay instead of state snapshots for rollback, implemented across CUDA, Metal, Vulkan, WebGPU, OpenCL, and Hexagon backends. Removes the LLAMA_RS_REPLAY env flag.
+- **Flash Attention indexed bias** (#32740, #33063): Compact position-bias support for Flash Attention, allowing models like Inkling 2 to use learned biases indexed into the attention scores. Supported on CPU, CUDA, and Vulkan.
+- **Hexagon 2.0 backend overhaul** (#32582): Major upgrade to the Qualcomm Hexagon (Snapdragon) backend — adds INT-HMX W8A8 matmul, F16 support, DMA pipeline offload, fused GLU ops, and flash attention with W8A8 Q8_0 KV.
+- **Async host input copies** (#30685): New `fast_async_host_input` backend capability lets CUDA batch host-to-device copies asynchronously instead of blocking per tensor, improving scheduler throughput.
+- **Scratch memory in graph_optimize** (#31898): Backends can now reserve shared scratch memory across fused nodes during graph optimization, enabling more complex kernel fusion patterns.
+- **Metaspace prepend_scheme "always" for BPE** (#33038) and SPM (#31986): Fixes tokenization for models that need the metaspace character prepended to every piece (e.g., Nanbeige4.3-33B).
+
+### Bug Fixes
+
+- **CUDA ADD_ID launch crash >65535 tokens** (#33162): The ADD_ID kernel's grid dimension exceeded the hardware limit when processing more than 65535 tokens, causing "invalid configuration argument" errors on both NVIDIA and AMD GPUs.
+- **CUDA non-contiguous concat crash** (#33006): Similar grid dimension overflow in the concat kernel for large tensors, failing with "invalid configuration argument".
+- **CUDA cooperative softmax >256 SMs** (#32897): The cooperative softmax kernel didn't reduce all partials on GPUs with more than 256 streaming multiprocessors, producing wrong results.
+- **CUDA NVFP4 stream-k fixup over-read** (#33136): The NVFP4 MMQ kernel read y_scale out of bounds during the stream-k fixup pass.
+- **CUDA int overflow in MMVF and MMF** (#32965, #33044): Integer overflow in matrix offset calculations for large tensors.
+- **CUDA bin_bcast size-1 dim assert** (#32854): Stride assertion fired on tensors exceeding 2^32 elements when trailing dimensions had size 1.
+- **HIP bf16 MFMA type mismatch** (#33086): LLVM 23 rejects the wrong operand type for CDNA bf16 builtins on gfx908/gfx90a/gfx942/gfx950.
+- **HIP NVFP4 scale double halving** (#32790): NVFP4 scales were halved twice on CDNA3, producing wrong results.
+- **Metal fused-node concurrency race** (#33175): The concurrency check for fused kernel groups only examined the last node, allowing a fused top-k kernel to run concurrently with the router matmul that writes its input, causing nondeterministic expert routing.
+- **Metal iPhone GPU timeout** (#31815, reverted #33050): An earlier fix for iPhone GPU timeouts on Bonsai models was reverted after causing other issues.
+- **Vulkan Windows RDNA1 misclassification** (#33123): The Vulkan backend misidentified RDNA1 GPUs on Windows drivers.
+- **Vulkan conv3d validation error** (#33106): Validation error on empty conv3d kernels.
+- **Vulkan fill for unaligned ranges** (#32725): memset failed for view offsets not aligned to minStorageBufferOffsetAlignment.
+- **WebGPU softmax indexing** (#32691): Off-by-one in the softmax kernel produced wrong results.
+- **WebGPU nonzero clear on non-UMA** (#32727): Buffer clearing failed on non-UMA WebGPU devices.
+- **SpacemiT flash attention null mask/ALiBi/softcap** (#32182): Several flash attention edge cases were broken on the SpacemiT (RISC-V) backend.
+- **Softplus precision for negative inputs** (#32655, #33017): `log(1 + exp(x))` had catastrophic cancellation for x < -16, returning 0 instead of the true value. Fixed across all backends (CPU, Metal, Vulkan, OpenCL, WebGPU) with a range-reduced log1p.
+- **Sequence state restore with ON_DEVICE** (#30318): State restore was broken when using on-device KV cache.
+- **MoE cache with experts on different backends** (#33133): Expert selection from a different backend than the cache caused failures when layer splitting.
+- **Host weight partial expert copy** (#32807): When a host weight was shared by multiple MUL_MAT_ID nodes, only the experts needed by the first node were copied, producing stale data for subsequent nodes.
+- **Tensor-split mode rejected for Hadamard models** (#33080): Prism Bonsai models crashed in tensor-parallel mode; now fails at load with a clear message.
+- **Prompt cache lookup skip** (#28992): The server sometimes skipped prompt cache lookups, missing cache hits.
+- **Prompt cache restore with idle slots** (#30997): A RAM-cached prompt could fail to restore because idle slots held the needed cells; now retries after clearing them.
+- **Excessive CPU polling without OpenMP** (#32378): Without OpenMP, the CPU burned cycles polling while the GPU computed.
+- **BPE tokenization speed** (#32859): Eliminated string allocations in the BPE tokenizer hot path.
+- **CMake llguidance header path** (#32928): Cargo 1.100 changed the build directory layout, breaking the llguidance header include path.
+- **Boolean JSON schema** (#32908): The server now accepts `"value": true` in JSON schemas, as sent by tools like RAGFlow.
+- **GGUF invalid enum safety** (#32641): Untrusted GGUF files could create invalid enum values; now validated at parse time.
+
+### Capability Gaps
+
+- **`llama_model_quantize_params` expanded** (#15550): Nine new fields were added to the quantize params struct (`activations`, `statistics`, `stats_schema`, `target_bpw`, `target_size`, `state_file`, `target_exclude`, `abort_callback`, `abort_callback_data`). The bindings don't expose `llama_model_quantize_params` or `llama_model_quantize()` at all, so this widens the existing quantization gap but doesn't break anything. If quantization support is ever added, these fields will need to be included.
+- **`ggml_gated_delta_net_ext`** (#31669): New op function for the GDN replay mechanism. This is a ggml-level op, not a llama API function, so it's below the binding surface — but projects using the ggml layer directly would need it.
+- **Recurrent state read-in-place** (#30139): Internal graph optimization that reads recurrent states directly from cache instead of copying. No API change, but changes cache behavior that state save/restore code should be aware of.
+
+### Other / Internal
+
+- Version bumped to llama.cpp 1.1.0 and ggml 1.1.0, then ggml 1.1.1.
+- Removed x86_64-darwin support from Nix (#33114); fixed Nix build on darwin (#32955) and webui (#32645).
+- CUDA: moved fusion code to dedicated fusion.cu (#33087); cached device type at init to avoid repeated cudaGetDeviceProperties calls (#33142); fused RMS_NORM+MUL+MROPE/IMROPE (#32500); fused Inkling 2 conv/mix/controller/clip chains (#33060); fused top-k MoE weight norm with sum bias (#32943); NVFP4 dequant packs 8 blocks per CTA (#32875); refactored FA data loading (#32901).
+- Metal: commit graph in chunks with one command buffer thread (#32947); vectorized concat rows (#32824); NVFP4 support (#32825); spread short mat-vec lanes over src1 rows (#33034); reserve top-k scratch only for short rows (#32942).
+- Vulkan: FA compact bias (#32898); chunked GDN replay (#32721); ssm_scan state size 96 (#32162); non-contiguous SCALE support (#32735).
+- OpenCL: coopmat GEMM for Adreno 850 across many quant types (#32686, #32716, #32909, #32971, #33069, #33098); xielu op (#32791); GDN QK offset fix (#32747).
+- SYCL: GDN ESIMD kernel (#31762); fused recurrent convolution (#31355); FP8 E4M3 initial support (#31871); ROLL op for permuted sources (#31799); removed host-wait check in fattn-mkl (#31208); CONV_TRANSPOSE_1D bounded iteration for massive speedups (#31109); BMG D=256 FA vector kernel (#30606).
+- OpenVINO: extensive CI fixes, NPU improvements including KV-only prefill, host gather for large embeddings, automatic weightless-bank cache, finer GPU KV rounding for decode, one compiled-model cache per graph, and many correctness fixes (#33088, #33002, #32861).
+- CPU: SVE-optimized q5_0/q5_1 dot-product kernels (#30867); repack kernels for ARMv8.0 without dotprod (#32142); improved mul_mat memory access pattern (#30846); accept flash_attn_ext indexed bias (#33016).
+- WebGPU: POOL_1D (#32254), ROLL (#31887), log1p for softplus (#33017), updated Dawn version (#32779), GDN supports_op update (#32782).
+- RPC: typed request helpers with single validation step (#32651); reuse one context for request tensors (#32896); test-llama-archs RPC support (#33112).
+- Server: CTRL_BREAK_EVENT handling on Windows (#32080); prompt cache preserved until restores succeed (#32828); MCP image/audio in tool results (#32064); exec_shell_command description field (#32894); /models/sse in single-model mode (#32398); offset pagination for grep_search (#32792); non-causal batch fitting (#32713); retry prompt cache after clearing idle slots (#30997).
+- UI (Llama Chat): extensive updates including phone sheet layouts, model picker, agentic trace view, Hugging Face dataset sharing, drag-and-drop import/export, slash commands anywhere, demo harness, and many UX refinements.
+- Tests: relaxed spec-dec acceptance floors (#33127); DEPTH_MIX tolerance (#33141); Metal fusion baselines updated for new architectures; GDN snapshot slot comparison (#32820).
+- Build: fixed symlinked directory builds (#32903); kleidiai files treated as vendored (#32605); MSVC static build fixes (#32870); macro collision fix on Windows (#33014).
+- Convert: BertForSequenceClassification pooler preservation (#33122); Inkling-2 LoRA tensor name mapping (#33055); qwen3-omni fix (#32941); Inkling 2 ignore_merges (#32799).
+- Quantize: MSVC const fix (#32902); locale include fix (#33105).
+- Misc: removed unused llm_tensor enums (#33179); YaRN hparams loading moved to base class (#33032); reasoning_effort=none passthrough (#32763); token-aware chat parsing (#29307); lazy grammar trigger on bare JSON tool calls (#32497); SIGMOID backward pass (#32126); TANH backward pass (#32136).
